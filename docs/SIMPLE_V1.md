@@ -97,3 +97,20 @@ separate it. The checked uploader inspects diagnostics as well as summary rows t
 block this known fixture error. A separate same-archive two-task dev evaluation uses
 the unaffected FastAPI/Rich pilot IDs for clean submission provenance; exclusion is
 an infrastructure accommodation, not a change to the recorded full dev cohort.
+
+## Sequential refinement
+
+R1 improved scratch hygiene but resolved 0/3 and still never dispatched investigator.
+The active `agents/simple-v2` therefore uses a declarative SequentialAgent wrapper
+with three LlmAgent roles: locator, investigator, verifier. This enforces role order
+without extra model calls for routing. `output_key` carries localization and repair
+reports through session state. The verifier owns cleanup, independent checks, and
+submit_patch. Thinking budgets are 512/1024/1024 with 4096 output tokens per role.
+All previous contracts and five-minute task limits remain. Exploration/time limits
+inside a role are still soft and require trace inspection.
+
+The two-task clean run is infrastructure/submission evidence only. The former R1
+full-dev run is retained for honest reporting; it cannot establish v2 performance.
+The separate clean run failed before model setup because the dataset was not present
+at the starter's hard-coded path. The generator now discovers an alternate official
+wheelhouse mount and fails explicitly if none is found, preserving offline setup.

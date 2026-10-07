@@ -102,3 +102,30 @@ def test_returned_runner_errors_survive_collection(tmp_path, monkeypatch, messag
     row = json.loads((tmp_path / "task_results.jsonl").read_text())
     assert row.get("failure_class") == failure_class
     assert bool(row.get("error")) == (failure_class == "infrastructure_or_harness")
+
+
+def test_official_wheelhouse_mount_fallback(tmp_path, monkeypatch):
+    agent = Path("agents/baseline").resolve()
+    starter(tmp_path)
+    starter_path = (
+        tmp_path / "vendor/official/notebook/getting-started-gemma-4-developer-agent.ipynb"
+    )
+    data = json.loads(starter_path.read_text())
+    data["cells"][0]["source"] = ["# Remove broken cutlass .pth hooks if present\n"]
+    starter_path.write_text(json.dumps(data))
+    mounted = tmp_path / "input/alternate/gemma-4-developer-agent-wheelhouse"
+    mounted.mkdir(parents=True)
+    (mounted / "official.whl").touch()
+    monkeypatch.chdir(tmp_path)
+    output = tmp_path / "generated"
+    generate(agent, "owner", "experiment-v1", output)
+    notebook = json.loads((output / "evaluation.ipynb").read_text())
+    namespace = dict(
+        WHEELHOUSE_DIR=tmp_path / "missing",
+        Path=lambda value: tmp_path / "input" if value == "/kaggle/input" else Path(value),
+    )
+    exec("".join(notebook["cells"][1]["source"]), namespace)
+    assert namespace["WHEELHOUSE_DIR"] == mounted
+    (mounted / "official.whl").unlink()
+    with pytest.raises(AssertionError, match="mounted official wheelhouse"):
+        exec("".join(notebook["cells"][1]["source"]), namespace)

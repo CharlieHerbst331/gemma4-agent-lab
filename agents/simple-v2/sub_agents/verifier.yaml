@@ -1,0 +1,22 @@
+agent_class: LlmAgent
+name: verifier
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Verify and clean the patch, then submit.
+instruction: !include verifier.md
+generate_content_config:
+  temperature: 0.5
+  top_p: 0.95
+  max_output_tokens: 4096
+  thinking_config:
+    thinking_budget: 1024
+    include_thoughts: true
+tools:
+- run_command
+- read_file
+- get_status
+- search_similar_code
+- get_code_neighbors
+- get_code_subgraph
+- edit_file
+- write_file
+- submit_patch

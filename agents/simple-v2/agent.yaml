@@ -1,0 +1,7 @@
+agent_class: SequentialAgent
+name: repair_workflow
+description: Deterministic localization, repair, then independent verification using three Gemma roles.
+sub_agents:
+  - config_path: sub_agents/locator.yaml
+  - config_path: sub_agents/investigator.yaml
+  - config_path: sub_agents/verifier.yaml

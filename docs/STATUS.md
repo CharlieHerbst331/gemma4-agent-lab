@@ -55,3 +55,14 @@ This Mac has roughly 6 GiB free disk, no NVIDIA GPU, and no Docker. It is the co
 Kaggle provides the offline GPU evaluation worker. The optional training recipe needs a
 separate sufficiently large NVIDIA worker and has not been GPU-validated. No paid compute
 or recurring automations have been configured.
+
+## Sequential candidate (active)
+
+- R1 dev3 completed 0/3, all three agent timeouts, no investigator invocations. Patch hygiene improved but it regressed on FastAPI; not selected for submission.
+- R1 clean notebook failed before evaluation (zero wheels at hard-coded dataset mount). No task result from that worker. Generator now discovers the official wheelhouse under alternate mount prefixes and fails explicitly if unavailable.
+- Active source: `agents/simple-v2`. Deterministic ADK SequentialAgent orchestrates exactly three LlmAgents: locator → investigator → verifier. Output keys carry the small reports. This removes discretionary dispatch that failed in both pilots.
+- SHA-256: `712b212760088d121c217fbe73d4b8563e03ce4ffa619f50f4b09ab0773f5b55`.
+- Clean dev2 evaluation: https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v2-clean (v1). Outputs: `runs/kaggle/simple-v2-clean`. Same FastAPI/Rich pilot IDs; Requests remains excluded due official fixture failure, not cherry-picked outcome.
+- R1 dev14 remains running; collect and report its full frozen cohort even though R1 has been superseded.
+- Portable validation/packaging pass; latest toolkit check: 36 tests plus formatter/linter.
+- No actual submission yet; submit only a clean, exactly evaluated archive through checked uploader.

@@ -52,6 +52,18 @@ def generate(source, owner, slug, output, task_ids=None, bundle_dataset=None):
             payload_setup = (
                 f"payload = base64.b64decode({base64.b64encode(archive.read_bytes()).decode()!r})\n"
             )
+    # Kaggle workers may attach datasets under a different mount prefix.
+    codes[0] = codes[0].replace(
+        "# Remove broken cutlass .pth hooks if present",
+        """if not any(WHEELHOUSE_DIR.glob('*.whl')):
+    matches = [p for p in Path('/kaggle/input').rglob('gemma-4-developer-agent-wheelhouse')
+               if p.is_dir() and any(p.glob('*.whl'))]
+    assert len(matches) == 1, ('Expected one mounted official wheelhouse',
+                              list(Path('/kaggle/input').iterdir()))
+    WHEELHOUSE_DIR = matches[0]
+
+# Remove broken cutlass .pth hooks if present""",
+    )
     ids = json.loads(task_ids.read_text()) if task_ids else None
     if ids is not None and (not isinstance(ids, list) or not ids or len(ids) != len(set(ids))):
         raise ValueError("Task IDs must be a nonempty JSON array with unique IDs")
