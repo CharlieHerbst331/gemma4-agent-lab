@@ -140,3 +140,13 @@ Text-search fallback moves to investigator; graph results remain checked against
 source. write_file is removed from investigator/verifier as well. Shell-based /tmp
 repros and editing still require prompt discipline, so no universal hygiene guarantee
 is claimed. This refinement follows trace attribution, not a preference for more roles.
+
+## First accepted submission
+
+The submitted source is `agents/simple-v3`, SHA256
+`50d7b69dd4d0f6a5b4925bda919f69e57196b72337190bd6073be95591ff2646`.
+Official dev13 evaluation resolved3/13, exactly the same three as v2, with no
+infrastructure errors and ten budget failures. Locator capability restriction removed
+observed workspace repro pollution; performance and timely finalization remain limited.
+The checked uploader accepted submission56905832; leaderboard score is pending.
+See STATUS.md for reproducible evidence and next steps.

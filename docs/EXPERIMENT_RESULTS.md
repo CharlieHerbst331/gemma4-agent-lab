@@ -11,6 +11,7 @@ The Mac only packages and controls jobs. Holdout has not been evaluated.
 | Shorter AgentTool R1 | Same dev3 | 0/3 | Three timeouts; no investigator dispatched |
 | AgentTool R1 | Full frozen dev14 | 3/14 | All wins FastAPI; ten budget failures; Requests fixture failure; Rich grading patch failed after agent test edit |
 | Sequential v2 | Unaffected dev2 pilot | 1/2 | No reported runner errors; no patch pollution; FastAPI used fallback patch capture |
+| Sequential v3 | Same usable dev13 | 3/13 | Read-only locator eliminated observed scratch leakage; ten budget failures; accepted submission56905832, score pending |
 | Sequential v2 | Full usable dev13 | 3/13 | Nine timeouts; one paired win and one regression versus R1 on identical IDs; locator created workspace repro files |
 
 The dev3 IDs are `fastapi_11194`, `requests_7502`, `rich_3105`. The unaffected pilot
@@ -46,3 +47,11 @@ moves text-search fallback to investigator, preserving the same three-role seque
 File-creation tools are also removed from editing/verifying roles; small edits use
 edit_file and repro scripts use shell commands under /tmp. The latter shell policies
 remain soft; only locator read-only capability is enforced by its attached tool set.
+
+V3 matches v2's resolved IDs with no paired wins/regressions. It used 3873.7 task
+seconds/343 calls, with ten budget failures and no infrastructure failures. Audited
+patches have no workspace repro/debug pollution or protected-file changes. A successful
+Rich patch also modifies repository tests; those changes did not establish its score,
+which comes from fresh official verification. Locator cannot execute shell commands,
+but soft exploration caps are still ignored. Submission56905832 was accepted October7
+at08:41UTC; leaderboard status PENDING. No competitive-performance claim is justified.
