@@ -186,7 +186,7 @@ def check_evaluation(archive, evaluation):
         raise ValueError("Evaluation task set is incomplete or mismatched")
     # Normalize an older collector's turn-budget classification without changing raw files.
     for row in rows:
-        message = row.get("agent_error") or row.get("error") or ""
+        message = row.get("error") or row.get("agent_error") or ""
         if any(
             marker in message.lower()
             for marker in ["exceeded session timeout", "exceeded turns budget"]

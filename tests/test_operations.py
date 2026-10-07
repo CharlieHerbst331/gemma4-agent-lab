@@ -127,3 +127,20 @@ def test_older_turn_budget_classification_is_not_an_infrastructure_error(tmp_pat
     assert metrics["agent_budget_failures"] == 1
     assert metrics["infrastructure_failures"] == 0
     assert rows.read_text() == raw
+
+
+def test_agent_timeout_does_not_hide_a_reported_grading_error(tmp_path):
+    archive = tmp_path / "submission.zip"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    rows = evaluation / "task_results.jsonl"
+    row = json.loads(rows.read_text())
+    row.update(
+        resolved=False,
+        failure_class="infrastructure_or_harness",
+        agent_error="Agent exceeded session timeout (5.0 min)",
+        error="Official verification httpbin fixture setup failed",
+    )
+    rows.write_text(json.dumps(row) + "\n")
+    with pytest.raises(ValueError, match="infrastructure errors"):
+        check_evaluation(archive, evaluation)
