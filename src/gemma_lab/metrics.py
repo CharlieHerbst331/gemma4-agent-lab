@@ -37,6 +37,7 @@ def summary(rows):
         "infrastructure_failures": sum(
             r.get("failure_class") == "infrastructure_or_harness" for r in rows
         ),
+        "agent_budget_failures": sum(r.get("failure_class") == "agent_budget" for r in rows),
         "empty_patches": sum(r.get("patch_chars") == 0 for r in rows),
         "tasks_with_patch_measurement": sum("patch_chars" in r for r in rows),
         "by_repo": {

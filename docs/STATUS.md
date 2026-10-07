@@ -21,19 +21,27 @@ Last updated: October 6, 2026 (Pacific).
 - Version: 1.
 - Candidate SHA-256: `2df8bc24ea9a2ee298da6487e95a0c891879349325692ab0a0821d453c9117fe`.
 - Two public tasks selected by the official starter's order.
-- Last observed state: running. No verified resolution rate yet.
-- Generate/push provenance is locally under `notebooks/generated/baseline` (ignored).
-- Output destination: `runs/kaggle/smoke-v1` (ignored).
-- A one-run collector is active locally; it will write `collection.json`, outputs,
-  and `execution.log` when this job finishes, with a 30-minute collection timeout.
-  Check those files or rerun `gemma-lab wait-run` if the collector is interrupted.
+- Completed: 0/2; one context-window error and one agent timeout. These are infrastructure/debugging evidence, not a generalization measurement.
+- Outputs: `runs/kaggle/smoke-v1`. Original summary omitted returned runner errors; source diagnostics contain them.
+
+## Simple v1 implementation and dev pilot
+
+- Source: `agents/simple-v1`; design review: `docs/SIMPLE_V1.md`.
+- Exactly three roles; bounded locator and investigator AgentTools; root verifies and submits.
+- Archive SHA-256: `510b45f2a24e61aa1b17b6341366c4425223efb092541ea5ab09f3403675b8ce`.
+- Portable validation and packaging passed. Toolkit: 33 tests plus formatter/linter passed.
+- Candidate: https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v1-dev3 (v2, running; v1 stopped before model setup due to notebook hardware-recording order, repaired).
+- Baseline: https://www.kaggle.com/code/charlesaherbst/gemma4-baseline-dev3 (v2, running; v1 stopped before model setup due to notebook hardware-recording order, repaired).
+- Identical frozen dev cohort: `fastapi_11194`, `requests_7502`, `rich_3105`.
+- Run record: `runs/experiments/simple-v1/EXPERIMENT.md`; outputs to `runs/kaggle/simple-v1-dev3` and `runs/kaggle/baseline-dev3`.
+- New notebook outputs preserve returned runner errors and actual GPU metadata. Infrastructure errors block submission; timeouts are tracked as agent-budget failures.
+- No leaderboard submission yet. User authorized submission after evaluation through the checked uploader. Holdout untouched in this experiment.
 
 ## Next actions
 
-1. Check B0 status, pull outputs and logs; repair any real harness failure.
-2. Record B0 results and infrastructure limits. Do not treat two tasks as performance evidence.
-3. Generate a fixed dev cohort and run B0 versus a text-only localization control (E1).
-4. Preserve run artifacts and update the experiment template with exact hashes and results.
+1. Collect both existing dev runs; inspect runner and verification diagnostics.
+2. Compare identical cohorts, fix concrete failures if needed, and submit a valid evaluated candidate via the daily-slot-checked uploader.
+3. Expand evaluation to the full 14-task dev cohort before claiming strength; keep the holdout for milestone comparisons.
 
 ## Practical limits
 

@@ -1,0 +1,28 @@
+agent_class: LlmAgent
+name: root
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Issue-driven repair with bounded localization, focused investigation, and root-owned verification.
+instruction: !include prompts/root.md
+generate_content_config:
+  temperature: 0.5
+  top_p: 0.95
+  max_output_tokens: 4096
+  thinking_config:
+    thinking_budget: 2048
+    include_thoughts: true
+tools:
+  - run_command
+  - read_file
+  - edit_file
+  - write_file
+  - get_status
+  - submit_patch
+  - search_similar_code
+  - get_code_neighbors
+  - get_code_subgraph
+  - agent_tool:
+      config_path: sub_agents/locator.yaml
+      skip_summarization: true
+  - agent_tool:
+      config_path: sub_agents/investigator.yaml
+      skip_summarization: true

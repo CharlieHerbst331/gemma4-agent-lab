@@ -51,6 +51,8 @@ uv run gemma-lab report runs/kaggle/baseline/task_results.jsonl
 
 By default this evaluates two public smoke tasks. Use `--task-ids path/to/ids.json` with a JSON array to evaluate a fixed dev cohort. Generated notebooks preserve the official offline wheel installation, model registry, vLLM parsers, context compaction, and evaluator. They add archive hash verification, incremental results, patches, diagnostics, and provenance. They do not upload a competition submission automatically.
 
+The first three-role candidate is `agents/simple-v1`; its design review and known limits are in [SIMPLE_V1](docs/SIMPLE_V1.md). It uses bounded locator/investigator AgentTools and root-owned verification. GPU evidence is tracked in [STATUS](docs/STATUS.md).
+
 ## Develop and compare
 
 Copy `agents/baseline` to a candidate directory, change one hypothesis, evaluate the same task IDs, and compare:

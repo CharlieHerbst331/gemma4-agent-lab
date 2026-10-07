@@ -1,0 +1,19 @@
+agent_class: LlmAgent
+name: locator
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Localize the supplied issue; return a small evidence map without changing repository files. Pass issue clues and any hints.
+instruction: !include locator.md
+generate_content_config:
+  temperature: 0.5
+  top_p: 0.95
+  max_output_tokens: 4096
+  thinking_config:
+    thinking_budget: 2048
+    include_thoughts: true
+tools:
+  - read_file
+  - run_command
+  - get_status
+  - search_similar_code
+  - get_code_neighbors
+  - get_code_subgraph

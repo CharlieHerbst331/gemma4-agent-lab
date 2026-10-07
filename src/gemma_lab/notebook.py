@@ -98,6 +98,15 @@ for idx, task in enumerate(SAMPLE_TASKS, start=1):
                'resolved': bool(result.resolved), 'test_exit_code': result.test_exit_code,
                'patch_chars': len(patch), 'tool_calls': result.tool_calls,
                'duration_seconds': result.duration_seconds}
+        # The evaluator can return status SUCCESS while recording a runner failure.
+        runner_error = getattr(result, 'error_message', None)
+        if runner_error:
+            row['agent_error'] = runner_error
+            if 'exceeded session timeout' in runner_error.lower():
+                row['failure_class'] = 'agent_budget'
+            else:
+                row['failure_class'] = 'infrastructure_or_harness'
+                row['error'] = runner_error
         (WORKING_DIR / 'results' / 'patches').mkdir(parents=True, exist_ok=True)
         (WORKING_DIR / 'results' / 'patches' / f'{task.instance_id}.patch').write_text(patch)
         # Persist the harness result, including available trace and verification diagnostics.
@@ -122,6 +131,12 @@ for idx, task in enumerate(SAMPLE_TASKS, start=1):
 
 """
         + codes[4][end:]
+    )
+    codes[3] += (
+        "\nRUN_PROVENANCE['hardware'] = {'gpu_count': torch.cuda.device_count(), "
+        "'gpu_names': [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())], "
+        "'tensor_parallel_size': tp_size}\n"
+        "(WORKING_DIR / 'run_manifest.json').write_text(json.dumps(RUN_PROVENANCE, indent=2))\n"
     )
     codes[5] = codes[5].replace(
         "zip_path = Path(shutil.make_archive(str(zip_base), 'zip', root_dir=AGENT_DIR))",
