@@ -2,7 +2,7 @@
 
 This implements the October7 review's bounded-triage direction and three narrowly
 scoped skills. It is a new development candidate; submitted simple-v3 stays immutable.
-No new competition upload is authorized by packaging, and no performance gain is claimed.
+Packaging does not upload the candidate, and no performance gain is claimed.
 
 ## Agent flow
 

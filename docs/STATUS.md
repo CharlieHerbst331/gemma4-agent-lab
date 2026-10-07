@@ -9,6 +9,12 @@ Last updated: October 7, 2026 (Pacific).
 - Skills: task-memory (bounded/locked task evidence), source-lookup (bounded literal
   search/windows), verify-patch (same-repro contract, real exit status, freshness and
   read-only patch audit). No global Codex skill installation or new custom tool.
+- Candidate commit: `62f8bab`; archive SHA256:
+  `01568061ee105be99a51af1bca592dd59756db9184dfada735c0e3074ae7e77e`.
+- Archive: `artifacts/structured-v4/submission.zip`;14 files, pure declarative agent
+  plus sandboxed skill resources. Diagnostic official notebook prepared at
+  `notebooks/generated/structured-v4-diagnostic` (not pushed/executed), frozen
+  dev IDs `fastapi_11194`, `fastapi_14786`, `rich_3454`. Holdout untouched.
 - Design/use/limits: `docs/STRUCTURED_V4.md`. All64 tests plus lint/format pass; skill
   manifests validated. Official GPU execution/performance remains unmeasured.
 - Submitted v3 and its archive are unchanged. No new submission or GPU run launched
