@@ -11,7 +11,7 @@ The Mac only packages and controls jobs. Holdout has not been evaluated.
 | Shorter AgentTool R1 | Same dev3 | 0/3 | Three timeouts; no investigator dispatched |
 | AgentTool R1 | Full frozen dev14 | 3/14 | All wins FastAPI; ten budget failures; Requests fixture failure; Rich grading patch failed after agent test edit |
 | Sequential v2 | Unaffected dev2 pilot | 1/2 | No reported runner errors; no patch pollution; FastAPI used fallback patch capture |
-| Sequential v2 | Full usable dev13 | Pending | Requests excluded prospectively for known official fixture error |
+| Sequential v2 | Full usable dev13 | 3/13 | Nine timeouts; one paired win and one regression versus R1 on identical IDs; locator created workspace repro files |
 
 The dev3 IDs are `fastapi_11194`, `requests_7502`, `rich_3105`. The unaffected pilot
 keeps FastAPI/Rich IDs. Dev13 contains every ID from the frozen dev partition except
@@ -37,3 +37,12 @@ correctness; it does not establish generalization or reliable explicit submissio
 Exact archives, task IDs, source checksums, package versions, hardware, trace audits,
 and comparisons are recorded under `runs/experiments/simple-v1` and `runs/kaggle`.
 See STATUS.md for the currently selected archive and actual submission state.
+
+V2 dev13 resolved FastAPI14786/14794 and Rich3454. It used 3577.1 task seconds and
+364 counted calls, with no reported infrastructure failures. Its FastAPI11194 smoke
+success did not repeat. All workspace repro pollution in the audited cases originated
+from locator shell commands. V3 removes the locator's shell capability entirely and
+moves text-search fallback to investigator, preserving the same three-role sequence.
+File-creation tools are also removed from editing/verifying roles; small edits use
+edit_file and repro scripts use shell commands under /tmp. The latter shell policies
+remain soft; only locator read-only capability is enforced by its attached tool set.

@@ -130,3 +130,13 @@ Sequential orchestration enforces role order, not the quality or maximum duratio
 of each role. The FastAPI smoke success still used the harness's patch fallback
 before explicit submit_patch. The Rich issue-number-only input produced no fix.
 These are measured limits to address next, not reasons to claim broad reliability.
+
+## Capability restriction after broader v2 evaluation
+
+V2 dev13 remained at 3/13 with nine timeouts and net zero paired wins versus R1.
+Its failed cases exposed locator-written workspace repro scripts. V3 removes
+run_command from locator, making that role read-only through its attached tools.
+Text-search fallback moves to investigator; graph results remain checked against
+source. write_file is removed from investigator/verifier as well. Shell-based /tmp
+repros and editing still require prompt discipline, so no universal hygiene guarantee
+is claimed. This refinement follows trace attribution, not a preference for more roles.

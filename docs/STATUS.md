@@ -1,83 +1,72 @@
 # Project status
 
-Last updated: October 6, 2026 (Pacific).
+Last updated: October 7, 2026 (Pacific).
 
-## Established
+## Active work
 
-- Private GitHub repository: https://github.com/CharlieHerbst331/gemma4-agent-lab
-- Python 3.12 local environment, locked dependencies, installed `gemma-lab` CLI.
-- Kaggle account `charlesaherbst`; authenticated competition file access verified.
-- Official notebook, HARNESS_README, and tasks downloaded into ignored directories.
-- Public task inventory: 129 tasks; frozen split is 95 train / 14 dev / 20 holdout.
-- Baseline config, validated deterministic archive, private GPU notebook generator.
-- Research snapshot saved locally: `runs/research/2026-10-06.json`.
-- 30 toolkit tests, formatter/linter, and package build pass locally.
-- GitHub Actions passed for the initial development-kit commit.
-- Submission command exercised in plan mode; no leaderboard submissions sent.
+User requested review, implementation, official evaluation, and Kaggle submission of
+a simple three-role Gemma agent. Implementation/evaluation are authorized; actual
+submission must use the checked uploader and respect one per UTC day. No submission
+has been sent; account history last checked with no submissions.
 
-## GPU smoke experiment B0
+- Active source: `agents/simple-v3`.
+- Archive: `artifacts/simple-v3/submission.zip`.
+- SHA-256: `50d7b69dd4d0f6a5b4925bda919f69e57196b72337190bd6073be95591ff2646`.
+- Architecture: declarative SequentialAgent wrapper with exactly three Gemma LlmAgent
+  roles: locator → investigator → verifier. No adapters or custom tools.
+- Locator now has only read_file, get_status, and the three graph tools: shell access
+  caused all observed v2 workspace repro leakage and is removed. Investigator owns
+  rg/grep fallback when graph data is missing/stale. No write_file in any role.
+- Model: `gemma-4-31b-it-qat-w4a16-ct`; output ceiling 4096; thinking 512/1024/1024.
+- Budgets: five minutes, 80 counted calls, 60 turns, official 300-second command/test timeout.
+- Portable validation and packaging passed. Toolkit: 39 tests plus lint/format passed.
+- GPU evaluation: https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v3-dev13 (v1, dispatched).
+- Collector/output: `runs/kaggle/simple-v3-dev13`; one bounded collector, no recurring job.
+- Cohort: all frozen dev IDs except `requests_7502`, excluded prospectively because
+  the official verification worker has a recursive httpbin fixture dependency.
+  IDs: `runs/experiments/simple-v1/dev-13-clean.json`. Holdout unexamined.
+- Run record: `runs/experiments/simple-v1/EXPERIMENT.md`. Candidate file hashes and
+  generation git revision/working snapshot are pinned in manifests.
 
-- URL: https://www.kaggle.com/code/charlesaherbst/gemma-4-agent-lab-evaluation
-- Version: 1.
-- Candidate SHA-256: `2df8bc24ea9a2ee298da6487e95a0c891879349325692ab0a0821d453c9117fe`.
-- Two public tasks selected by the official starter's order.
-- Completed: 0/2; one context-window error and one agent timeout. These are infrastructure/debugging evidence, not a generalization measurement.
-- Outputs: `runs/kaggle/smoke-v1`. Original summary omitted returned runner errors; source diagnostics contain them.
+## Completed evidence
 
-## Simple v1 implementation and dev evaluation
+- Baseline smoke: 0/2, context exhaustion and timeout; infrastructure check only.
+- Baseline dev3: 0/3, three timeouts; Requests fixture failure makes its grading inconclusive.
+- Initial AgentTool v1 dev3: 1/3, two timeouts, scratch/debug pollution; not submitted.
+- Shorter AgentTool R1 dev3: 0/3; investigator never invoked.
+- AgentTool R1 full dev14: 3/14 (FastAPI3/6, Rich0/7, Requests0/1), ten budget failures.
+  Rich grading patch failed after candidate test edits; Requests also has fixture errors.
+- Sequential v2 smoke: 1/2, all three roles execute, clean patches; successful FastAPI
+  patch captured by fallback before explicit submit_patch. Smoke is not generalization evidence.
+- Sequential v2 dev13: 3/13 (FastAPI2/6, Rich1/7), nine timeouts, zero reported infrastructure
+  failures, 3577.1 task seconds/364 calls. Same-cohort R1 comparison: one win (rich_3454),
+  one regression (fastapi_11194), net zero. Locator wrote workspace repro scripts in
+  three failed cases; v2 was not submitted.
+- Audits/comparisons: `runs/experiments/simple-v1/*audit.json`, `*comparison.json`.
+- All measured GPU runs used four NVIDIA L4s; swegemma0.2.7, adk-submission0.2.12,
+  adk-eval-core0.1.0, vLLM0.19.1, google-adk1.36.1 (confirm v3 manifest after collection).
 
-- Source: `agents/simple-v1`; review and limits: `docs/SIMPLE_V1.md`.
-- Implementation commit: `22cd4ab` (initial candidate); revised prompt source hashes are recorded in manifests.
-- Initial candidate SHA-256: `510b45f2a24e61aa1b17b6341366c4425223efb092541ea5ab09f3403675b8ce`.
-- Initial dev3: 1/3 versus baseline 0/3; FastAPI win, no regressions. Two candidate timeouts, three baseline timeouts. No runner infrastructure errors. Requests grading timed out at 60 seconds and the candidate patch contained scratch/debug output; initial archive NOT submitted.
-- Actual hardware: 4 × NVIDIA L4; swegemma 0.2.7, adk-submission 0.2.12, adk-eval-core 0.1.0, vLLM 0.19.1, google-adk 1.36.1.
-- Comparison/audit: `runs/experiments/simple-v1/comparison.json`, `trace-audit.json`.
-- Revised SHA-256: `fb9ebb8f452dc78fba7fb5bdcf80b74190496b1e31a72cd206be803bd855db7d`.
-- Revised prompts target observed ignored limits, skipped investigator, malformed arguments, swallowed assertions, and scratch/debug pollution. Verification timeout restored to official 300 seconds.
-- Portable validation/packaging passed; toolkit 35 tests plus formatting/linting passed.
-- Revised dev3: https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v1-r1-dev3 (v1, running).
-- Full frozen dev14: https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v1-r1-dev14 (v1, dispatched).
-- Output paths: `runs/kaggle/simple-v1-r1-dev3`, `runs/kaggle/simple-v1-r1-dev14`.
-- Identical pilot IDs: `fastapi_11194`, `requests_7502`, `rich_3105`. Full dev IDs: `configs/splits/public-v1.json` dev partition.
-- Requests baseline grading is inconclusive: 196 recursive `httpbin` fixture setup errors in the official worker. Initial summaries counted runner errors only; retain raw rows and consult diagnostics. The checked uploader now inspects official diagnostics and rejects this failure even if old rows omitted it.
-- Clean same-archive dev2 notebook prepared at `notebooks/generated/simple-v1-r1-clean`, using FastAPI/Rich pilot IDs. Push attempt rejected by Kaggle's two concurrent GPU-session limit; wait for dev3 to finish, then push it. No clean run has started yet.
-- No leaderboard submission yet. User authorized submission after exact-hash evaluation through the checked uploader. Holdout untouched.
+## Toolkit repairs
+
+Returned runner errors are preserved even when the evaluator reports status SUCCESS.
+The uploader inspects official diagnostics, distinguishes timeout/turn-budget failures
+from infrastructure, and blocks known grading fixture failures. It never rewrites raw
+results to conceal failures. Alternate official wheelhouse mount discovery handles a
+worker that previously failed with zero wheels; missing mounts fail explicitly.
 
 ## Next actions
 
-1. Collect revised dev3/dev14 runs, audit patches/traces, compare revised dev3 against the identical baseline and initial candidate.
-2. Record full-dev results and use the checked uploader for the evaluated archive if infrastructure and patch hygiene permit.
-3. Reserve holdout for milestone comparison; do not claim competitiveness from the pilot.
+1. Collect v3 dev13, audit changed paths, protected files, debug/scratch, and role traces.
+2. Compare identical IDs with v2/R1; report wins, regressions, errors, and per-repo results.
+3. If valid evaluation and patch hygiene support it, upload the exact v3 archive via
+   `gemma-lab submit ... --evaluation runs/kaggle/simple-v3-dev13 --execute`.
+4. Check account history after upload; preserve ledger and pending/actual score.
+   Never retry an uncertain upload without reconciling history.
 
-## Practical limits
+## Environment and limits
 
-This Mac has roughly 6 GiB free disk, no NVIDIA GPU, and no Docker. It is the control machine;
-Kaggle provides the offline GPU evaluation worker. The optional training recipe needs a
-separate sufficiently large NVIDIA worker and has not been GPU-validated. No paid compute
-or recurring automations have been configured.
-
-## Sequential candidate (active)
-
-- R1 dev3 completed 0/3, all three agent timeouts, no investigator invocations. Patch hygiene improved but it regressed on FastAPI; not selected for submission.
-- R1 clean notebook failed before evaluation (zero wheels at hard-coded dataset mount). No task result from that worker. Generator now discovers the official wheelhouse under alternate mount prefixes and fails explicitly if unavailable.
-- Active source: `agents/simple-v2`. Deterministic ADK SequentialAgent orchestrates exactly three LlmAgents: locator → investigator → verifier. Output keys carry the small reports. This removes discretionary dispatch that failed in both pilots.
-- SHA-256: `712b212760088d121c217fbe73d4b8563e03ce4ffa619f50f4b09ab0773f5b55`.
-- Clean dev2 evaluation: https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v2-clean (v1). Outputs: `runs/kaggle/simple-v2-clean`. Same FastAPI/Rich pilot IDs; Requests remains excluded due official fixture failure, not cherry-picked outcome.
-- R1 dev14 remains running; collect and report its full frozen cohort even though R1 has been superseded.
-- Portable validation/packaging pass; latest toolkit check: 36 tests plus formatter/linter.
-- No actual submission yet; submit only a clean, exactly evaluated archive through checked uploader.
-
-## V2 smoke result and broader run
-
-- V2 clean dev2 completed: 1/2, FastAPI resolved; Rich issue-number-only input produced an empty patch. No reported infrastructure errors or agent-budget failures. Actual task duration 484.5 seconds, 48 counted calls.
-- All three roles executed on both tasks. Patch audit found no workspace scratch, protected-file modifications, or debug additions. FastAPI was captured by harness fallback before explicit submit_patch; do not claim explicit submission is reliable from this trace. Rich explicitly submitted an empty patch.
-- Identical unaffected-cohort baseline: 0/2. One paired win, no regressions; different budget/sampling/architecture changes mean this cannot isolate causal improvements. Smoke is not generalization evidence.
-- V2 full usable dev13: https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v2-dev13 (v1, queued/running). IDs frozen in `runs/experiments/simple-v1/dev-13-clean.json` before this run; includes all dev except Requests due the documented official fixture failure. Output: `runs/kaggle/simple-v2-dev13`.
-- Next: collect dev13 and R1 dev14, inspect patch hygiene/diagnostics, then use checked uploader for exact v2 archive if evaluation permits. No submission slot used yet.
-
-## R1 full-dev diagnostic result
-
-- R1 dev14 completed: raw official result 3/14; all three resolutions in FastAPI (`fastapi_11194`, `fastapi_14786`, `fastapi_14794`), Rich 0/7, Requests 0/1.
-- Raw collector summary counted 9 session timeouts, one turn-budget error as infrastructure, and one Rich test_patch application error as infrastructure. Turn-budget exhaustion is an agent failure; collector/gate classification is repaired without rewriting raw results. Requests verification also has the known httpbin fixture failure (diagnostic, not visible in old raw summary).
-- `rich_3454` candidate edited `tests/test_highlighter.py` before grading patch application failed; do not attribute that failure solely to infrastructure. Raw diagnostics and patch audit are preserved in `runs/kaggle/simple-v1-r1-dev14` and `runs/experiments/simple-v1/r1-dev14-audit.json`.
-- This is R1 evidence only, not sequential-v2 performance. Latest toolkit check: 38 tests plus lint/format.
+Private repo: https://github.com/CharlieHerbst331/gemma4-agent-lab; Kaggle account
+`charlesaherbst`. Locked Python3.12 Mac environment, no GPU/Docker, roughly6GiB free.
+Weights and task repositories run only on disposable offline Kaggle workers. No paid
+hardware, training, holdout evaluation, public release, or recurring automation.
+See `docs/SIMPLE_V1.md` and `docs/EXPERIMENT_RESULTS.md` for review/evidence.

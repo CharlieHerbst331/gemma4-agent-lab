@@ -1,0 +1,21 @@
+agent_class: LlmAgent
+name: investigator
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Reproduce and repair the localized cause.
+instruction: !include investigator.md
+generate_content_config:
+  temperature: 0.5
+  top_p: 0.95
+  max_output_tokens: 4096
+  thinking_config:
+    thinking_budget: 1024
+    include_thoughts: true
+tools:
+- run_command
+- read_file
+- get_status
+- search_similar_code
+- get_code_neighbors
+- get_code_subgraph
+- edit_file
+output_key: repair_report
