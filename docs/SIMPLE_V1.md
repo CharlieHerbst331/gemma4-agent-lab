@@ -1,4 +1,4 @@
-# Simple v1: issue-driven three-role repair
+# Simple agent: design and experimental revisions
 
 The first candidate keeps the proposed locator → root → investigator architecture.
 It uses exactly one Gemma 4 QAT base model, the nine official tool names, two
@@ -114,3 +114,19 @@ full-dev run is retained for honest reporting; it cannot establish v2 performanc
 The separate clean run failed before model setup because the dataset was not present
 at the starter's hard-coded path. The generator now discovers an alternate official
 wheelhouse mount and fails explicitly if none is found, preserving offline setup.
+
+## Current execution path
+
+```mermaid
+flowchart LR
+    Issue[Issue and supplied hints] --> Sequence[ADK SequentialAgent]
+    Sequence --> Locator[Locator: read-only evidence map]
+    Locator --> Investigator[Investigator: reproduce and repair]
+    Investigator --> Verifier[Verifier: check and clean]
+    Verifier --> Submit[submit_patch]
+```
+
+Sequential orchestration enforces role order, not the quality or maximum duration
+of each role. The FastAPI smoke success still used the harness's patch fallback
+before explicit submit_patch. The Rich issue-number-only input produced no fix.
+These are measured limits to address next, not reasons to claim broad reliability.
