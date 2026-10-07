@@ -88,6 +88,7 @@ def test_returned_runner_errors_survive_collection(tmp_path, monkeypatch, messag
         tool_calls=1,
         duration_seconds=2,
         error_message=message,
+        test_output="",
     )
     namespace = dict(
         WORKING_DIR=tmp_path,

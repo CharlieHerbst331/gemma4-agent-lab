@@ -34,11 +34,13 @@ Last updated: October 6, 2026 (Pacific).
 - Comparison/audit: `runs/experiments/simple-v1/comparison.json`, `trace-audit.json`.
 - Revised SHA-256: `fb9ebb8f452dc78fba7fb5bdcf80b74190496b1e31a72cd206be803bd855db7d`.
 - Revised prompts target observed ignored limits, skipped investigator, malformed arguments, swallowed assertions, and scratch/debug pollution. Verification timeout restored to official 300 seconds.
-- Portable validation/packaging passed; toolkit 33 tests plus formatting/linting passed.
+- Portable validation/packaging passed; toolkit 35 tests plus formatting/linting passed.
 - Revised dev3: https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v1-r1-dev3 (v1, running).
 - Full frozen dev14: https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v1-r1-dev14 (v1, dispatched).
 - Output paths: `runs/kaggle/simple-v1-r1-dev3`, `runs/kaggle/simple-v1-r1-dev14`.
 - Identical pilot IDs: `fastapi_11194`, `requests_7502`, `rich_3105`. Full dev IDs: `configs/splits/public-v1.json` dev partition.
+- Requests baseline grading is inconclusive: 196 recursive `httpbin` fixture setup errors in the official worker. Initial summaries counted runner errors only; retain raw rows and consult diagnostics. The checked uploader now inspects official diagnostics and rejects this failure even if old rows omitted it.
+- Clean same-archive dev2 notebook prepared at `notebooks/generated/simple-v1-r1-clean`, using FastAPI/Rich pilot IDs. Push attempt rejected by Kaggle's two concurrent GPU-session limit; wait for dev3 to finish, then push it. No clean run has started yet.
 - No leaderboard submission yet. User authorized submission after exact-hash evaluation through the checked uploader. Holdout untouched.
 
 ## Next actions

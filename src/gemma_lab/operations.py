@@ -186,6 +186,22 @@ def check_evaluation(archive, evaluation):
         raise ValueError("Evaluation task set is incomplete or mismatched")
     if any(r.get("error") or r.get("failure_class") == "infrastructure_or_harness" for r in rows):
         raise ValueError("Resolve evaluation infrastructure errors before uploading")
+    # Also inspect official diagnostics: older collectors omitted returned failures.
+    for row in rows:
+        detail_path = evaluation / "results" / f"{row['instance_id']}.json"
+        if detail_path.exists():
+            detail = json.loads(detail_path.read_text())
+            runner_error = detail.get("error_message") or ""
+            if runner_error and "exceeded session timeout" not in runner_error.lower():
+                raise ValueError(
+                    "Resolve returned evaluation infrastructure errors before uploading"
+                )
+            if "recursive dependency involving fixture 'httpbin'" in (
+                detail.get("test_output") or ""
+            ) and "b/tests/conftest.py" not in (detail.get("agent_patch") or ""):
+                raise ValueError(
+                    "Resolve official verification httpbin fixture errors before uploading"
+                )
     return summary(rows)
 
 

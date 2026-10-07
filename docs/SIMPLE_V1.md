@@ -89,3 +89,11 @@ motivated by trace evidence, not proven until the revised runs finish.
 
 The revised archive is evaluated on the same three tasks for paired comparison and
 on the full frozen 14-task dev set. This remains dev evidence; holdout is untouched.
+
+The baseline Requests verification produced 196 recursive `httpbin` fixture setup
+errors. This is an official worker environment failure, so the Requests result is
+inconclusive for patch correctness. Raw outputs stay intact; annotated analysis must
+separate it. The checked uploader inspects diagnostics as well as summary rows to
+block this known fixture error. A separate same-archive two-task dev evaluation uses
+the unaffected FastAPI/Rich pilot IDs for clean submission provenance; exclusion is
+an infrastructure accommodation, not a change to the recorded full dev cohort.

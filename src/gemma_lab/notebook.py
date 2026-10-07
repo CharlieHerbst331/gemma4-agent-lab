@@ -107,6 +107,10 @@ for idx, task in enumerate(SAMPLE_TASKS, start=1):
             else:
                 row['failure_class'] = 'infrastructure_or_harness'
                 row['error'] = runner_error
+        if ("recursive dependency involving fixture 'httpbin'" in (result.test_output or '')
+                and 'b/tests/conftest.py' not in patch):
+            row['failure_class'] = 'infrastructure_or_harness'
+            row['error'] = 'Official verification httpbin fixture setup failed'
         (WORKING_DIR / 'results' / 'patches').mkdir(parents=True, exist_ok=True)
         (WORKING_DIR / 'results' / 'patches' / f'{task.instance_id}.patch').write_text(patch)
         # Persist the harness result, including available trace and verification diagnostics.

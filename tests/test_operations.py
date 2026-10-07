@@ -88,3 +88,23 @@ def test_evaluation_gate_requires_exact_archive_and_complete_tasks(tmp_path):
     manifest.write_text(json.dumps({"sha256": "wrong", "task_ids": ["task"]}))
     with pytest.raises(ValueError, match="hash"):
         check_evaluation(archive, evaluation)
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        {"error_message": "Sandbox execution error: ContextWindowExceededError"},
+        {
+            "error_message": "Agent exceeded session timeout (5.0 min)",
+            "test_output": "recursive dependency involving fixture 'httpbin' detected",
+        },
+    ],
+)
+def test_evaluation_gate_checks_diagnostics_even_when_rows_omit_errors(tmp_path, detail):
+    archive = tmp_path / "submission.zip"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    (evaluation / "results").mkdir()
+    (evaluation / "results/task.json").write_text(json.dumps(detail))
+    with pytest.raises(ValueError, match="errors before uploading"):
+        check_evaluation(archive, evaluation)
