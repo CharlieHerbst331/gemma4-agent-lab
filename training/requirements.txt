@@ -1,0 +1,6 @@
+# Install on a dedicated NVIDIA worker; do not install into the Mac control environment.
+torch>=2.8
+transformers>=5.0
+peft>=0.17
+accelerate>=1.10
+safetensors>=0.6

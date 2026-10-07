@@ -1,0 +1,10 @@
+Gemma 4 Agent Lab
+Copyright 2026 Charles Herbst
+
+GPU notebook generation adapts the official Kaggle getting-started notebook:
+https://www.kaggle.com/code/ryanholbrook/getting-started-gemma-4-developer-agent
+
+Official competition data, models, harness packages, and downloaded notebooks
+are not bundled in the repository. They retain their respective licenses and
+terms. The competition data page identifies its license as Apache 2.0 and also
+imposes competition access/sharing rules. Gemma model terms apply separately.

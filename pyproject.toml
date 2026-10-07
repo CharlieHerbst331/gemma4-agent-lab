@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gemma4-agent-lab"
+version = "0.1.0"
+description = "Reproducible Gemma 4 coding-agent experiments and Kaggle submission operations"
+requires-python = ">=3.12"
+dependencies = ["PyYAML>=6.0.3", "requests>=2.32", "kaggle==2.2.4"]
+
+[project.scripts]
+gemma-lab = "gemma_lab.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.12", "build>=1"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gemma_lab"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

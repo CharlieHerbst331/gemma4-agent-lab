@@ -1,0 +1,16 @@
+name: Development kit checks
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: make check
+      - run: uv run gemma-lab validate agents/baseline
+      - run: uv run gemma-lab pack agents/baseline
