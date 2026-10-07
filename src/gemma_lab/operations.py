@@ -134,7 +134,62 @@ def upload_bundle(archive, owner, slug, output, execute=False, version=False):
     return kaggle(*args, timeout=600)
 
 
-def submit(archive, message, ledger=Path("runs/submissions.jsonl"), execute=False):
+def wait_for_run(kernel, output, timeout_minutes=45, interval_seconds=45):
+    """Collect one existing run; no scheduling, retries of uploads, or new GPU launches."""
+    import time
+
+    from gemma_lab.metrics import load_results, summary
+
+    if timeout_minutes <= 0 or interval_seconds < 10:
+        raise ValueError("Positive timeout and polling interval >=10 seconds required")
+    output.mkdir(parents=True, exist_ok=True)
+    deadline, previous = time.monotonic() + timeout_minutes * 60, None
+    while time.monotonic() < deadline:
+        status = kaggle("kernels", "status", kernel)
+        if status != previous:
+            print(status.strip(), flush=True)
+            previous = status
+        if any(
+            f"KernelWorkerStatus.{state}" in status
+            for state in ["COMPLETE", "ERROR", "CANCEL_ACKNOWLEDGED"]
+        ):
+            kaggle("kernels", "output", kernel, "-p", output, timeout=600)
+            (output / "execution.log").write_text(kaggle("kernels", "logs", kernel))
+            result = {
+                "kernel": kernel,
+                "observed_at": now(),
+                "status": status.strip(),
+                "output": str(output),
+            }
+            rows = output / "task_results.jsonl"
+            if rows.exists():
+                result["metrics"] = summary(load_results(rows))
+            write_json(output / "collection.json", result)
+            if "KernelWorkerStatus.COMPLETE" not in status:
+                raise RuntimeError(f"Notebook failed; inspect {output / 'execution.log'}")
+            return result
+        time.sleep(min(interval_seconds, max(0, deadline - time.monotonic())))
+    raise RuntimeError(f"Run still pending after {timeout_minutes} minutes: {kernel}")
+
+
+def check_evaluation(archive, evaluation):
+    from gemma_lab.metrics import load_results, summary
+
+    if evaluation is None:
+        raise ValueError("Actual upload requires --evaluation with completed GPU outputs")
+    evaluation = Path(evaluation)
+    manifest = json.loads((evaluation / "run_manifest.json").read_text())
+    if manifest["sha256"] != sha256(Path(archive)):
+        raise ValueError("Evaluation archive hash does not match submission")
+    rows = load_results(evaluation / "task_results.jsonl")
+    if {r["instance_id"] for r in rows} != set(manifest["task_ids"]):
+        raise ValueError("Evaluation task set is incomplete or mismatched")
+    if any(r.get("error") or r.get("failure_class") == "infrastructure_or_harness" for r in rows):
+        raise ValueError("Resolve evaluation infrastructure errors before uploading")
+    return summary(rows)
+
+
+def submit(archive, message, ledger=Path("runs/submissions.jsonl"), execute=False, evaluation=None):
     archive = Path(archive).resolve()
     validate_archive(archive)
     digest = sha256(archive)
@@ -148,6 +203,7 @@ def submit(archive, message, ledger=Path("runs/submissions.jsonl"), execute=Fals
     }
     if not execute:
         return plan
+    plan["evaluation"] = check_evaluation(archive, evaluation)
     # Reserve before upload so an interrupted upload cannot cause an automatic duplicate.
     # The local lock serializes this user's processes; Kaggle remains authoritative for team usage.
     import fcntl

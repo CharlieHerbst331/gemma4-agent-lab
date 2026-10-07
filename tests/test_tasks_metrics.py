@@ -53,6 +53,18 @@ def test_paired_comparison_detects_regressions():
     assert 0 <= interval[0] < 0.5 < interval[1] <= 1
 
 
+def test_report_keeps_infrastructure_failures_visible():
+    rows = [
+        {"instance_id": "a", "resolved": False, "failure_class": "infrastructure_or_harness"},
+        {"instance_id": "b", "resolved": False, "patch_chars": 0},
+        {"instance_id": "c", "resolved": True, "patch_chars": 100},
+    ]
+    report = summary(rows)
+    assert report["infrastructure_failures"] == 1
+    assert report["empty_patches"] == 1
+    assert report["tasks_with_patch_measurement"] == 2
+
+
 def test_duplicate_results_rejected(tmp_path):
     path = tmp_path / "results.jsonl"
     row = {"instance_id": "same", "resolved": True}

@@ -56,7 +56,7 @@ def generate(source, owner, slug, output, task_ids=None, bundle_dataset=None):
     if ids is not None and (not isinstance(ids, list) or not ids or len(ids) != len(set(ids))):
         raise ValueError("Task IDs must be a nonempty JSON array with unique IDs")
     codes[1] = (
-        "import base64, hashlib, io, json, zipfile\n"
+        "import base64, hashlib, importlib.metadata, io, json, zipfile\n"
         "from swegemma.models import load_tasks\n"
         "DATA_DIR = Path('/kaggle/input/competitions/gemma-4-developer-agent')\n"
         "WORKING_DIR = Path('/kaggle/working')\n"
@@ -74,6 +74,8 @@ def generate(source, owner, slug, output, task_ids=None, bundle_dataset=None):
         "assert set(TASK_IDS) <= {t.instance_id for t in tasks}, 'Unknown task IDs'\n"
         f"RUN_PROVENANCE = {provenance!r}\n"
         "RUN_PROVENANCE['task_ids'] = TASK_IDS\n"
+        "RUN_PROVENANCE['packages'] = {name: importlib.metadata.version(name) "
+        "for name in ['swegemma', 'adk-submission', 'adk-eval-core', 'vllm', 'google-adk']}\n"
         "RUN_PROVENANCE['task_file_sha256'] = hashlib.sha256(TASKS_PATH.read_bytes()).hexdigest()\n"
         "(WORKING_DIR / 'run_manifest.json').write_text(json.dumps(RUN_PROVENANCE, indent=2))\n"
         "print(f'Loaded {len(tasks)} tasks; evaluating {len(TASK_IDS)} selected tasks')\n"
@@ -120,6 +122,10 @@ for idx, task in enumerate(SAMPLE_TASKS, start=1):
 
 """
         + codes[4][end:]
+    )
+    codes[5] = codes[5].replace(
+        "zip_path = Path(shutil.make_archive(str(zip_base), 'zip', root_dir=AGENT_DIR))",
+        "zip_path = WORKING_DIR / 'submission.zip'\nzip_path.write_bytes(payload)",
     )
     # Explicitly select the evaluation subprocess sandbox only on disposable Kaggle workers.
     # The original notebook already configures sandbox='subprocess'.

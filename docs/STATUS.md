@@ -11,7 +11,8 @@ Last updated: October 6, 2026 (Pacific).
 - Public task inventory: 129 tasks; frozen split is 95 train / 14 dev / 20 holdout.
 - Baseline config, validated deterministic archive, private GPU notebook generator.
 - Research snapshot saved locally: `runs/research/2026-10-06.json`.
-- Toolkit tests, formatter/linter, and package build pass locally.
+- 30 toolkit tests, formatter/linter, and package build pass locally.
+- GitHub Actions passed for the initial development-kit commit.
 - Submission command exercised in plan mode; no leaderboard submissions sent.
 
 ## GPU smoke experiment B0
@@ -23,6 +24,9 @@ Last updated: October 6, 2026 (Pacific).
 - Last observed state: running. No verified resolution rate yet.
 - Generate/push provenance is locally under `notebooks/generated/baseline` (ignored).
 - Output destination: `runs/kaggle/smoke-v1` (ignored).
+- A one-run collector is active locally; it will write `collection.json`, outputs,
+  and `execution.log` when this job finishes, with a 30-minute collection timeout.
+  Check those files or rerun `gemma-lab wait-run` if the collector is interrupted.
 
 ## Next actions
 

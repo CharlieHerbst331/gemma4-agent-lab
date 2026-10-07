@@ -34,11 +34,13 @@ The dataset zip is named after its dataset slug. Notebook generation pins the en
 
 ## Submission and recovery
 
-`gemma-lab submit` validates the archive and prints a plan. `--execute` checks server history, then holds a local file lock and reserves the UTC daily slot before uploading. Both successful uploads and uncertain network outcomes remain recorded in `runs/submissions.jsonl`.
+`gemma-lab submit` validates the archive and prints a plan. `--execute --evaluation runs/candidate` requires matching archive provenance, complete task results, and no infrastructure errors. It checks server history, then holds a local file lock and reserves the UTC daily slot before uploading. Both successful uploads and uncertain network outcomes remain recorded in `runs/submissions.jsonl`.
 
 If upload was interrupted, query `gemma-lab status`. Reconcile the local reserved row only after confirming the server did not receive a submission. Never blindly retry. Team submissions from another machine may consume the slot after the preflight check; Kaggle is the final authority. The toolkit does not select final submissions automatically.
 
 `status --kernel owner/slug` reports the run state. Use the exact URL returned by Kaggle after push. `pull-output` downloads result files and logs. In a failed notebook, inspect the log before editing; the failure may be model access, GPU capacity, installation, schema compilation, sandbox setup, or inference.
+
+For autonomous collection of one existing run, use `gemma-lab wait-run owner/slug --output runs/experiment`. It waits with a bounded timeout, downloads outputs and logs, and writes `collection.json` with any available metrics. It launches no new GPU job and creates no recurring schedule.
 
 ## Training
 

@@ -67,10 +67,17 @@ def main():
     logs = sub.add_parser("logs", help="Read persisted Kaggle notebook logs")
     logs.add_argument("kernel")
     logs.add_argument("--output", type=Path)
+    wait = sub.add_parser("wait-run", help="Wait for one existing GPU run and collect results")
+    wait.add_argument("kernel")
+    wait.add_argument("--output", type=Path, required=True)
+    wait.add_argument("--timeout-minutes", type=float, default=45)
     submit = sub.add_parser("submit", help="Plan or upload an archive; enforces one/day")
     submit.add_argument("archive", type=Path)
     submit.add_argument("--message", required=True)
     submit.add_argument("--execute", action="store_true")
+    submit.add_argument(
+        "--evaluation", type=Path, help="Completed GPU output folder for this archive"
+    )
     args = parser.parse_args()
     try:
         match args.command:
@@ -136,8 +143,12 @@ def main():
                 if args.output:
                     args.output.parent.mkdir(parents=True, exist_ok=True)
                     args.output.write_text(result)
+            case "wait-run":
+                result = operations.wait_for_run(args.kernel, args.output, args.timeout_minutes)
             case "submit":
-                result = operations.submit(args.archive, args.message, execute=args.execute)
+                result = operations.submit(
+                    args.archive, args.message, execute=args.execute, evaluation=args.evaluation
+                )
         print(json.dumps(result, indent=2) if not isinstance(result, str) else result)
     except (ValueError, RuntimeError, OSError) as exc:
         parser.exit(1, f"Error: {exc}\n")

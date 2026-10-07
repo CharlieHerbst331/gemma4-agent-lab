@@ -70,11 +70,11 @@ uv run gemma-lab pack agents/candidate --output artifacts/candidate/submission.z
 uv run gemma-lab submit artifacts/candidate/submission.zip --message 'experiment ID and hypothesis'
 # After examining the plan and completed evaluation:
 uv run gemma-lab submit artifacts/candidate/submission.zip \
-  --message 'experiment ID and hypothesis' --execute
+  --message 'experiment ID and hypothesis' --evaluation runs/candidate --execute
 uv run gemma-lab status
 ```
 
-The uploader checks Kaggle history, enforces the one-per-UTC-day slot, prevents identical resubmissions, and reserves the slot locally before a network upload. An interrupted upload needs history reconciliation before retrying. Portable checks are supplemented by the official harness checks inside the GPU notebook.
+The uploader requires completed evaluation outputs matching the exact archive hash and task cohort, checks Kaggle history, enforces the one-per-UTC-day slot, prevents identical resubmissions, and reserves the slot locally before a network upload. An interrupted upload needs history reconciliation before retrying. Portable checks are supplemented by the official harness checks inside the GPU notebook.
 
 ## What lives where
 

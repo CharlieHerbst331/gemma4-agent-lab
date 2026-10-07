@@ -6,7 +6,33 @@ import pytest
 
 from gemma_lab import operations
 from gemma_lab.bundle import pack
-from gemma_lab.operations import submissions_today
+from gemma_lab.operations import check_evaluation, submissions_today
+
+
+def evidence(tmp_path, archive):
+    evaluation = tmp_path / "evaluation"
+    evaluation.mkdir()
+    from gemma_lab.common import sha256
+
+    (evaluation / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "sha256": sha256(archive),
+                "task_ids": ["task"],
+            }
+        )
+    )
+    (evaluation / "task_results.jsonl").write_text(
+        json.dumps(
+            {
+                "instance_id": "task",
+                "resolved": True,
+                "patch_chars": 10,
+            }
+        )
+        + "\n"
+    )
+    return evaluation
 
 
 def test_history_parser():
@@ -21,6 +47,7 @@ def test_history_parser():
 def test_submission_reservation_blocks_retry_after_network_failure(tmp_path, monkeypatch):
     archive, ledger = tmp_path / "submission.zip", tmp_path / "ledger.jsonl"
     pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
     calls = []
 
     def api(*args, **kwargs):
@@ -31,12 +58,12 @@ def test_submission_reservation_blocks_retry_after_network_failure(tmp_path, mon
 
     monkeypatch.setattr(operations, "kaggle", api)
     with pytest.raises(RuntimeError):
-        operations.submit(archive, "test", ledger, execute=True)
+        operations.submit(archive, "test", ledger, execute=True, evaluation=evaluation)
     row = json.loads(ledger.read_text())
     assert row["status"] == "reserved"
     assert row["created_at"].startswith(datetime.now(UTC).date().isoformat())
     with pytest.raises(ValueError, match="reserved"):
-        operations.submit(archive, "test", ledger, execute=True)
+        operations.submit(archive, "test", ledger, execute=True, evaluation=evaluation)
     assert sum("submit" in args for args in calls) == 1
 
 
@@ -45,3 +72,19 @@ def test_plan_has_no_network_side_effects(tmp_path, monkeypatch):
     pack(Path("agents/baseline"), archive)
     monkeypatch.setattr(operations, "kaggle", lambda *args, **kwargs: pytest.fail("unexpected API"))
     assert operations.submit(archive, "plan")["status"] == "planned"
+
+
+def test_evaluation_gate_requires_exact_archive_and_complete_tasks(tmp_path):
+    archive = tmp_path / "submission.zip"
+    pack(Path("agents/baseline"), archive)
+    with pytest.raises(ValueError, match="requires --evaluation"):
+        check_evaluation(archive, None)
+    evaluation = evidence(tmp_path, archive)
+    assert check_evaluation(archive, evaluation)["resolved"] == 1
+    (evaluation / "task_results.jsonl").write_text("")
+    with pytest.raises(ValueError, match="incomplete"):
+        check_evaluation(archive, evaluation)
+    manifest = evaluation / "run_manifest.json"
+    manifest.write_text(json.dumps({"sha256": "wrong", "task_ids": ["task"]}))
+    with pytest.raises(ValueError, match="hash"):
+        check_evaluation(archive, evaluation)
