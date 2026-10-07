@@ -184,6 +184,15 @@ def check_evaluation(archive, evaluation):
     rows = load_results(evaluation / "task_results.jsonl")
     if {r["instance_id"] for r in rows} != set(manifest["task_ids"]):
         raise ValueError("Evaluation task set is incomplete or mismatched")
+    # Normalize an older collector's turn-budget classification without changing raw files.
+    for row in rows:
+        message = row.get("agent_error") or row.get("error") or ""
+        if any(
+            marker in message.lower()
+            for marker in ["exceeded session timeout", "exceeded turns budget"]
+        ):
+            row["failure_class"] = "agent_budget"
+            row.pop("error", None)
     if any(r.get("error") or r.get("failure_class") == "infrastructure_or_harness" for r in rows):
         raise ValueError("Resolve evaluation infrastructure errors before uploading")
     # Also inspect official diagnostics: older collectors omitted returned failures.
@@ -192,7 +201,10 @@ def check_evaluation(archive, evaluation):
         if detail_path.exists():
             detail = json.loads(detail_path.read_text())
             runner_error = detail.get("error_message") or ""
-            if runner_error and "exceeded session timeout" not in runner_error.lower():
+            if runner_error and not any(
+                marker in runner_error.lower()
+                for marker in ["exceeded session timeout", "exceeded turns budget"]
+            ):
                 raise ValueError(
                     "Resolve returned evaluation infrastructure errors before uploading"
                 )

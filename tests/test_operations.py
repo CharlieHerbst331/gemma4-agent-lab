@@ -108,3 +108,22 @@ def test_evaluation_gate_checks_diagnostics_even_when_rows_omit_errors(tmp_path,
     (evaluation / "results/task.json").write_text(json.dumps(detail))
     with pytest.raises(ValueError, match="errors before uploading"):
         check_evaluation(archive, evaluation)
+
+
+def test_older_turn_budget_classification_is_not_an_infrastructure_error(tmp_path):
+    archive = tmp_path / "submission.zip"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    rows = evaluation / "task_results.jsonl"
+    row = json.loads(rows.read_text())
+    row.update(
+        resolved=False,
+        failure_class="infrastructure_or_harness",
+        error="Agent exceeded turns budget (60 turns)",
+    )
+    raw = json.dumps(row) + "\n"
+    rows.write_text(raw)
+    metrics = check_evaluation(archive, evaluation)
+    assert metrics["agent_budget_failures"] == 1
+    assert metrics["infrastructure_failures"] == 0
+    assert rows.read_text() == raw

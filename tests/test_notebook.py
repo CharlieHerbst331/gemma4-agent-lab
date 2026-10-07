@@ -67,6 +67,7 @@ def test_changed_starter_fails_closed(tmp_path, monkeypatch):
     [
         ("Sandbox execution error: ContextWindowExceededError", "infrastructure_or_harness"),
         ("Agent exceeded session timeout (5.0 min)", "agent_budget"),
+        ("Agent exceeded turns budget (60 turns)", "agent_budget"),
         (None, None),
     ],
 )

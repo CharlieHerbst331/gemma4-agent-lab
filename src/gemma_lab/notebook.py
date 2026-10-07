@@ -114,7 +114,8 @@ for idx, task in enumerate(SAMPLE_TASKS, start=1):
         runner_error = getattr(result, 'error_message', None)
         if runner_error:
             row['agent_error'] = runner_error
-            if 'exceeded session timeout' in runner_error.lower():
+            if any(marker in runner_error.lower() for marker in
+                   ['exceeded session timeout', 'exceeded turns budget']):
                 row['failure_class'] = 'agent_budget'
             else:
                 row['failure_class'] = 'infrastructure_or_harness'
