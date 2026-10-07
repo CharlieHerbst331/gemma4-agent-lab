@@ -24,24 +24,28 @@ Last updated: October 6, 2026 (Pacific).
 - Completed: 0/2; one context-window error and one agent timeout. These are infrastructure/debugging evidence, not a generalization measurement.
 - Outputs: `runs/kaggle/smoke-v1`. Original summary omitted returned runner errors; source diagnostics contain them.
 
-## Simple v1 implementation and dev pilot
+## Simple v1 implementation and dev evaluation
 
-- Source: `agents/simple-v1`; design review: `docs/SIMPLE_V1.md`.
-- Exactly three roles; bounded locator and investigator AgentTools; root verifies and submits.
-- Archive SHA-256: `510b45f2a24e61aa1b17b6341366c4425223efb092541ea5ab09f3403675b8ce`.
-- Portable validation and packaging passed. Toolkit: 33 tests plus formatter/linter passed.
-- Candidate: https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v1-dev3 (v2, running; v1 stopped before model setup due to notebook hardware-recording order, repaired).
-- Baseline: https://www.kaggle.com/code/charlesaherbst/gemma4-baseline-dev3 (v2, running; v1 stopped before model setup due to notebook hardware-recording order, repaired).
-- Identical frozen dev cohort: `fastapi_11194`, `requests_7502`, `rich_3105`.
-- Run record: `runs/experiments/simple-v1/EXPERIMENT.md`; outputs to `runs/kaggle/simple-v1-dev3` and `runs/kaggle/baseline-dev3`.
-- New notebook outputs preserve returned runner errors and actual GPU metadata. Infrastructure errors block submission; timeouts are tracked as agent-budget failures.
-- No leaderboard submission yet. User authorized submission after evaluation through the checked uploader. Holdout untouched in this experiment.
+- Source: `agents/simple-v1`; review and limits: `docs/SIMPLE_V1.md`.
+- Implementation commit: `22cd4ab` (initial candidate); revised prompt source hashes are recorded in manifests.
+- Initial candidate SHA-256: `510b45f2a24e61aa1b17b6341366c4425223efb092541ea5ab09f3403675b8ce`.
+- Initial dev3: 1/3 versus baseline 0/3; FastAPI win, no regressions. Two candidate timeouts, three baseline timeouts. No runner infrastructure errors. Requests grading timed out at 60 seconds and the candidate patch contained scratch/debug output; initial archive NOT submitted.
+- Actual hardware: 4 × NVIDIA L4; swegemma 0.2.7, adk-submission 0.2.12, adk-eval-core 0.1.0, vLLM 0.19.1, google-adk 1.36.1.
+- Comparison/audit: `runs/experiments/simple-v1/comparison.json`, `trace-audit.json`.
+- Revised SHA-256: `fb9ebb8f452dc78fba7fb5bdcf80b74190496b1e31a72cd206be803bd855db7d`.
+- Revised prompts target observed ignored limits, skipped investigator, malformed arguments, swallowed assertions, and scratch/debug pollution. Verification timeout restored to official 300 seconds.
+- Portable validation/packaging passed; toolkit 33 tests plus formatting/linting passed.
+- Revised dev3: https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v1-r1-dev3 (v1, running).
+- Full frozen dev14: https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v1-r1-dev14 (v1, dispatched).
+- Output paths: `runs/kaggle/simple-v1-r1-dev3`, `runs/kaggle/simple-v1-r1-dev14`.
+- Identical pilot IDs: `fastapi_11194`, `requests_7502`, `rich_3105`. Full dev IDs: `configs/splits/public-v1.json` dev partition.
+- No leaderboard submission yet. User authorized submission after exact-hash evaluation through the checked uploader. Holdout untouched.
 
 ## Next actions
 
-1. Collect both existing dev runs; inspect runner and verification diagnostics.
-2. Compare identical cohorts, fix concrete failures if needed, and submit a valid evaluated candidate via the daily-slot-checked uploader.
-3. Expand evaluation to the full 14-task dev cohort before claiming strength; keep the holdout for milestone comparisons.
+1. Collect revised dev3/dev14 runs, audit patches/traces, compare revised dev3 against the identical baseline and initial candidate.
+2. Record full-dev results and use the checked uploader for the evaluated archive if infrastructure and patch hygiene permit.
+3. Reserve holdout for milestone comparison; do not claim competitiveness from the pilot.
 
 ## Practical limits
 

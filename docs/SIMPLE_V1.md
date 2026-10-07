@@ -12,11 +12,10 @@ and another opportunity to lose evidence without isolating a distinct responsibi
   exploration calls. Forcing 5–10 reads or 3–8 suspects wastes time on explicit issues.
   Literal/path clues use text search first; ambiguous symbols use optional graphs.
 - **Scratch access:** harness file tools resolve paths inside `/workspace`; `/tmp`
-  notes and scripts therefore use `run_command` with quoted heredocs. The brief is
-  also returned directly so a failed note write cannot stall orchestration.
+  notes and scripts therefore use `run_command` with quoted heredocs. The revised locator returns the brief directly and creates no files, avoiding an observed workspace scratch leak.
 - **Read-only boundary:** locator has no editing/file-writing tools, but its shell
   capability is not a hard read-only sandbox. Its prompt restricts shell use to
-  searches and `/tmp` notes. Declarative configuration cannot enforce this policy.
+  searches only. Declarative configuration cannot enforce this policy.
 - **Evidence before edits:** the investigator checks a specific hypothesis and
   reproduces the relevant failure before changing implementation. Related files may
   require multiple small edits; a strict one-file rule can produce incomplete fixes.
@@ -30,7 +29,7 @@ and another opportunity to lose evidence without isolating a distinct responsibi
   temperature 0.5. Baseline smoke hit the 32,768 context ceiling with 16,384 output
   tokens reserved. Smaller output leaves room for tool history and compaction.
   Sampling is a starting hypothesis, not evidence that higher temperature helps.
-- **Budget:** five minutes, 80 counted calls, 60 turns, 60-second command cap; prompts
+- **Budget:** five minutes, 80 counted calls, 60 turns, 300-second official verification/command cap; prompts
   aim for 30-second commands and reserve the last 60 seconds/eight calls for verification.
   Across 120 tasks, the configured task ceiling is ten hours, leaving nominal setup
   margin under twelve hours. Actual setup and hardware timings still need measurement.
@@ -69,3 +68,24 @@ Timeouts are agent-budget failures; other runner errors block the checked upload
 Portable validation alone does not establish ADK compilation or performance.
 Prompt budget limits and read-only behavior are soft policies; measure compliance
 in traces. Context exhaustion is still possible despite the reduced output ceiling.
+
+## Pilot result and revision
+
+The first pilot resolved 1/3 versus the baseline's 0/3 on the identical dev cohort
+(one FastAPI win, no regressions), on 4 × NVIDIA L4 with swegemma 0.2.7 and google-adk
+1.36.1. Candidate generation/verification duration totaled 992.7 seconds versus
+1165.5 seconds; these task durations include overhead and are not pure generation time.
+Two candidate sessions and all three baseline sessions timed out. The candidate
+Requests grading also hit the configured 60-second test timeout. Its patch included
+workspace scratch and debug output. It was not submitted.
+
+Trace review found ignored soft exploration limits, skipped investigator delegation,
+malformed read_file arguments, and a repro catching exceptions with exit zero. The
+revised prompts are shorter, require investigator dispatch, make argument fields
+explicit, forbid locator writes, and demand propagating assertions and removal of
+added debug/scratch. Verification uses the official 300-second timeout. Issue-number-
+only tasks should end cleanly without guessing unrelated defects. These changes are
+motivated by trace evidence, not proven until the revised runs finish.
+
+The revised archive is evaluated on the same three tasks for paired comparison and
+on the full frozen 14-task dev set. This remains dev evidence; holdout is untouched.
