@@ -2,6 +2,20 @@
 
 Last updated: October 7, 2026 (Pacific).
 
+## Current development candidate
+
+- `agents/structured-v4` implements bounded tool-free triage, isolated repair/verifier
+  histories with explicit state handoffs, and three scoped sandboxed skills.
+- Skills: task-memory (bounded/locked task evidence), source-lookup (bounded literal
+  search/windows), verify-patch (same-repro contract, real exit status, freshness and
+  read-only patch audit). No global Codex skill installation or new custom tool.
+- Design/use/limits: `docs/STRUCTURED_V4.md`. All64 tests plus lint/format pass; skill
+  manifests validated. Official GPU execution/performance remains unmeasured.
+- Submitted v3 and its archive are unchanged. No new submission or GPU run launched
+  for this implementation. Current v3 server history still reports PENDING.
+- Next: official compilation/skill-execution pilot on frozen dev IDs, then controlled
+  ablations and same-cohort evaluation. Do not claim skills improved scores from unit tests.
+
 ## Active work
 
 User requested review, implementation, official evaluation, and Kaggle submission of

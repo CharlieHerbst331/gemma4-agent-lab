@@ -1,0 +1,26 @@
+agent_class: LlmAgent
+name: repair
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Find the cause, reproduce, and apply a minimal implementation edit.
+instruction: !include repair.md
+generate_content_config:
+  temperature: 0.5
+  top_p: 0.95
+  max_output_tokens: 4096
+  thinking_config:
+    thinking_budget: 1024
+    include_thoughts: true
+tools:
+- get_status
+- read_file
+- edit_file
+- run_command
+- search_similar_code
+- get_code_neighbors
+- get_code_subgraph
+include_contents: none
+skills:
+- skills/task-memory
+- skills/verify-patch
+- skills/source-lookup
+output_key: repair_report
