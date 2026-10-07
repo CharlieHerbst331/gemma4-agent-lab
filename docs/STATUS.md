@@ -66,3 +66,11 @@ or recurring automations have been configured.
 - R1 dev14 remains running; collect and report its full frozen cohort even though R1 has been superseded.
 - Portable validation/packaging pass; latest toolkit check: 36 tests plus formatter/linter.
 - No actual submission yet; submit only a clean, exactly evaluated archive through checked uploader.
+
+## V2 smoke result and broader run
+
+- V2 clean dev2 completed: 1/2, FastAPI resolved; Rich issue-number-only input produced an empty patch. No reported infrastructure errors or agent-budget failures. Actual task duration 484.5 seconds, 48 counted calls.
+- All three roles executed on both tasks. Patch audit found no workspace scratch, protected-file modifications, or debug additions. FastAPI was captured by harness fallback before explicit submit_patch; do not claim explicit submission is reliable from this trace. Rich explicitly submitted an empty patch.
+- Identical unaffected-cohort baseline: 0/2. One paired win, no regressions; different budget/sampling/architecture changes mean this cannot isolate causal improvements. Smoke is not generalization evidence.
+- V2 full usable dev13: https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v2-dev13 (v1, queued/running). IDs frozen in `runs/experiments/simple-v1/dev-13-clean.json` before this run; includes all dev except Requests due the documented official fixture failure. Output: `runs/kaggle/simple-v2-dev13`.
+- Next: collect dev13 and R1 dev14, inspect patch hygiene/diagnostics, then use checked uploader for exact v2 archive if evaluation permits. No submission slot used yet.
