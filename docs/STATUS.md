@@ -85,3 +85,14 @@ Private repo: https://github.com/CharlieHerbst331/gemma4-agent-lab; Kaggle accou
 Weights and task repositories run only on disposable offline Kaggle workers. No paid
 hardware, training, holdout evaluation, public release, or recurring automation.
 See `docs/SIMPLE_V1.md` and `docs/EXPERIMENT_RESULTS.md` for review/evidence.
+
+## October 7 design review
+
+Review/roadmap: `docs/HARNESS_REVIEW.md`. No candidate, GPU run, or submission changed.
+Trace reanalysis: locator261/367 total tool events; verifier reached2/13; locator44
+repeated exact navigation calls. Primary proposed controls are one-shot/tool-free
+triage and a matched single-agent baseline, followed by navigation/handoff ablations.
+A newly inspected grading output for fastapi14356 cannot import dirty_equals; the old
+summary recorded only its simultaneous timeout. Therefore zero recorded infrastructure
+failures was incomplete. Preserve raw3/13 and diagnose this as concurrent execution
+and verification-environment failures before future promotion/submission decisions.
