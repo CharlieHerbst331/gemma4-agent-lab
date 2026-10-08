@@ -41,3 +41,13 @@ The only uploaded submission56905832 was accepted for upload but now reports ERR
 without a leaderboard score. Dev/diagnostic counts are separate official local-style
 harness evaluations on public tasks. The selected3/3 pilot is not a leaderboard or
 holdout/generalization claim. Raw/diagnosed infrastructure failures must stay visible.
+
+## Published state
+
+GitHub repository is PUBLIC; authenticated metadata and an unauthenticated GitHub
+API request both confirmed it. README, HANDOFF, HARNESS_SPEC, RUN_CATALOG and redacted
+evidence were fetched without credentials and matched committed local bytes.
+Release checks:66tests plus lint/format passed;160historical blobs scanned with no
+matched credential pattern or forbidden artifact path. All own findings/source are
+at https://github.com/CharlieHerbst331/gemma4-agent-lab . Kaggle mirror remains pending
+owner action, exactly as requested. No collaborator invitation or new submission.

@@ -130,7 +130,7 @@ remains reserved. No leaderboard strength claim until actual results are availab
 
 ## Environment and limits
 
-Private repo: https://github.com/CharlieHerbst331/gemma4-agent-lab; Kaggle account
+Public repo: https://github.com/CharlieHerbst331/gemma4-agent-lab; Kaggle account
 `charlesaherbst`. Locked Python3.12 Mac environment, no GPU/Docker, roughly6GiB free.
 Weights and task repositories run only on disposable offline Kaggle workers. No paid
 hardware, training, holdout evaluation, public release, or recurring automation.
@@ -155,3 +155,8 @@ current implementation, all14 runs/preflights, evidence caveats and next priorit
 evidence/run-results.json contains allowlisted own observations only; raw competition
 material, logs/traces/patches, credentials and weights remain excluded. Kaggle public
 code-sharing step is pending owner action. No new submission/run or collaborator invite.
+
+Public GitHub visibility and unauthenticated source/document access are verified.
+Publication checks:66tests/lint/format;160historical source blobs, no matching secret
+patterns or forbidden tracked data/artifacts. Release handoff documents and evidence
+are committed. Kaggle notebook/post deferred to owner; no public Kaggle action.
