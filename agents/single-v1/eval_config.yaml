@@ -1,0 +1,9 @@
+evaluation:
+  # Per-command cap. Remaining task time bounds each command further.
+  timeout_seconds: 300
+  # Midpoint of the structured-v5 40-60 counted-call range.
+  max_tool_calls: 50
+  # 270 seconds.
+  max_time_minutes: 4.5
+  # Same 40-60 band, equal to the call cap so turns do not bind first.
+  max_turns: 50

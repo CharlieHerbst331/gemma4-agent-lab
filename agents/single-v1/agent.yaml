@@ -1,0 +1,30 @@
+agent_class: LlmAgent
+name: single_v1
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Single-agent control matched to structured-v5 budgets, sampling, tools, and skills.
+instruction: !include prompts/system.md
+generate_content_config:
+  temperature: 0.5
+  top_p: 0.95
+  # Modest ceiling. vLLM rejects prompt + max_output_tokens above 32768.
+  max_output_tokens: 2048
+  thinking_config:
+    # Single knob. 0 turns thinking off on adk-submission 0.2.12.
+    # Change only this integer (for example to 256) to ablate a small budget.
+    thinking_budget: 0
+    include_thoughts: true
+# default keeps this agent's own tool history. none is a multi-agent handoff control.
+include_contents: default
+tools:
+- get_status
+- read_file
+- edit_file
+- run_command
+- search_similar_code
+- get_code_neighbors
+- get_code_subgraph
+- submit_patch
+skills:
+- skills/task-memory
+- skills/source-lookup
+- skills/verify-patch
