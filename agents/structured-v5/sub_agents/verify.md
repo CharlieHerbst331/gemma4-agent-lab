@@ -4,11 +4,11 @@ Verify this issue from the repair report and the skill output, not from the repa
 Hints, if the harness supplied any:
 {hints?}
 
-Triage brief:
-{triage_brief}
+Triage brief (empty if triage wrote no text):
+{triage_brief?}
 
-Repair report:
-{repair_report}
+Repair report (empty if repair wrote no text):
+{repair_report?}
 
 The loop allows 3 iterations and has no exit tool. Using all 3 without a submission
 restarts triage. Read loop_iteration from the repair report. If it is missing, use 1.

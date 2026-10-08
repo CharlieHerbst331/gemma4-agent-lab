@@ -70,7 +70,7 @@ def test_unchanged_skills_match_v4_10m_bytes():
         assert (CANDIDATE / rel).read_bytes() == (PREVIOUS / rel).read_bytes()
 
 
-def test_candidate_compiles_to_the_bounded_loop():
+def test_candidate_yaml_is_the_bounded_loop():
     root = load_yaml(CANDIDATE / "agent.yaml", CANDIDATE)
     assert root["agent_class"] == "SequentialAgent"
     assert [item["config_path"] for item in root["sub_agents"]] == [
@@ -100,8 +100,8 @@ def test_candidate_compiles_to_the_bounded_loop():
         assert sampling["temperature"] == 0.5
         assert sampling["top_p"] == 0.95
         assert sampling["temperature"] != 0.2
-        assert sampling["thinking_config"]["thinking_budget"] == 0
-        assert sampling["thinking_config"]["include_thoughts"] is True
+        assert "thinking_budget" not in sampling["thinking_config"]
+        assert sampling["thinking_config"]["include_thoughts"] is False
     assert triage["generate_content_config"]["max_output_tokens"] == 1024
     assert repair["generate_content_config"]["max_output_tokens"] == 2048
     assert verify["generate_content_config"]["max_output_tokens"] == 1536
@@ -122,8 +122,9 @@ def test_candidate_compiles_to_the_bounded_loop():
         assert "!include thinking.yaml" in raw
         assert "thinking_budget" not in raw
     knob = (CANDIDATE / "sub_agents/thinking.yaml").read_text()
-    assert knob.count("thinking_budget:") == 1
-    assert "thinking_budget: 0" in knob
+    live = "\n".join(line for line in knob.splitlines() if line.strip() and not line.strip().startswith("#"))
+    assert live.strip() == "include_thoughts: false"
+    assert "thinking_budget:" not in live
     assert len(validate(CANDIDATE)) == 16
 
 
@@ -142,6 +143,12 @@ def test_prompts_state_import_scratch_and_final_submit_rules():
         assert "python -I" in prompt and "python -E" in prompt
         assert "INSTALLED-COPY" in prompt
         assert "module.__file__" in prompt or "m.__file__" in prompt
+    assert "{triage_brief?}" in repair
+    assert "{triage_brief}" not in repair.replace("{triage_brief?}", "")
+    assert "{triage_brief?}" in verify
+    assert "{repair_report?}" in verify
+    assert "{triage_brief}" not in verify.replace("{triage_brief?}", "")
+    assert "{repair_report}" not in verify.replace("{repair_report?}", "")
     assert "at most 3" in triage
     assert "You do not have submit_patch" in repair
     assert "12 counted calls" in repair

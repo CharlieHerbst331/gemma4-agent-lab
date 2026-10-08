@@ -4,8 +4,8 @@ Resolve this issue in /workspace:
 Hints, if the harness supplied any:
 {hints?}
 
-Triage brief (candidate files are unverified):
-{triage_brief}
+Triage brief (candidate files are unverified; empty if triage wrote no text):
+{triage_brief?}
 
 Your history is isolated. The latest verify failure, if this is a later loop pass,
 is the preceding message. Read its loop_iteration. This loop runs at most 3 times.
