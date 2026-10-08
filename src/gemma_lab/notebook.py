@@ -682,7 +682,7 @@ def _pair_eval_cell(source, protocol, budgets, skipped):
     max_time_minutes = float(budgets['max_time_minutes'])
     timeout_seconds = int(budgets['timeout_seconds'])
     max_turns = int(budgets['max_turns'])
-    {safe_config}
+{safe_config}
     assert eval_config.concurrency == 1
     assert eval_config.max_tool_calls == max_tool_calls
     assert eval_config.max_time_minutes == max_time_minutes
