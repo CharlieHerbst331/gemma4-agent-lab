@@ -9,7 +9,10 @@ Build a technically credible, competitive offline Gemma4 coding agent for Kaggle
 Google – The Gemma4 Developer Agent competition. Preserve honest experiment evidence.
 The code is a prototype; a3/3 selected diagnostic does not establish generalization.
 
-Latest development candidate: `agents/structured-v4-10m`.
+Latest evaluated candidate: `agents/structured-v4-10m`.
+Unevaluated fork: `agents/structured-v5` (see `docs/STRUCTURED_V5.md`). It is not
+a measured improvement and has not been submitted. v4-10m and its archive stay
+the comparison baseline.
 Latest evaluated archive SHA256:
 `0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.
 Candidate code commit: `b00526833928c5ce9f1e181b77ad982e5bf12e84`.

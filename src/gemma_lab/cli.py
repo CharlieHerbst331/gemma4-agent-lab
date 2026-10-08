@@ -6,7 +6,7 @@ from gemma_lab import bundle, metrics, operations, tasks
 from gemma_lab.common import COMPETITION, kaggle, write_json
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Gemma 4 agent development kit")
     sub = parser.add_subparsers(dest="command", required=True)
     doctor = sub.add_parser("doctor", help="Check environment and optional account access")
@@ -49,6 +49,31 @@ def main():
     notebook.add_argument("--task-ids", type=Path, help="JSON array of selected public task IDs")
     notebook.add_argument("--bundle-dataset", help="owner/slug for a private large bundle dataset")
     notebook.add_argument("--output", type=Path, default=Path("notebooks/generated/baseline"))
+    notebook_pair = sub.add_parser("notebook-pair", help="Generate a hash-pinned two-arm notebook")
+    notebook_pair.add_argument("--protocol", type=Path, required=True)
+    notebook_pair.add_argument("--owner", required=True)
+    notebook_pair.add_argument("--slug", required=True)
+    notebook_pair.add_argument("--repeats-in-session", default="1")
+    notebook_pair.add_argument("--output", type=Path, required=True)
+    notebook_pair.add_argument("--prior-run", type=Path)
+    notebook_pair.add_argument(
+        "--bundle-dataset",
+        action="append",
+        default=[],
+        help="LABEL=owner/slug for an arm archive larger than 5 MiB",
+    )
+    pair_schedule = sub.add_parser(
+        "pair-schedule", help="Print a frozen paired schedule without packing"
+    )
+    pair_schedule.add_argument("--protocol", type=Path, required=True)
+    pair_schedule.add_argument("--print", dest="do_print", action="store_true")
+    pair_schedule.add_argument("--output", type=Path)
+    pair_report = sub.add_parser(
+        "pair-report", help="Regenerate a paired report from one or more sessions"
+    )
+    pair_report.add_argument("runs", nargs="+", type=Path)
+    pair_report.add_argument("--protocol", type=Path, required=True)
+    pair_report.add_argument("--output", type=Path, required=True)
     push = sub.add_parser("push-notebook", help="Upload and run a prepared private notebook")
     push.add_argument("folder", type=Path)
     push.add_argument("--execute", action="store_true")
@@ -78,7 +103,36 @@ def main():
     submit.add_argument(
         "--evaluation", type=Path, help="Completed GPU output folder for this archive"
     )
-    args = parser.parse_args()
+    submit.add_argument(
+        "--scorer-overhead-seconds",
+        type=float,
+        default=operations.DEFAULT_SCORER_OVERHEAD_SECONDS,
+        help=(
+            "Hosted scorer seconds added per task to the 120-task block and the "
+            "worst-case warning only. The 129-task block uses the measured mean "
+            "with no overhead. Checked at submit --execute, never from the "
+            "per-task cap and never as a precondition for dev GPU runs."
+        ),
+    )
+    hygiene = sub.add_parser("hygiene", help="Offline patch hygiene and finalization checks")
+    hygiene_commands = hygiene.add_subparsers(dest="hygiene_command", required=True)
+    for name in ("candidate", "run", "patch"):
+        command = hygiene_commands.add_parser(name)
+        command.add_argument("--policy", type=Path, default=Path("configs/hygiene/default.yaml"))
+        command.add_argument("--fail-on", choices=["block", "warn"], default="block")
+        command.add_argument("--output", type=Path)
+        if name == "candidate":
+            command.add_argument("source", type=Path)
+        elif name == "run":
+            command.add_argument("directory", type=Path)
+            command.add_argument("--task-ids", type=Path)
+            command.add_argument("--require-trace", action="store_true")
+        else:
+            command.add_argument("patch_file", type=Path)
+            command.add_argument("--trace", type=Path)
+            command.add_argument("--require-trace", action="store_true")
+    args = parser.parse_args(argv)
+    exit_code = 0
     try:
         match args.command:
             case "doctor":
@@ -121,6 +175,45 @@ def main():
                     args.task_ids,
                     args.bundle_dataset,
                 )
+            case "notebook-pair":
+                from gemma_lab.notebook import generate_pair
+
+                datasets = {}
+                for item in args.bundle_dataset:
+                    if "=" not in item:
+                        raise ValueError("Expected --bundle-dataset LABEL=owner/slug")
+                    label, ref = item.split("=", 1)
+                    datasets[label] = ref
+                result = generate_pair(
+                    args.protocol,
+                    args.owner,
+                    args.slug,
+                    args.output,
+                    args.repeats_in_session,
+                    args.prior_run,
+                    datasets,
+                )
+            case "pair-schedule":
+                from gemma_lab.paired import build_schedule, load_cohort_ids, load_protocol
+
+                protocol = load_protocol(args.protocol)
+                schedule = build_schedule(
+                    load_cohort_ids(protocol["cohort"]["path"]),
+                    repeats=int(protocol["repeats"]),
+                    shuffle_seed=protocol.get("shuffle_seed"),
+                )
+                result = {
+                    "protocol_sha256": protocol["_sha256"],
+                    "schedule_sha256": schedule["sha256"],
+                    "rule": schedule["rule"],
+                    "entries": schedule["entries"],
+                }
+                if args.output:
+                    write_json(args.output, result)
+            case "pair-report":
+                from gemma_lab.paired import report_from_runs
+
+                result = report_from_runs(args.runs, args.protocol, args.output)
             case "upload-bundle":
                 result = operations.upload_bundle(
                     args.archive, args.owner, args.slug, args.output, args.execute, args.version
@@ -147,9 +240,27 @@ def main():
                 result = operations.wait_for_run(args.kernel, args.output, args.timeout_minutes)
             case "submit":
                 result = operations.submit(
-                    args.archive, args.message, execute=args.execute, evaluation=args.evaluation
+                    args.archive,
+                    args.message,
+                    execute=args.execute,
+                    evaluation=args.evaluation,
+                    scorer_overhead_seconds=args.scorer_overhead_seconds,
                 )
-        print(json.dumps(result, indent=2) if not isinstance(result, str) else result)
+            case "hygiene":
+                from gemma_lab.hygiene import HygieneInputError, run_cli
+
+                try:
+                    result, exit_code = run_cli(args)
+                except HygieneInputError as exc:
+                    parser.exit(2, f"Error: {exc}\n")
+        rendered = (
+            result
+            if isinstance(result, str)
+            else json.dumps(result, indent=2, sort_keys=args.command == "hygiene")
+        )
+        print(rendered)
+        if exit_code:
+            parser.exit(exit_code)
     except (ValueError, RuntimeError, OSError) as exc:
         parser.exit(1, f"Error: {exc}\n")
 

@@ -1,0 +1,14 @@
+agent_class: LlmAgent
+name: triage
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Name at most three candidate files from the issue and layout, then stop.
+instruction: !include triage.md
+generate_content_config:
+  temperature: 0.5
+  top_p: 0.95
+  # 1024 completion tokens leaves a 31744-token prompt ceiling inside 32768.
+  max_output_tokens: 1024
+  thinking_config: !include thinking.yaml
+include_contents: none
+tools: []
+output_key: triage_brief

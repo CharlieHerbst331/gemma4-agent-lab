@@ -1,0 +1,5 @@
+# Repos whose snapshots use a src/ layout. Under the subprocess sandbox those
+# tasks are graded against the host package. Primary paired metrics exclude them
+# when the protocol sets exclude_import_origin_risk.
+src_layout_repos:
+  - psf/requests

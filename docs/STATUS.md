@@ -2,6 +2,29 @@
 
 Last updated: October 8, 2026 (Pacific).
 
+## Unevaluated structured-v5 candidate
+
+`agents/structured-v5` is a new candidate forked from `agents/structured-v4-10m`.
+No evaluated candidate was modified. v5 is not evaluated and not submitted.
+Design, harness evidence, and the repair-submit decision: `docs/STRUCTURED_V5.md`.
+
+Shape: Sequential[triage, Loop(max_iterations 3)[repair, verify]]. Thinking is off
+via the single knob `sub_agents/thinking.yaml` (`include_thoughts: false`, no
+budget). Budgets are 270s (`max_time_minutes: 4.5`), 48 counted calls, and 64
+turns. Skill script runs count as calls, so turns and calls are roughly
+co-binding, and the 270s clock usually binds first. Repair hands off at about
+90 seconds remaining. Verify submits when fewer than 60 seconds remain, re-reads
+the clock before its check, and replies with one sentence. Verify's tools are
+get_status, read_file, edit_file, submit_patch, and the verify-patch skill. Repair
+does not have submit_patch: a text handoff after a submission ends the task before
+verify. src-layout requests tasks are unreliable in the notebook subprocess eval
+and are excluded from promotion decisions.
+
+Archive SHA256 `6202ab26252df59061547e0fd7dbcc1e8ef62b5cb12c61c14c2b2e953865bbb5`
+(`artifacts/structured-v5/submission.zip`, 16 files). Repacking the evaluated
+candidates still matches their recorded hashes, including v4-10m
+`0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.
+
 ## Matched single-agent control
 
 `agents/single-v1` is a new unevaluated control forked from `agents/structured-v4-10m`
@@ -32,8 +55,9 @@ patch and invokes verify-patch. No new competition submission. Full report:
 `docs/STRUCTURED_V4_10M_DIAGNOSTIC.md`. Outputs/stages/audit/paired comparison are saved;
 collector completed, no active run or recurring job. Do not generalize three-task success
 or promote without broader same-cohort measurement and patch-hygiene remediation. Original
-five-minute candidate, archive and results remain unchanged. The two diagnostic
-failures explicitly report session timeout, not single-command timeout. The12hour
+five-minute candidate, archive and results remain unchanged. The two failures in
+that five-minute diagnostic explicitly report session timeout, not single-command
+timeout. The10-minute diagnostic had no failures. The12hour
 competition-wide generation limit still applies; longer caps require runtime evidence.
 
 ## Evaluated five-minute development candidate
@@ -61,7 +85,7 @@ competition-wide generation limit still applies; longer caps require runtime evi
 - Outputs: `runs/kaggle/structured-v4-diagnostic-v1`, `structured-v4-sdk-preflight-v3`.
   No active collector, GPU job or recurring automation remains.
 
-## Active work
+## Submitted simple-v3
 
 User requested review, implementation, official evaluation, and Kaggle submission of
 a simple three-role Gemma agent. Implementation/evaluation are authorized; actual
@@ -71,7 +95,7 @@ leaderboard score. The CLI summary does not expose the cause. The earlier zero-s
 message applied to the upload's UTC day; use the checked uploader for current history
 and quota, never assume a cached slot count.
 
-- Active source: `agents/simple-v3`.
+- Submitted source: `agents/simple-v3`. The active development source is `agents/structured-v4-10m`, above.
 - Archive: `artifacts/simple-v3/submission.zip`.
 - SHA-256: `50d7b69dd4d0f6a5b4925bda919f69e57196b72337190bd6073be95591ff2646`.
 - Architecture: declarative SequentialAgent wrapper with exactly three Gemma LlmAgent
@@ -86,7 +110,7 @@ and quota, never assume a cached slot count.
 - Collector/output: `runs/kaggle/simple-v3-dev13`; collection complete; no active collector or recurring job.
 - Cohort: all frozen dev IDs except `requests_7502`, excluded prospectively because
   the official verification worker has a recursive httpbin fixture dependency.
-  IDs: `runs/experiments/simple-v1/dev-13-clean.json`. Holdout unexamined.
+  Public IDs: `configs/cohorts/dev-13-environment-screened.json`. Holdout unexamined.
 - Run record: `runs/experiments/simple-v1/EXPERIMENT.md`. Candidate file hashes and
   generation git revision/working snapshot are pinned in manifests.
 
@@ -96,8 +120,11 @@ and quota, never assume a cached slot count.
 - Baseline dev3: 0/3, three timeouts; Requests fixture failure makes its grading inconclusive.
 - Initial AgentTool v1 dev3: 1/3, two timeouts, scratch/debug pollution; not submitted.
 - Shorter AgentTool R1 dev3: 0/3; investigator never invoked.
-- AgentTool R1 full dev14: 3/14 (FastAPI3/6, Rich0/7, Requests0/1), ten budget failures.
+- AgentTool R1 full dev14: 3/14 (FastAPI3/6, Rich0/7, Requests0/1), 9 recorded budget
+  failures and 2 recorded infrastructure failures (`rich_3472`, `rich_3454`).
   Rich grading patch failed after candidate test edits; Requests also has fixture errors.
+  An older "ten budget failures" label does not match `evidence/run-results.json`.
+  Reclassifying `rich_3472` as turn-budget exhaustion is unverified and is not applied here.
 - Sequential v2 smoke: 1/2, all three roles execute, clean patches; successful FastAPI
   patch captured by fallback before explicit submit_patch. Smoke is not generalization evidence.
 - Sequential v2 dev13: 3/13 (FastAPI2/6, Rich1/7), nine timeouts, zero reported infrastructure
@@ -106,7 +133,8 @@ and quota, never assume a cached slot count.
   three failed cases; v2 was not submitted.
 - Audits/comparisons: `runs/experiments/simple-v1/*audit.json`, `*comparison.json`.
 - All measured GPU runs used four NVIDIA L4s; swegemma0.2.7, adk-submission0.2.12,
-  adk-eval-core0.1.0, vLLM0.19.1, google-adk1.36.1 (confirm v3 manifest after collection).
+  adk-eval-core0.1.0, vLLM0.19.1, google-adk1.36.1. The v3 manifest matches these
+  packages; see the submission evidence below.
 
 ## Toolkit repairs
 
@@ -115,6 +143,27 @@ The uploader inspects official diagnostics, distinguishes timeout/turn-budget fa
 from infrastructure, and blocks known grading fixture failures. It never rewrites raw
 results to conceal failures. Alternate official wheelhouse mount discovery handles a
 worker that previously failed with zero wheels; missing mounts fail explicitly.
+
+The checked uploader refuses an archive when either projected block fails. Gates
+run on the measured per-task mean at `submit --execute` only (`projection.json`
+`basis` is `measured_mean`). They are not a precondition for dev GPU runs, and
+the per-task cap never blocks. `--scorer-overhead-seconds` (default 70) is added
+only to the 120-task block and the worst-case warning: 120 × (mean + overhead)
+must be at most 11 hours, and model-load seconds (from `run_manifest.json`, else
+900) + 129 × mean, with no overhead, must be at most 10.8 hours. A worst case of
+load + 129 × (cap + overhead) above 12 hours warns and does not block.
+`git_revision()` appends `-dirty` when the worktree is dirty, and the public
+findings export keeps that marker plus the pack provenance fields. `gemma-lab
+hygiene candidate|run|patch` audits patches offline. Rule IDs, the 0.2.7
+checkout-abort reason H2 stays a block, and the trace paths are in
+`docs/HYGIENE.md`. It does not edit agents or raw run files. `hygiene run DIR`
+writes `DIR/hygiene.json`, and `hygiene candidate` and `hygiene patch` write
+`./hygiene.json` unless `--output` is given. `hygiene.json` and
+`projection.json` are gitignored at any depth and omitted from packs, so a
+report left inside a candidate does not change the archive. Candidate lint is
+not wired into submit
+or pack. Frozen structured-v4 and structured-v4-10m block that lint on
+`G2.superset`. baseline, simple-v1, and simple-v2 block it on `G0.write_file`.
 
 ## Submission evidence and next actions
 
@@ -171,3 +220,24 @@ Public GitHub visibility and unauthenticated source/document access are verified
 Publication checks:66tests/lint/format;160historical source blobs, no matching secret
 patterns or forbidden tracked data/artifacts. Release handoff documents and evidence
 are committed. Kaggle notebook/post deferred to owner; no public Kaggle action.
+
+## Paired notebook toolkit
+
+`gemma-lab notebook-pair`, `pair-schedule`, and `pair-report` live in the toolkit.
+No paired GPU session has been run. `pins_mode` stays `record` until the six grading
+file hashes are confirmed against the official Kaggle wheelhouse; they currently match
+the public happyc0der copy only. max_tool_calls and max_time_minutes are now set
+explicitly from eval_config; previously inherited from the fetched starter. The paired
+notebook sets each arm's caps from that arm's resolved eval_config. adk-submission
+older than 0.2.11 refuses to run, and a version below 0.2.12 warns that a
+thinking_budget ablation would not be honored. The exact version is recorded on the
+pair manifest. Each arm writes `results/<arm>/r<k>/task_results.jsonl` and `model_load_seconds`
+in that arm's `run_manifest.json`. A harness ATIF file already at
+`results/<arm>/r<k>/traces/trace_<id>.json` is left in place; a missing trace is
+saved with `trace.save()` when that writer exists, and a raw dump otherwise goes
+to `trace_<id>.raw.json`. Task ids with `/` use `__` in that filename. Restart
+starts vLLM in its own session. The process-group id equals the parent pid and
+is recorded before stop(); after stop() that group gets SIGTERM and then
+SIGKILL, and the same id is used for a wait of up to 60 s for the port and any
+leftover GPU memory. Agent trees and the recorded archive
+hashes are unchanged.

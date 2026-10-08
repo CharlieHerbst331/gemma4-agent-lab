@@ -1,0 +1,7 @@
+diff --git a/pkg/c.py b/pkg/c.py
+index 1111111..2222222 100644
+--- a/pkg/c.py
++++ b/pkg/c.py
+@@ -1 +1 @@
+-VALUE = 1
++VALUE = 2
