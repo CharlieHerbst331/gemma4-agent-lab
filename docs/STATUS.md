@@ -2,6 +2,23 @@
 
 Last updated: October 8, 2026 (Pacific).
 
+## Unevaluated structured-v5 candidate
+
+`agents/structured-v5` is a new candidate forked from `agents/structured-v4-10m`.
+No evaluated candidate was modified. v5 is not evaluated and not submitted.
+Design, harness evidence, and the repair-submit decision: `docs/STRUCTURED_V5.md`.
+
+Shape: Sequential[triage, Loop(max_iterations 3)[repair, verify]]. Thinking is off
+via the single knob `sub_agents/thinking.yaml` (`thinking_budget: 0`). Budgets are
+270s (`max_time_minutes: 4.5`), 48 counted calls, and 48 turns. Verify's tools are
+get_status, read_file, edit_file, submit_patch, and the verify-patch skill. Repair
+does not have submit_patch: a text handoff after a submission ends the task before
+verify. src-layout requests tasks are unreliable in the notebook subprocess eval
+and are excluded from promotion decisions.
+
+Archive SHA256 is recorded below after packaging. The evaluated v4-10m archive
+remains `0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.
+
 ## Current development budget variant
 
 User requested10–15minutes after the five-minute pilot. New active development

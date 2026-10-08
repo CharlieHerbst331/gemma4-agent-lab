@@ -23,6 +23,7 @@ without a leaderboard score.
 | [RUN_CATALOG](docs/RUN_CATALOG.md) | All14 run/preflight summaries, cohorts and interpretation caveats |
 | [Structured v4](docs/STRUCTURED_V4.md) | Current architecture, scoped skills and known limitations |
 | [10minute diagnostic](docs/STRUCTURED_V4_10M_DIAGNOSTIC.md) | Latest paired results, stage timing, skill behavior and hygiene |
+| [Structured v5](docs/STRUCTURED_V5.md) | Unevaluated fork: loop, thinking off, import rule, verify-only submit |
 | [Harness review](docs/HARNESS_REVIEW.md) | Evidence-based priorities and experiment roadmap |
 | [RUNBOOK](docs/RUNBOOK.md) | Environment, official GPU evaluation, collection and checked uploads |
 | [COMPETITION](docs/COMPETITION.md) | Contract summary; official rules remain authoritative |
@@ -38,7 +39,8 @@ Research/training plans: [RESEARCH](docs/RESEARCH.md), [PORTFOLIO](docs/PORTFOLI
 | --- | --- | --- |
 | agents/simple-v3 | Uploaded as ref56905832; current server status ERROR, no score | Official public-dev3/13; not a leaderboard score |
 | agents/structured-v4 | Five-minute evaluated development candidate | Diagnostic1/3, zero skill calls, two timeouts |
-| agents/structured-v4-10m | Latest development candidate; not submitted | Same diagnostic3/3, two paired wins; scratch/fallback issues remain |
+| agents/structured-v4-10m | Latest evaluated development candidate; not submitted | Same diagnostic3/3, two paired wins; scratch/fallback issues remain |
+| agents/structured-v5 | Unevaluated fork; not submitted | No score. See docs/STRUCTURED_V5.md |
 
 Latest archive SHA256:
 `0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.
