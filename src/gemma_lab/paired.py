@@ -28,6 +28,7 @@ import json as _json
 import os as _os
 import tarfile as _tarfile
 import time as _time
+import warnings as _warnings
 import zipfile as _zipfile
 from pathlib import Path as _Path
 from pathlib import PurePosixPath
@@ -336,7 +337,8 @@ def token_fields(trace):
     return {key: summary[key] if key in summary else None for key in TOKEN_KEYS}
 
 
-ADK_SUBMISSION_MINIMUM = "0.2.12"
+ADK_SUBMISSION_MINIMUM = "0.2.11"
+ADK_SUBMISSION_WARN_BELOW = "0.2.12"
 
 
 def parse_version(text):
@@ -358,18 +360,24 @@ def parse_version(text):
 
 
 def assert_adk_submission_version(version, minimum=ADK_SUBMISSION_MINIMUM):
-    """Refuse adk-submission older than 0.2.12.
+    """Refuse adk-submission older than 0.2.11.
 
-    0.2.11 rejects thinking_budget 0 because its schema requires the field to be >= 1.
+    Below 0.2.12 a thinking_budget ablation would not be honored.
     """
     found = parse_version(version)
     need = parse_version(minimum)
     if found < need:
         raise RuntimeError(
             f"adk-submission {version} is too old; this notebook requires "
-            f"adk-submission>={minimum}. thinking_budget: 0 is rejected by 0.2.11 "
-            "because that release requires thinking_budget >= 1."
+            f"adk-submission>={minimum}."
         )
+    if found < parse_version(ADK_SUBMISSION_WARN_BELOW):
+        message = (
+            f"adk-submission {version} is below {ADK_SUBMISSION_WARN_BELOW}; "
+            "a thinking_budget ablation would not be honored."
+        )
+        print(message)
+        _warnings.warn(message, UserWarning, stacklevel=2)
     return found
 
 
@@ -598,7 +606,56 @@ def write_json_fsync(path, value):
     temporary.replace(path)
 
 
+def _sandbox_names_in_path(text):
+    names = []
+    for part in str(text).split("/"):
+        if part.startswith("swegemma_sandbox_"):
+            names.append(part)
+    return names
+
+
+def collect_live_sandbox_names(evaluators=None, proc_root="/proc"):
+    """Sandbox directory names still registered or held open by a process."""
+    names = set()
+    for item in (evaluators or {}).values():
+        evaluator = item[1] if isinstance(item, tuple) and len(item) == 2 else item
+        sandbox = getattr(evaluator, "sandbox", None)
+        sandboxes = getattr(sandbox, "_sandboxes", None) or {}
+        records = sandboxes.values() if isinstance(sandboxes, dict) else sandboxes
+        for record in records:
+            root = record.get("root") if isinstance(record, dict) else getattr(record, "root", None)
+            if root is None:
+                continue
+            names.update(_sandbox_names_in_path(root))
+            names.add(_Path(str(root)).name)
+    proc = _Path(proc_root)
+    if proc.is_dir():
+        for pid in proc.iterdir():
+            if not pid.name.isdigit():
+                continue
+            targets = [pid / "cwd"]
+            fd_dir = pid / "fd"
+            if fd_dir.is_dir():
+                try:
+                    targets.extend(fd_dir.iterdir())
+                except OSError:
+                    pass
+            for candidate in targets:
+                try:
+                    target = _os.readlink(candidate)
+                except OSError:
+                    continue
+                names.update(_sandbox_names_in_path(target))
+    return names
+
+
 def clean_stray_sandboxes(root, session_start_epoch, live_names=()):
+    """Delete leftover swegemma sandbox directories, including this session's.
+
+    ``session_start_epoch`` stays in the signature so existing callers keep working.
+    A directory is kept only when its name is in ``live_names``.
+    """
+    del session_start_epoch
     root = _Path(root)
     if not root.is_dir():
         return []
@@ -607,17 +664,42 @@ def clean_stray_sandboxes(root, session_start_epoch, live_names=()):
     for path in root.glob("swegemma_sandbox_*"):
         if not path.is_dir() or path.name in live:
             continue
-        try:
-            modified = path.stat().st_mtime
-        except OSError:
-            continue
-        if session_start_epoch is not None and modified >= session_start_epoch:
-            continue
         import shutil
 
         shutil.rmtree(path, ignore_errors=True)
         removed.append(path.name)
     return removed
+
+
+def _jsonable(value, seen=None):
+    """JSON-ready copy of a trace object. Cycles become a marker."""
+    if seen is None:
+        seen = set()
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    identity = id(value)
+    if identity in seen:
+        return "<cycle>"
+    if isinstance(value, dict):
+        seen.add(identity)
+        return {str(key): _jsonable(item, seen) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        seen.add(identity)
+        return [_jsonable(item, seen) for item in value]
+    dump = getattr(value, "model_dump", None)
+    if callable(dump):
+        seen.add(identity)
+        try:
+            dumped = dump()
+        except Exception:
+            dumped = None
+        if dumped is not None:
+            return _jsonable(dumped, seen)
+    data = getattr(value, "__dict__", None)
+    if isinstance(data, dict):
+        seen.add(identity)
+        return _jsonable(data, seen)
+    return str(value)
 
 
 def _record_digest(field):
@@ -1182,6 +1264,12 @@ def execute_session(
     timing_path = output_dir / "timing.jsonl"
     append_jsonl(events, {"event": "session_start", "t": clock() - session_start})
 
+    def sweep_sandboxes():
+        if sandbox_tmp is None:
+            return []
+        live = collect_live_sandbox_names(evaluators)
+        return clean_stray_sandboxes(sandbox_tmp, session_start_epoch, live)
+
     def event(payload):
         payload = {"t": clock() - session_start, **payload}
         append_jsonl(events, payload)
@@ -1211,6 +1299,7 @@ def execute_session(
                 "task_ids": attempted,
                 "arm": label,
                 "repeat": repeat,
+                "model_load_seconds": model_load_seconds,
             },
         )
 
@@ -1316,6 +1405,7 @@ def execute_session(
                 continue
             if arm not in evaluators or evaluators[arm][0] != repeat:
                 evaluators[arm] = (repeat, rebuild(arm, repeat))
+            sweep_sandboxes()
             dashboard = TimingDashboard()
             t0 = clock()
             t0_epoch = _time.time()
@@ -1362,6 +1452,13 @@ def execute_session(
                 (folder / f"{task.instance_id}.json").write_text(
                     _json.dumps(details, default=str, indent=2, sort_keys=True) + "\n"
                 )
+                trace_obj = getattr(result, "trace", None)
+                if trace_obj is not None:
+                    trace_path = folder / "traces" / f"trace_{task.instance_id}.json"
+                    trace_path.parent.mkdir(parents=True, exist_ok=True)
+                    trace_path.write_text(
+                        _json.dumps(_jsonable(trace_obj), indent=2, sort_keys=True) + "\n"
+                    )
                 (folder / "patches" / f"{task.instance_id}.patch").write_text(patch)
                 walls.append(wall)
             except (KeyboardInterrupt, SystemExit):
@@ -1381,8 +1478,7 @@ def execute_session(
                     evaluators[arm] = (repeat, rebuild(arm, repeat))
                 except Exception:
                     evaluators.pop(arm, None)
-                if sandbox_tmp is not None:
-                    clean_stray_sandboxes(sandbox_tmp, session_start_epoch)
+                sweep_sandboxes()
             cache = None
             if prefix_cache is not None:
                 try:
@@ -1437,6 +1533,7 @@ def execute_session(
         if _session_stopped(status):
             unrun.extend(schedule[index + 1 :])
             break
+        sweep_sandboxes()
         # Early stop is evaluated only between repeats.
         upcoming = schedule[index + 1]["repeat"] if index + 1 < len(schedule) else None
         if early_stop == "round2" and upcoming != pair["repeat"]:
@@ -1454,6 +1551,7 @@ def execute_session(
                 status = f"early_stopped:{loser}"
                 event({"event": "early_stop", "arm": loser, "repeat": pair["repeat"]})
         index += 1
+    sweep_sandboxes()
     if status == "running":
         status = "complete"
     # Preserve an early-stop status when the remaining unpaired work finished.
@@ -1726,16 +1824,27 @@ def _resolved_sampling(documents):
     return sorted(found, key=lambda item: json.dumps(item))
 
 
+def _yaml_compare_value(source, rel):
+    """Resolved YAML, or a bytes sentinel when the file does not parse."""
+    path = Path(source) / rel
+    try:
+        return ("yaml", load_yaml(path, source))
+    except Exception:
+        return ("bytes", hashlib.sha256(path.read_bytes()).hexdigest())
+
+
 def inspect_arm(source):
     source = Path(source).resolve()
     files = {}
+    yaml_values = {}
     for path in sorted(source.rglob("*")):
         if path.is_file() and not any(
             part.startswith(".") for part in path.relative_to(source).parts
         ):
-            files[path.relative_to(source).as_posix()] = hashlib.sha256(
-                path.read_bytes()
-            ).hexdigest()
+            rel = path.relative_to(source).as_posix()
+            files[rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+            if path.suffix in {".yaml", ".yml"}:
+                yaml_values[rel] = _yaml_compare_value(source, rel)
     documents = _agent_documents(source)
     models, adapters = [], []
     for document in documents:
@@ -1760,6 +1869,7 @@ def inspect_arm(source):
         "adapters": sorted(set(adapters)),
         "budgets": normalize_budgets_from_disk(source),
         "settings_includes": sorted(settings_include_paths(source)),
+        "yaml_values": yaml_values,
     }
 
 
@@ -1767,11 +1877,24 @@ def normalize_budgets_from_disk(source):
     return read_arm_budgets(source)
 
 
-def unexpected_file_diffs(files_a, files_b, allowed, ignored=()):
+def unexpected_file_diffs(files_a, files_b, allowed, ignored=(), yaml_a=None, yaml_b=None):
+    """YAML files compare as resolved values. Other files compare as bytes."""
     ignored = set(ignored or ())
+    yaml_a = yaml_a or {}
+    yaml_b = yaml_b or {}
     bad = []
     for rel in sorted(set(files_a) | set(files_b)):
         if rel in ignored or _path_allowed(rel, allowed or []):
+            continue
+        if rel.endswith((".yaml", ".yml")):
+            # Identical bytes cannot be a comment-only or value change in this file.
+            # Included documents are compared on their own paths.
+            if rel in files_a and files_a.get(rel) == files_b.get(rel):
+                continue
+            left = yaml_a.get(rel)
+            right = yaml_b.get(rel)
+            if left is None or right is None or left != right:
+                bad.append(rel)
             continue
         if files_a.get(rel) != files_b.get(rel):
             bad.append(rel)
@@ -1795,7 +1918,14 @@ def assert_arms_compatible(arm_a, arm_b, *, allow_identical, allowed_differences
             f"{arm_a['sampling']} != {arm_b['sampling']}"
         )
     ignored = set(arm_a.get("settings_includes") or ()) | set(arm_b.get("settings_includes") or ())
-    diffs = unexpected_file_diffs(arm_a["files"], arm_b["files"], allowed_differences, ignored)
+    diffs = unexpected_file_diffs(
+        arm_a["files"],
+        arm_b["files"],
+        allowed_differences,
+        ignored,
+        arm_a.get("yaml_values"),
+        arm_b.get("yaml_values"),
+    )
     if diffs:
         raise ValueError("Settings differ outside allowed_differences: " + ", ".join(diffs))
     return True

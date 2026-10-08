@@ -1,5 +1,7 @@
 import hashlib
 import json
+import os
+import time
 
 import pytest
 
@@ -9,6 +11,8 @@ from gemma_lab.paired import (
     abort_code,
     build_projection,
     build_schedule,
+    clean_stray_sandboxes,
+    collect_live_sandbox_names,
     early_stop_loser,
     execute_session,
     projection_for_arm,
@@ -301,6 +305,15 @@ def test_timing_tiers_and_projection_math():
     assert blocked["blocked"] is True
 
 
+class Trace:
+    def __init__(self):
+        self.kind = "atif"
+        self.self_ref = self
+
+    def summarize(self):
+        return {"total_tokens": 3, "llm_calls": 1}
+
+
 def test_single_arm_schema_and_check_evaluation(tmp_path):
     def run_evaluate(evaluator, task, dashboard, position, total):
         dashboard.attach_context(
@@ -317,9 +330,9 @@ def test_single_arm_schema_and_check_evaluation(tmp_path):
                 },
             )(),
         )
-        return Result(resolved=True, patch="abc\n")
+        return Result(resolved=True, patch="abc\n", trace=Trace())
 
-    outcome = run_session(tmp_path, ["t1"], run_evaluate, requested_tier=2)
+    outcome = run_session(tmp_path, ["t1"], run_evaluate, requested_tier=2, model_load_seconds=12.5)
     row = outcome["rows"][0]
     single_path = tmp_path / "run" / "results" / "A" / "r1" / "task_results.jsonl"
     single = json.loads(single_path.read_text())
@@ -334,6 +347,14 @@ def test_single_arm_schema_and_check_evaluation(tmp_path):
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     folder = tmp_path / "run" / "results" / "A" / "r1"
     manifest = json.loads((folder / "run_manifest.json").read_text())
+    other_path = tmp_path / "run" / "results" / "B" / "r1" / "run_manifest.json"
+    other = json.loads(other_path.read_text())
+    assert manifest["model_load_seconds"] == 12.5
+    assert other["model_load_seconds"] == 12.5
+    trace = json.loads((folder / "traces" / "trace_t1.json").read_text())
+    assert trace["kind"] == "atif"
+    assert trace["self_ref"] == "<cycle>"
+    assert (folder / "task_results.jsonl").is_file()
     manifest["sha256"] = digest
     (folder / "run_manifest.json").write_text(json.dumps(manifest))
     # The session wrote the arm sha, not this zip. Point the manifest at the zip.
@@ -380,3 +401,100 @@ def test_record_mode_refuses_record_mismatch_and_static_scan(tmp_path):
         verify_grading_pins(pins, "enforce", origins)
     assert "setattr" in grading_mutation_findings("setattr(swegemma, 'x', 1)")
     assert grading_mutation_findings("evaluator.evaluate_task(task)\n") == []
+
+
+def test_clean_stray_sandboxes_drops_current_session_leftovers(tmp_path):
+    root = tmp_path / "tmp"
+    root.mkdir()
+    old = root / "swegemma_sandbox_old"
+    stray = root / "swegemma_sandbox_stray"
+    live = root / "swegemma_sandbox_live"
+    for path in (old, stray, live):
+        path.mkdir()
+    now = time.time()
+    os.utime(old, (now - 10_000, now - 10_000))
+    os.utime(stray, (now, now))
+    os.utime(live, (now, now))
+    removed = clean_stray_sandboxes(root, now - 100, live_names={live.name})
+    assert set(removed) == {old.name, stray.name}
+    assert live.is_dir()
+    assert not old.exists()
+    assert not stray.exists()
+
+
+def test_collect_live_sandbox_names_keeps_registered_and_open_dirs(tmp_path):
+    live = tmp_path / "swegemma_sandbox_registered"
+    live.mkdir()
+
+    class Manager:
+        def __init__(self):
+            self._sandboxes = {"1": {"root": str(live)}}
+
+    class Evaluator:
+        def __init__(self):
+            self.sandbox = Manager()
+
+    proc = tmp_path / "proc" / "42"
+    (proc / "fd").mkdir(parents=True)
+    os.symlink("/tmp/swegemma_sandbox_held/workspace", proc / "cwd")
+    os.symlink("/var/swegemma_sandbox_fd", proc / "fd" / "3")
+    names = collect_live_sandbox_names({"A": (1, Evaluator())}, proc_root=tmp_path / "proc")
+    assert live.name in names
+    assert "swegemma_sandbox_held" in names
+    assert "swegemma_sandbox_fd" in names
+
+
+def test_session_sweeps_unregistered_sandboxes_between_arms(tmp_path):
+    root = tmp_path / "sand"
+    root.mkdir()
+    preexisting = root / "swegemma_sandbox_preexisting"
+    preexisting.mkdir()
+    generations = {"A": 0, "B": 0}
+
+    class Manager:
+        def __init__(self, label, generation):
+            path = root / f"swegemma_sandbox_{label}_{generation}"
+            path.mkdir()
+            self.path = path
+            self._sandboxes = {"id": {"root": str(path)}}
+
+    class Evaluator:
+        def __init__(self, label, generation):
+            self.label = label
+            self.sandbox = Manager(label, generation)
+
+    def rebuild(label, repeat):
+        generations[label] += 1
+        return Evaluator(label, generations[label])
+
+    def run_evaluate(evaluator, task, dashboard, position, total):
+        (root / "swegemma_sandbox_orphan").mkdir(exist_ok=True)
+        if evaluator.label == "A":
+            raise RuntimeError("boom")
+        return Result(resolved=True, patch="ok\n")
+
+    schedule = build_schedule(["t1"], repeats=1)
+    arms = {
+        "A": arm_meta(tmp_path, "A", "a" * 64),
+        "B": arm_meta(tmp_path, "B", "b" * 64),
+    }
+    execute_session(
+        schedule=schedule["entries"],
+        tasks={"t1": Task("t1")},
+        rebuild=rebuild,
+        run_evaluate=run_evaluate,
+        output_dir=tmp_path / "run",
+        arms=arms,
+        schedule_sha256=schedule["sha256"],
+        cap_seconds=60,
+        session_budget_seconds=10**9,
+        clock=Clock(),
+        session_start=0,
+        sandbox_tmp=root,
+        session_start_epoch=time.time(),
+    )
+    assert not preexisting.exists()
+    assert not (root / "swegemma_sandbox_orphan").exists()
+    assert not (root / "swegemma_sandbox_A_1").exists()
+    assert (root / "swegemma_sandbox_A_2").is_dir()
+    assert (root / "swegemma_sandbox_B_1").is_dir()

@@ -247,3 +247,54 @@ def test_import_origin_listing_wins_on_disagreement(tmp_path):
     listed = import_origin_risk("psf/requests", ["psf/requests"], list_tar_members(archive))
     assert listed["src_layout"] is True
     assert listed["grading_origin"] == "host-likely"
+
+
+def _compatible(left, right):
+    assert_arms_compatible(
+        left,
+        right,
+        allow_identical=False,
+        allowed_differences=["agent.yaml", "prompts/*"],
+        sha_a="a" * 64,
+        sha_b="b" * 64,
+    )
+
+
+def test_yaml_comments_match_when_values_match(tmp_path):
+    left_root = _arm(tmp_path, "single", thinking_path="thinking.yaml")
+    right_root = _arm(tmp_path / "other", "single", thinking_path="thinking.yaml")
+    original = (left_root / "eval_config.yaml").read_text()
+    (right_root / "eval_config.yaml").write_text("# comment only\n" + original)
+    (left_root / "configs").mkdir()
+    (right_root / "configs").mkdir()
+    (left_root / "configs" / "limits.yaml").write_text("max_bytes: 10\n")
+    (right_root / "configs" / "limits.yaml").write_text("# note\nmax_bytes: 10\n")
+    (left_root / "broken.yaml").write_text("[\n")
+    (right_root / "broken.yaml").write_text("[\n")
+    left = inspect_arm(left_root)
+    right = inspect_arm(right_root)
+    assert left["yaml_values"]["eval_config.yaml"][0] == "yaml"
+    assert left["yaml_values"]["broken.yaml"][0] == "bytes"
+    _compatible(left, right)
+
+
+def test_yaml_value_differences_are_refused(tmp_path):
+    left_root = _arm(tmp_path, "single", thinking_path="thinking.yaml")
+    right_root = _arm(tmp_path / "other", "single", thinking_path="thinking.yaml")
+    (right_root / "eval_config.yaml").write_text(
+        (right_root / "eval_config.yaml").read_text() + "note: changed\n"
+    )
+    with pytest.raises(ValueError, match="eval_config.yaml"):
+        _compatible(inspect_arm(left_root), inspect_arm(right_root))
+    (right_root / "eval_config.yaml").write_text((left_root / "eval_config.yaml").read_text())
+    (left_root / "configs").mkdir()
+    (right_root / "configs").mkdir()
+    (left_root / "configs" / "limits.yaml").write_text("max_bytes: 10\n")
+    (right_root / "configs" / "limits.yaml").write_text("max_bytes: 11\n")
+    with pytest.raises(ValueError, match="configs/limits.yaml"):
+        _compatible(inspect_arm(left_root), inspect_arm(right_root))
+    (right_root / "configs" / "limits.yaml").write_text("max_bytes: 10\n")
+    (left_root / "README.md").write_text("left\n")
+    (right_root / "README.md").write_text("right\n")
+    with pytest.raises(ValueError, match="README.md"):
+        _compatible(inspect_arm(left_root), inspect_arm(right_root))

@@ -166,7 +166,11 @@ are committed. Kaggle notebook/post deferred to owner; no public Kaggle action.
 `gemma-lab notebook-pair`, `pair-schedule`, and `pair-report` live in the toolkit.
 No paired GPU session has been run. `pins_mode` stays `record` until the six grading
 file hashes are confirmed against the official Kaggle wheelhouse; they currently match
-the public happyc0der copy only. The single-arm generator still leaves the starter's
-hard-coded `max_tool_calls = 100` and `max_time_minutes = 5.0` in the notebook. The
-paired notebook sets both from each arm's resolved `eval_config`. Agent trees and the
-recorded archive hashes are unchanged.
+the public happyc0der copy only. max_tool_calls and max_time_minutes are now set
+explicitly from eval_config; previously inherited from the fetched starter. The paired
+notebook sets each arm's caps from that arm's resolved eval_config. adk-submission
+older than 0.2.11 refuses to run, and a version below 0.2.12 warns that a
+thinking_budget ablation would not be honored. The exact version is recorded on the
+pair manifest. Each arm writes `results/<arm>/r<k>/task_results.jsonl`, traces at
+`results/<arm>/r<k>/traces/trace_<id>.json`, and `model_load_seconds` in that arm's
+`run_manifest.json`. Agent trees and the recorded archive hashes are unchanged.

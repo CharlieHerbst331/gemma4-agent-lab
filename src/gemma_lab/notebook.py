@@ -92,6 +92,7 @@ def generate(source, owner, slug, output, task_ids=None, bundle_dataset=None):
         "(WORKING_DIR / 'run_manifest.json').write_text(json.dumps(RUN_PROVENANCE, indent=2))\n"
         "print(f'Loaded {len(tasks)} tasks; evaluating {len(TASK_IDS)} selected tasks')\n"
     )
+    codes[4] = _set_explicit_caps(codes[4], source)
     codes[4] = codes[4].replace(
         "SAMPLE_TASKS = tasks[:2]", "SAMPLE_TASKS = [t for t in tasks if t.instance_id in TASK_IDS]"
     )
@@ -246,6 +247,84 @@ max_tool_calls = 100
 max_time_minutes = 5.0
 """
 
+# max_tool_calls and max_time_minutes are now set explicitly from eval_config;
+# previously inherited from the fetched starter.
+_LIVE_TOOL_CALLS = re.compile(
+    r"^max_tool_calls\s*=\s*int\(eval_section\.get\((['\"])max_tool_calls\1.*\)\)\s*$",
+    re.M,
+)
+_LIVE_TIME_MINUTES = re.compile(
+    r"^max_time_minutes\s*=\s*float\(eval_section\.get\((['\"])max_time_minutes\1.*\)\)\s*$",
+    re.M,
+)
+_PRELUDE_STARTS = (
+    "# Read evaluation settings from the submission's eval_config.yaml\n",
+    "eval_config_file = AGENT_DIR / 'eval_config.yaml'\n",
+    'eval_config_file = AGENT_DIR / "eval_config.yaml"\n',
+)
+_PRELUDE_END = "max_turns = int(turns_raw) if turns_raw is not None else None\n"
+
+
+def _cap_literals(source):
+    from gemma_lab.paired import read_arm_budgets
+
+    budgets = read_arm_budgets(source)
+    return str(int(budgets["max_tool_calls"])), repr(float(budgets["max_time_minutes"]))
+
+
+def _set_explicit_caps(cell, source):
+    """Replace starter cap assignments with literals from the agent eval_config."""
+    replaced = False
+    if _BUDGET_HARDCODE in cell or _LIVE_TOOL_CALLS.search(cell) or _LIVE_TIME_MINUTES.search(cell):
+        calls, minutes = _cap_literals(source)
+        block = f"max_tool_calls = {calls}\nmax_time_minutes = {minutes}\n"
+        if _BUDGET_HARDCODE in cell:
+            cell = cell.replace(_BUDGET_HARDCODE, block, 1)
+            replaced = True
+        if _LIVE_TOOL_CALLS.search(cell) or _LIVE_TIME_MINUTES.search(cell):
+            cell, call_count = _LIVE_TOOL_CALLS.subn(f"max_tool_calls = {calls}", cell, count=1)
+            cell, minute_count = _LIVE_TIME_MINUTES.subn(
+                f"max_time_minutes = {minutes}", cell, count=1
+            )
+            if call_count != 1 or minute_count != 1:
+                raise ValueError(
+                    "Official starter structure changed; unrecognized "
+                    "max_tool_calls/max_time_minutes. Review generator before continuing"
+                )
+            replaced = True
+    if not replaced and ("max_tool_calls" in cell or "max_time_minutes" in cell):
+        raise ValueError(
+            "Official starter structure changed; unrecognized "
+            "max_tool_calls/max_time_minutes. Review generator before continuing"
+        )
+    return cell
+
+
+def _strip_paired_budget_prelude(source):
+    """Drop the starter budget prelude. make_evaluator sets each arm's caps."""
+    start = -1
+    for marker in _PRELUDE_STARTS:
+        found = source.find(marker)
+        if found >= 0:
+            start = found if start < 0 else min(start, found)
+    if start >= 0:
+        end = source.find(_PRELUDE_END, start)
+        if end < 0:
+            raise ValueError(
+                "Official starter structure changed; missing budget prelude end. "
+                "Review generator before continuing"
+            )
+        source = source[:start] + source[end + len(_PRELUDE_END) :]
+    elif _BUDGET_HARDCODE in source:
+        source = source.replace(_BUDGET_HARDCODE, "", 1)
+    if re.search(r"(?m)^max_tool_calls\s*=|^max_time_minutes\s*=", source):
+        raise ValueError(
+            "Official starter structure changed; unrecognized budget prelude. "
+            "Review generator before continuing"
+        )
+    return source
+
+
 _WHEEL_ANCHOR = "# Remove broken cutlass .pth hooks if present"
 _WHEEL_INSERT = """if not any(WHEELHOUSE_DIR.glob('*.whl')):
     matches = [p for p in Path('/kaggle/input').rglob('gemma-4-developer-agent-wheelhouse')
@@ -317,7 +396,6 @@ def generate_pair(
     _require(codes[3], "server_instance.start()", "server start")
     _require(codes[3], "validate_single_declared_model(AGENT_DIR)", "single-model validation")
     _require(codes[3], "discover_adapters(str(AGENT_DIR)", "adapter discovery")
-    _require(codes[4], _BUDGET_HARDCODE, "hard-coded max_tool_calls/max_time_minutes")
     _require(codes[4], "SAMPLE_TASKS = tasks[:2]", "sample task anchor")
     _require(codes[4], "eval_config = EvalConfig(", "EvalConfig")
     _require(codes[4], "for idx, task in enumerate", "task loop")
@@ -476,7 +554,8 @@ def _pair_payload_cell(protocol, packed, cohort_ids, schedule, session_repeats, 
     return (
         "import base64, hashlib, importlib.metadata, io, json, zipfile\n"
         "from swegemma.models import load_tasks\n"
-        "assert_adk_submission_version(importlib.metadata.version('adk-submission'))\n"
+        "_ADK_SUBMISSION_VERSION = importlib.metadata.version('adk-submission')\n"
+        "assert_adk_submission_version(_ADK_SUBMISSION_VERSION)\n"
         "DATA_DIR = Path('/kaggle/input/competitions/gemma-4-developer-agent')\n"
         "WORKING_DIR = Path('/kaggle/working')\n"
         "WORKING_DIR.mkdir(parents=True, exist_ok=True)\n"
@@ -543,6 +622,7 @@ def _pair_payload_cell(protocol, packed, cohort_ids, schedule, session_repeats, 
         "    'session_repeats': SESSION_REPEATS,\n"
         "    'packages': {name: importlib.metadata.version(name) for name in "
         "['swegemma', 'adk-submission', 'adk-eval-core', 'vllm', 'google-adk']},\n"
+        "    'adk_submission_version': _ADK_SUBMISSION_VERSION,\n"
         "    'status': 'loaded',\n"
         "}\n"
         "(WORKING_DIR / 'schedule.json').write_text("
@@ -634,18 +714,7 @@ def _pair_server_cell(source, protocol, pins):
 
 
 def _pair_eval_cell(source, protocol, budgets, skipped):
-    source = source.replace(
-        _BUDGET_HARDCODE,
-        (
-            "# Budgets come from each arm's packed eval_config.\n"
-            "# Starter fallback defaults are not used.\n"
-            "_frozen = ARM_BUDGETS['A']\n"
-            "max_tool_calls = int(_frozen['max_tool_calls'])\n"
-            "max_time_minutes = float(_frozen['max_time_minutes'])\n"
-            "assert max_tool_calls == ARM_BUDGETS['B']['max_tool_calls']\n"
-            "assert max_time_minutes == ARM_BUDGETS['B']['max_time_minutes']\n"
-        ),
-    )
+    source = _strip_paired_budget_prelude(source)
     source = source.replace(
         "SAMPLE_TASKS = tasks[:2]",
         "SAMPLE_TASKS = [t for t in tasks if t.instance_id in TASK_IDS]",
@@ -707,6 +776,7 @@ def server_health():
 
 def restart_model_server():
     _t0 = time.perf_counter()
+    server_instance.stop()
     server_instance.start()
     return time.perf_counter() - _t0
 
@@ -754,4 +824,9 @@ SESSION_RESULT = execute_session(
 )
 predictions = []
 """
-    return source[:start] + driver + source[frame:]
+    result = source[:start] + driver + source[frame:]
+    if "AGENT_DIR" in result:
+        raise ValueError(
+            "Paired eval cell still references AGENT_DIR. Review generator before continuing"
+        )
+    return result

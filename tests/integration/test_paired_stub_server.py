@@ -1,69 +1,107 @@
-"""Opt-in smoke against swegemma's synthetic mock repository.
+"""Opt-in Evaluator run against the stub model server and synthetic mock repo.
 
-Default `make check` deselects this module. Run it with
+Default ``make check`` deselects this module. Run it with
 ``GEMMA_LAB_STUB_SERVER=1 uv run pytest -m stub_server`` once swegemma is installed.
 """
 
+import asyncio
 import inspect
+import json
 import os
-import subprocess
-import sys
+import shutil
+import tarfile
+from pathlib import Path
 
 import pytest
 
 from gemma_lab.stub_server import (
-    apply_tool_calls,
+    ScriptedResponder,
+    StubModelServer,
     is_synthetic_mock,
     mock_task,
-    smoke_server_for_candidate,
+    repair_turns,
     write_mock_repo,
 )
 
 pytestmark = pytest.mark.stub_server
 
-
-def _post(server, text):
-    import json
-    import urllib.request
-
-    body = json.dumps({"messages": [{"role": "user", "content": text}]}).encode()
-    request = urllib.request.Request(
-        server.openai_base_url + "/chat/completions",
-        data=body,
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(request) as response:
-        return json.load(response)
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BASELINE = REPO_ROOT / "agents" / "baseline"
 
 
-def test_swegemma_mock_repo_smoke(tmp_path):
+def _invoke(fn, /, **kwargs):
+    signature = inspect.signature(fn)
+    parameters = signature.parameters
+    if any(item.kind == inspect.Parameter.VAR_KEYWORD for item in parameters.values()):
+        accepted = kwargs
+    else:
+        accepted = {key: value for key, value in kwargs.items() if key in parameters}
+    result = fn(**accepted)
+    if inspect.iscoroutine(result):
+        result = asyncio.run(result)
+    return result
+
+
+def _snapshot(repo, dest):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(dest, "w:gz") as archive:
+        for path in repo.rglob("*"):
+            if path.is_file():
+                archive.add(path, arcname=path.relative_to(repo).as_posix())
+
+
+def test_evaluator_repairs_mock_repo(tmp_path):
     if os.environ.get("GEMMA_LAB_STUB_SERVER") != "1":
         pytest.skip("set GEMMA_LAB_STUB_SERVER=1 to run the harness smoke test")
     pytest.importorskip("swegemma")
-    import swegemma.harness.verification as verification
+    pytest.importorskip("google.adk")
+    pytest.importorskip("litellm")
+    from swegemma.config import EvalConfig
+    from swegemma.evaluate import Evaluator
+    from swegemma.models import load_tasks
+    from swegemma.models.registry import setup_gemma_model_registry
 
-    source = inspect.getsource(verification.verify_task)
-    assert "test/mock_repo" in source
-    assert "123456" in source
-    task = mock_task()
+    instance_id = "mock-calc-001"
+    repo = write_mock_repo(tmp_path / "repo")
+    _snapshot(repo, tmp_path / "snapshots" / f"{instance_id}.tgz")
+    task_row = mock_task(instance_id)
+    task_row["FAIL_TO_PASS"] = ["tests/test_calc.py"]
+    task_row["PASS_TO_PASS"] = []
+    task_row["test_patch"] = ""
+    tasks_path = tmp_path / "tasks.jsonl"
+    tasks_path.write_text(json.dumps(task_row) + "\n")
+    task = load_tasks(tasks_path)[0]
     assert is_synthetic_mock(task)
-    root = write_mock_repo(tmp_path / "repo")
-    candidate = tmp_path / "candidate"
-    candidate.mkdir()
-    server, marker = smoke_server_for_candidate(candidate, behavior="repair")
+
+    submission = tmp_path / "candidate"
+    shutil.copytree(BASELINE, submission)
+    server = StubModelServer(ScriptedResponder({"": repair_turns()}))
+    server.start()
     try:
-        first = _post(server, marker)
-        apply_tool_calls(root, first["choices"][0]["message"])
-        second = _post(server, marker)
-        name = second["choices"][0]["message"]["tool_calls"][0]["function"]["name"]
-        assert name == "submit_patch"
+        registered = setup_gemma_model_registry(api_base=server.openai_base_url, api_key="EMPTY")
+        models = registered if registered is not None else ["gemma-4-31b-it-qat-w4a16-ct"]
+        config = _invoke(
+            EvalConfig,
+            tasks_path=tasks_path,
+            snapshots_dir=tmp_path / "snapshots",
+            results_dir=tmp_path / "results",
+            submission_dir=submission,
+            models=models,
+            sandbox="subprocess",
+            timeout_seconds=120,
+            max_time_minutes=2.0,
+            max_tool_calls=8,
+            max_turns=4,
+            verbose=False,
+        )
+        evaluator = Evaluator(config)
+        result = _invoke(
+            evaluator.evaluate_task,
+            task=task,
+            task_index=1,
+            total_tasks=1,
+        )
     finally:
         server.close()
-    completed = subprocess.run(
-        [sys.executable, "-c", "from mockpkg.calc import add; assert add(1, 2) == 3"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr
+    assert bool(getattr(result, "resolved", False))
+    assert server.responder.requests
