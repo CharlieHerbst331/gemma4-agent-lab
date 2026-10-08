@@ -84,13 +84,20 @@ and rich are not affected by this shadowing. Host dependency versions
 ## Archive
 
 Packed with `uv run gemma-lab pack agents/single-v1 --output artifacts/single-v1/submission.zip`.
-The zip is gitignored. SHA256 is recorded below after packaging and is not a
-benchmark result.
+The zip is gitignored. The SHA256 is of the archive contents, not a benchmark result.
+Portable validation returned `{"files": 9, "portable_checks": "passed"}`.
 
-Archive SHA256: `PENDING`.
+Archive SHA256: `6b359d83dc78f90feb0027c40e38a026ad7c1201ee1d0b623fa486fcef8914dd`.
 
-Existing documented archives were re-packed only to confirm they did not change.
-They are not replaced by this candidate.
+Re-packed existing archives and compared them to the documented hashes. All three
+matched, so those candidates are unchanged:
+
+- structured-v4-10m `0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`
+- structured-v4 `01568061ee105be99a51af1bca592dd59756db9184dfada735c0e3074ae7e77e`
+- simple-v3 `50d7b69dd4d0f6a5b4925bda919f69e57196b72337190bd6073be95591ff2646`
+
+`make check` on this tree: ruff check passed, ruff format reported 74 files already
+formatted, pytest reported 88 passed.
 
 ## Reproduce
 

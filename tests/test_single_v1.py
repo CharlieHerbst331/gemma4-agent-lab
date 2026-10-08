@@ -103,7 +103,8 @@ def test_single_agent_matches_v5_control_knobs():
     ]
     source = (CANDIDATE / "agent.yaml").read_text()
     assert source.count("thinking_budget:") == 1
-    assert "0.2" not in source
+    assert "temperature: 0.2" not in source
+    assert sampling["temperature"] != 0.2
     assert "SequentialAgent" not in source and "LoopAgent" not in source
     budgets = load_yaml(CANDIDATE / "eval_config.yaml", CANDIDATE)["evaluation"]
     assert budgets["max_time_minutes"] * 60 == 270
@@ -112,7 +113,7 @@ def test_single_agent_matches_v5_control_knobs():
     assert 40 <= budgets["max_tool_calls"] <= 60
     assert 40 <= budgets["max_turns"] <= 60
     assert budgets["timeout_seconds"] == 300
-    prompt = root["instruction"]
+    prompt = " ".join(root["instruction"].split())
     for phrase in [
         "top 3 candidate files",
         "12 counted calls",
