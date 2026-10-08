@@ -10,8 +10,11 @@ source `agents/structured-v4-10m`:10min per task,80 counted tool calls,60 model 
 changes. Candidate commit `b005268`, archive SHA256
 `0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.
 Archive `artifacts/structured-v4-10m/submission.zip`; same-cohort official notebook
-prepared at `notebooks/generated/structured-v4-10m-diagnostic` (not executed).
-Portable validation/packaging passed; no new performance result or submission. Original
+executed from `notebooks/generated/structured-v4-10m-diagnostic`.
+Private official run: https://www.kaggle.com/code/charlesaherbst/gemma4-structured-v4-10m-diagnostic
+(v1 QUEUED/RUNNING); collector/output `runs/kaggle/structured-v4-10m-diagnostic-v1`.
+Same frozen diagnostic IDs: fastapi_11194,fastapi_14786,rich_3454. Portable validation
+passed and local archive exactly matches notebook hash. Results pending; no submission. Original
 five-minute candidate, archive and results remain unchanged. The two diagnostic
 failures explicitly report session timeout, not single-command timeout. The12hour
 competition-wide generation limit still applies; longer caps require runtime evidence.
