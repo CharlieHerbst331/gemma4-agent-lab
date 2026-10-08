@@ -160,3 +160,13 @@ Public GitHub visibility and unauthenticated source/document access are verified
 Publication checks:66tests/lint/format;160historical source blobs, no matching secret
 patterns or forbidden tracked data/artifacts. Release handoff documents and evidence
 are committed. Kaggle notebook/post deferred to owner; no public Kaggle action.
+
+## Paired notebook toolkit
+
+`gemma-lab notebook-pair`, `pair-schedule`, and `pair-report` live in the toolkit.
+No paired GPU session has been run. `pins_mode` stays `record` until the six grading
+file hashes are confirmed against the official Kaggle wheelhouse; they currently match
+the public happyc0der copy only. The single-arm generator still leaves the starter's
+hard-coded `max_tool_calls = 100` and `max_time_minutes = 5.0` in the notebook. The
+paired notebook sets both from each arm's resolved `eval_config`. Agent trees and the
+recorded archive hashes are unchanged.
