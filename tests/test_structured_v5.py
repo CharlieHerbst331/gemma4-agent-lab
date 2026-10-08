@@ -189,8 +189,16 @@ def test_v5_memory_and_lookup_roundtrip(workspace):
         ("pkg/test.py", False),
         ("testing/helper.py", True),
         ("Testing/helper.py", True),
+        ("pkg/testing/helper.py", True),
+        ("TESTS/helper.py", True),
+        ("src/TEST/util.py", True),
+        ("deep/TESTING/mod.py", True),
+        ("mytesting/helper.py", False),
+        ("testing/data.txt", False),
         ("tests/data.json", False),
         ("tests/notes.md", False),
+        ("tests.py", False),
+        ("test_foo.txt", False),
         ("pytest.ini", True),
         ("pkg/pytest.ini", True),
         ("pyproject.toml", True),
@@ -198,12 +206,17 @@ def test_v5_memory_and_lookup_roundtrip(workspace):
         ("tox.ini", True),
         ("pkg/tox.ini", True),
         (".pytest.ini", True),
+        ("nested/sub/.pytest.ini", True),
         ("conftest.py", True),
         ("pkg/conftest.py", True),
         ("sitecustomize.py", True),
+        ("a/b/sitecustomize.py", True),
         ("usercustomize.py", True),
+        ("a/b/usercustomize.py", True),
         ("_swegemma_stubs.py", True),
+        ("vendor/_swegemma_stubs.py", True),
         ("src/_extra.pth", True),
+        ("hooks/vendor/extra.pth", True),
         ("test_foo.py", True),
         ("pkg/test_extra.py", True),
         ("foo_test.py", True),
@@ -248,6 +261,30 @@ def test_audit_flags_nested_protected_paths_and_not_implementation(workspace):
         "pkg/pytest.ini",
         "tox.ini",
     } <= set(result["forbidden"])
+
+
+def test_audit_flags_import_hooks_and_case_insensitive_test_dirs(workspace):
+    root, _ = workspace
+    files = [
+        "pkg/widget_test.py",
+        "src/testing/helper.py",
+        "TESTS/helper.py",
+        "deep/TESTING/mod.py",
+        "nested/sub/.pytest.ini",
+        "hooks/sitecustomize.py",
+        "hooks/usercustomize.py",
+        "hooks/_swegemma_stubs.py",
+        "hooks/vendor/extra.pth",
+    ]
+    for name in files:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# grading reset\n")
+    (root / "hooks/notes.txt").write_text("not protected\n")
+    result = check.audit(root)
+    assert set(files) <= set(result["forbidden"])
+    assert "hooks/notes.txt" in result["untracked"]
+    assert "hooks/notes.txt" not in result["forbidden"]
 
 
 def test_repro_reports_workspace_and_default_import_origin(workspace):
