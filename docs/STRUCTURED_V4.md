@@ -85,3 +85,12 @@ resolution. Pilot results are mechanism/infrastructure checks, not generalizatio
 Before attributing gains, compare a triage-only control and/or a matched single agent;
 v4 bundles triage, history isolation and skills. Then evaluate identical full dev IDs.
 Keep holdout reserved. Do not promote or submit v4 merely because helper tests pass.
+
+## Official diagnostic completed
+
+See `STRUCTURED_V4_DIAGNOSTIC.md`:1/3 on the frozen diagnostic tasks versus prior
+v3's2/3 on the same IDs; two timeouts and zero skill invocations. Tool-free triage
+completed, but repair bypassed helpers and introduced scratch/test edits. A separate
+CPU official SDK preflight exposes the tools and executes all three helpers correctly.
+The model's discretionary tool selection remains the bottleneck. Candidate is not
+promoted or submitted; no improved efficacy claim is justified from this pilot.

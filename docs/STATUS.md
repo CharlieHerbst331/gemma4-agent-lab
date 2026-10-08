@@ -12,15 +12,20 @@ Last updated: October 7, 2026 (Pacific).
 - Candidate commit: `62f8bab`; archive SHA256:
   `01568061ee105be99a51af1bca592dd59756db9184dfada735c0e3074ae7e77e`.
 - Archive: `artifacts/structured-v4/submission.zip`;14 files, pure declarative agent
-  plus sandboxed skill resources. Diagnostic official notebook prepared at
-  `notebooks/generated/structured-v4-diagnostic` (not pushed/executed), frozen
+  plus sandboxed skill resources. Diagnostic official notebook executed at
+  https://www.kaggle.com/code/charlesaherbst/gemma4-structured-v4-diagnostic (v1 COMPLETE), frozen
   dev IDs `fastapi_11194`, `fastapi_14786`, `rich_3454`. Holdout untouched.
 - Design/use/limits: `docs/STRUCTURED_V4.md`. All64 tests plus lint/format pass; skill
-  manifests validated. Official GPU execution/performance remains unmeasured.
-- Submitted v3 and its archive are unchanged. No new submission or GPU run launched
-  for this implementation. Current v3 server history still reports PENDING.
-- Next: official compilation/skill-execution pilot on frozen dev IDs, then controlled
-  ablations and same-cohort evaluation. Do not claim skills improved scores from unit tests.
+  manifests validated. Official diagnostic:1/3, two timeouts, zero skill-tool invocations; see below.
+- Submitted v3 and its archive are unchanged. No new competition submission.
+  Its last checked server history reported PENDING.
+- Official SDK CPU preflight confirms compiled skill tools are exposed and all three
+  helper scripts execute successfully; it is synthetic validation, not model performance.
+- Diagnostic report: `docs/STRUCTURED_V4_DIAGNOSTIC.md`. V4 regressed on rich_3454;
+  do not promote. Next experiment: restrict raw-tool bypasses and explicitly activate
+  scoped operations, with a triage-only control. Do not add further skills as a remedy.
+- Outputs: `runs/kaggle/structured-v4-diagnostic-v1`, `structured-v4-sdk-preflight-v3`.
+  No active collector, GPU job or recurring automation remains.
 
 ## Active work
 
