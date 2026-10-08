@@ -7,7 +7,11 @@ Last updated: October 7, 2026 (Pacific).
 User requested10–15minutes after the five-minute pilot. New active development
 source `agents/structured-v4-10m`:10min per task,80 counted tool calls,60 model turns,
 300s command cap. Repair's soft handoff target scales180→360s. No other agent/skill
-changes. This is locally validated/packaged, not measured or submitted. Original
+changes. Candidate commit `b005268`, archive SHA256
+`0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.
+Archive `artifacts/structured-v4-10m/submission.zip`; same-cohort official notebook
+prepared at `notebooks/generated/structured-v4-10m-diagnostic` (not executed).
+Portable validation/packaging passed; no new performance result or submission. Original
 five-minute candidate, archive and results remain unchanged. The two diagnostic
 failures explicitly report session timeout, not single-command timeout. The12hour
 competition-wide generation limit still applies; longer caps require runtime evidence.
