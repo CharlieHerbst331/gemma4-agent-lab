@@ -122,10 +122,12 @@ load + 129 × (cap + overhead) above 12 hours warns and does not block.
 findings export keeps that marker plus the pack provenance fields. `gemma-lab
 hygiene candidate|run|patch` audits patches offline. Rule IDs, the 0.2.7
 checkout-abort reason H2 stays a block, and the trace paths are in
-`docs/HYGIENE.md`. It does not edit agents or raw run files. The CLI writes
-`hygiene.json` next to the input, but `hygiene.json` and `projection.json` are
-gitignored at any depth and omitted from packs, so a report left inside a
-candidate does not change the archive. Candidate lint is not wired into submit
+`docs/HYGIENE.md`. It does not edit agents or raw run files. `hygiene run DIR`
+writes `DIR/hygiene.json`, and `hygiene candidate` and `hygiene patch` write
+`./hygiene.json` unless `--output` is given. `hygiene.json` and
+`projection.json` are gitignored at any depth and omitted from packs, so a
+report left inside a candidate does not change the archive. Candidate lint is
+not wired into submit
 or pack. Frozen structured-v4 and structured-v4-10m block that lint on
 `G2.superset`. baseline, simple-v1, and simple-v2 block it on `G0.write_file`.
 
