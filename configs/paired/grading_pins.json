@@ -1,0 +1,18 @@
+{
+  "files": {
+    "swegemma/harness/verification.py": "5602f33acb49062de8e99073199745679d86445297be9dd075ccec60c41b60dd",
+    "swegemma/harness/container_setup.py": "3192acdce35f2d0bd0b191186851b46c251390af16b7f139a1640e16fb1d862c",
+    "swegemma/evaluate.py": "96a46f49267ffcf861f7f90b98efbe828d03f27553ceefce745819028589de1e",
+    "swegemma/harness/agent_runner.py": "dff7d2505340633c3fe50ba7073f2609fb2b41becd69c356d9af25cc4c1f98dd",
+    "swegemma/sandbox/subprocess.py": "a26e9265d93f0387dd0a820ea451d1c530884bebca41583738f3ab2cc31df1f2",
+    "adk_eval_core/sandbox/subprocess_sandbox.py": "09dc213bd71f4ad33a2a403732271efbc78bd09db2d2999817d55f4e630ac6fc"
+  },
+  "pytest_command_literals": [
+    "f'cd /workspace && PYTHONSAFEPATH=1 PYTHONNOUSERSITE=1 python3 -s -m pytest {test_files_str} '",
+    "f'--junitxml={junit_xml_path} '",
+    "'-p no:anyio -o timeout=0 '",
+    "'-o python_classes=\"Test* *Test\" -q'"
+  ],
+  "pins_mode": "record",
+  "note": "Bootstrap hashes match the public swegemma 0.2.7 / adk_eval_core 0.1.0 RECORD copy. pins_mode stays record until Verification confirms the official wheelhouse."
+}

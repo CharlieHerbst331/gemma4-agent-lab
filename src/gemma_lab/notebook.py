@@ -205,3 +205,553 @@ for idx, task in enumerate(SAMPLE_TASKS, start=1):
         },
     )
     return {"folder": str(output), "kernel": meta["id"], "bundle_sha256": provenance["sha256"]}
+
+
+def _require(source, needle, label):
+    if needle not in source:
+        raise ValueError(
+            "Official starter structure changed; missing "
+            f"{label}. Review generator before continuing"
+        )
+    return source
+
+
+def _call_span(source, token):
+    start = source.index(token)
+    paren = source.index("(", start)
+    depth = 0
+    for index in range(paren, len(source)):
+        char = source[index]
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return start, index + 1
+    raise ValueError("Official starter structure changed; review generator before continuing")
+
+
+def _replace_required(source, options, replacement, label):
+    for option in options:
+        if option in source:
+            return source.replace(option, replacement, 1)
+    raise ValueError(
+        f"Official starter structure changed; missing {label}. Review generator before continuing"
+    )
+
+
+_BUDGET_HARDCODE = """# max_tool_calls = int(eval_section.get('max_tool_calls', 100))
+max_tool_calls = 100
+# max_time_minutes = float(eval_section.get('max_time_minutes', 5.0))
+max_time_minutes = 5.0
+"""
+
+_WHEEL_ANCHOR = "# Remove broken cutlass .pth hooks if present"
+_WHEEL_INSERT = """if not any(WHEELHOUSE_DIR.glob('*.whl')):
+    matches = [p for p in Path('/kaggle/input').rglob('gemma-4-developer-agent-wheelhouse')
+               if p.is_dir() and any(p.glob('*.whl'))]
+    assert len(matches) == 1, ('Expected one mounted official wheelhouse',
+                              list(Path('/kaggle/input').iterdir()))
+    WHEELHOUSE_DIR = matches[0]
+
+# Remove broken cutlass .pth hooks if present"""
+
+
+def generate_pair(
+    protocol_path,
+    owner,
+    slug,
+    output,
+    repeats_in_session="1",
+    prior_run=None,
+    bundle_datasets=None,
+):
+    """Generate a two-arm notebook. generate() is not used and its cells stay unchanged."""
+    from gemma_lab.paired import (
+        ORDER_RULE,
+        PYTEST_COMMAND_LITERALS,
+        assert_arms_compatible,
+        build_schedule,
+        inspect_arm,
+        load_cohort_ids,
+        load_grading_pins,
+        load_protocol,
+        notebook_runtime_source,
+        parse_repeats,
+    )
+
+    if not re.fullmatch(r"[a-zA-Z0-9_-]+", owner) or not re.fullmatch(r"[a-z0-9-]+", slug):
+        raise ValueError("Invalid Kaggle owner or notebook slug")
+    protocol = load_protocol(protocol_path)
+    if protocol.get("pins_mode") not in {"record", "enforce"}:
+        raise ValueError("pins_mode must be record or enforce")
+    pins = load_grading_pins()
+    if list(pins.get("pytest_command_literals") or []) != list(PYTEST_COMMAND_LITERALS):
+        raise ValueError("grading pin pytest literals do not match the runtime constant")
+    cohort_ids = load_cohort_ids(protocol["cohort"]["path"])
+    repeats = int(protocol["repeats"])
+    session_repeats = parse_repeats(repeats_in_session, repeats)
+    schedule = build_schedule(
+        cohort_ids, repeats=repeats, shuffle_seed=protocol.get("shuffle_seed")
+    )
+    if schedule["rule"] != ORDER_RULE:
+        raise ValueError("Schedule rule drifted from the approved parity rule")
+    skipped = None
+    if prior_run is not None:
+        prior = json.loads((Path(prior_run) / "pair_manifest.json").read_text())
+        prior_status = str(prior.get("status") or "")
+        for prefix in ("early_stopped:", "aborted_arm:"):
+            if prior_status.startswith(prefix):
+                skipped = prior_status.split(":", 1)[1]
+                if skipped not in {"A", "B"}:
+                    raise ValueError(f"Prior run stopped an unknown arm: {prior_status}")
+    starter = Path("vendor/official/notebook/getting-started-gemma-4-developer-agent.ipynb")
+    metadata = Path("vendor/official/notebook/kernel-metadata.json")
+    if not starter.exists():
+        raise ValueError("Run gemma-lab fetch-starter first")
+    notebook = json.loads(starter.read_text())
+    codes = ["".join(cell["source"]) for cell in notebook["cells"] if cell["cell_type"] == "code"]
+    if len(codes) != 6 or "SAMPLE_SUBMISSION_SRC" not in codes[1]:
+        raise ValueError("Official starter structure changed; review generator before continuing")
+    _require(codes[0], _WHEEL_ANCHOR, "wheelhouse anchor")
+    _require(codes[3], "server_instance.start()", "server start")
+    _require(codes[3], "validate_single_declared_model(AGENT_DIR)", "single-model validation")
+    _require(codes[3], "discover_adapters(str(AGENT_DIR)", "adapter discovery")
+    _require(codes[4], _BUDGET_HARDCODE, "hard-coded max_tool_calls/max_time_minutes")
+    _require(codes[4], "SAMPLE_TASKS = tasks[:2]", "sample task anchor")
+    _require(codes[4], "eval_config = EvalConfig(", "EvalConfig")
+    _require(codes[4], "for idx, task in enumerate", "task loop")
+    _require(codes[4], "submission_df =", "submission frame")
+    _require(codes[4], "sandbox='subprocess'", "subprocess sandbox")
+    _require(
+        codes[5],
+        "zip_path = Path(shutil.make_archive(str(zip_base), 'zip', root_dir=AGENT_DIR))",
+        "archive rebuild",
+    )
+    datasets = dict(bundle_datasets or {})
+    for label, spec in protocol["arms"].items():
+        if spec.get("bundle_dataset"):
+            datasets.setdefault(label, spec["bundle_dataset"])
+    output.mkdir(parents=True, exist_ok=True)
+    packed = {}
+    with tempfile.TemporaryDirectory() as tmp:
+        for label in ("A", "B"):
+            archive = Path(tmp) / f"{label}.zip"
+            manifest = pack(protocol["arms"][label]["source"], archive)
+            expected = protocol["arms"][label].get("expected_sha256")
+            if expected and manifest["sha256"] != expected:
+                raise ValueError(f"Arm {label} archive {manifest['sha256']} != pinned {expected}")
+            manifest["budgets"] = inspect_arm(protocol["arms"][label]["source"])["budgets"]
+            manifest["payload_setup"] = _arm_payload_setup(label, archive, datasets.get(label))
+            manifest["payload_bytes"] = archive.read_bytes()
+            packed[label] = manifest
+    inspected = {label: inspect_arm(protocol["arms"][label]["source"]) for label in ("A", "B")}
+    assert_arms_compatible(
+        inspected["A"],
+        inspected["B"],
+        allow_identical=bool(protocol.get("allow_identical")),
+        allowed_differences=list(protocol.get("allowed_differences") or []),
+        sha_a=packed["A"]["sha256"],
+        sha_b=packed["B"]["sha256"],
+    )
+    budgets = {label: packed[label]["budgets"] for label in ("A", "B")}
+    codes[0] = (
+        "import time\nSESSION_WALL_T0 = time.time()\nSESSION_PERF_T0 = time.perf_counter()\n"
+        + codes[0].replace(_WHEEL_ANCHOR, _WHEEL_INSERT)
+    )
+    codes[1] = _pair_payload_cell(protocol, packed, cohort_ids, schedule, session_repeats, pins)
+    codes[3] = _pair_server_cell(codes[3], protocol, pins)
+    codes[4] = _pair_eval_cell(codes[4], protocol, budgets, skipped)
+    codes[5] = (
+        "import hashlib\n"
+        "for _label, _expected in ARM_SHA.items():\n"
+        "    _blob = (WORKING_DIR / 'arms' / _label / 'submission.zip').read_bytes()\n"
+        "    assert hashlib.sha256(_blob).hexdigest() == _expected\n"
+        "print('Paired archives remain the hash-pinned payloads')\n"
+    )
+    runtime = notebook_runtime_source()
+    compile(runtime, "paired_runtime", "exec")
+    notebook["cells"] = [
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": [
+                "# Gemma 4 Agent Lab — paired offline evaluation\n",
+                f"Adapted from the [official starter](https://www.kaggle.com/code/{STARTER}).\n",
+                "Two hash-pinned arms share one vLLM server. Grading is the official evaluator. "
+                "This private notebook does not submit to the leaderboard.\n",
+            ],
+        },
+        code_cell(codes[0]),
+        code_cell(runtime),
+        code_cell(codes[1]),
+        code_cell(codes[2]),
+        code_cell(codes[3]),
+        code_cell(codes[4]),
+        code_cell(codes[5]),
+        code_cell("server_instance.stop()\n"),
+    ]
+    for cell in notebook["cells"]:
+        if cell["cell_type"] == "code":
+            compile("".join(cell["source"]), "generated_notebook", "exec")
+    write_json(output / "evaluation.ipynb", notebook)
+    meta = json.loads(metadata.read_text())
+    meta.update(
+        {
+            "id": f"{owner}/{slug}",
+            "title": slug.replace("-", " "),
+            "code_file": "evaluation.ipynb",
+            "is_private": True,
+            "enable_gpu": True,
+            "enable_internet": False,
+        }
+    )
+    meta.pop("id_no", None)
+    meta.setdefault("dataset_sources", [])
+    for dataset in datasets.values():
+        if dataset not in meta["dataset_sources"]:
+            meta["dataset_sources"].append(dataset)
+    write_json(output / "kernel-metadata.json", meta)
+    arm_provenance = {}
+    for label, manifest in packed.items():
+        arm_provenance[label] = {
+            "sha256": manifest["sha256"],
+            "budgets": manifest["budgets"],
+            "files": manifest["files"],
+            "source": manifest["source"],
+            "git_revision": manifest["git_revision"],
+        }
+    record = {
+        "generated_at": now(),
+        "git_revision": git_revision(),
+        "starter_sha256": sha256(starter),
+        "protocol_sha256": protocol["_sha256"],
+        "protocol_path": protocol["_path"],
+        "schedule_sha256": schedule["sha256"],
+        "order_rule": ORDER_RULE,
+        "repeats_in_session": session_repeats,
+        "skipped_arm": skipped,
+        "pins_mode": protocol["pins_mode"],
+        "arms": arm_provenance,
+        "status": "generated",
+    }
+    write_json(output / "provenance.json", record)
+    write_json(
+        output / "schedule.json",
+        {"sha256": schedule["sha256"], "rule": schedule["rule"], "entries": schedule["entries"]},
+    )
+    write_json(output / "pair_manifest.json", record)
+    return {
+        "folder": str(output),
+        "kernel": meta["id"],
+        "schedule_sha256": schedule["sha256"],
+        "arms": {label: packed[label]["sha256"] for label in ("A", "B")},
+    }
+
+
+def _arm_payload_setup(label, archive, bundle_dataset):
+    if bundle_dataset:
+        if not re.fullmatch(r"[a-zA-Z0-9_-]+/[a-z0-9-]+", bundle_dataset):
+            raise ValueError("Expected bundle dataset reference owner/slug")
+        dataset_slug = bundle_dataset.split("/", 1)[1]
+        return (
+            f"matches = list(Path('/kaggle/input').rglob('{dataset_slug}.zip'))\n"
+            "assert len(matches) == 1, 'Expected exactly one uploaded bundle'\n"
+            f"payload_{label} = matches[0].read_bytes()\n"
+        )
+    if archive.stat().st_size > 5 * 1024**2:
+        raise ValueError(
+            f"Arm {label} bundle >5 MiB: upload a private bundle dataset and pass --bundle-dataset"
+        )
+    encoded = base64.b64encode(archive.read_bytes()).decode()
+    return f"payload_{label} = base64.b64decode({encoded!r})\n"
+
+
+def _pair_payload_cell(protocol, packed, cohort_ids, schedule, session_repeats, pins):
+    files = {label: packed[label]["files"] for label in ("A", "B")}
+    budgets = {label: packed[label]["budgets"] for label in ("A", "B")}
+    shas = {label: packed[label]["sha256"] for label in ("A", "B")}
+    setups = "\n".join(packed[label]["payload_setup"] for label in ("A", "B"))
+    repos = load_import_repos()
+    return (
+        "import base64, hashlib, importlib.metadata, io, json, zipfile\n"
+        "from swegemma.models import load_tasks\n"
+        "assert_adk_submission_version(importlib.metadata.version('adk-submission'))\n"
+        "DATA_DIR = Path('/kaggle/input/competitions/gemma-4-developer-agent')\n"
+        "WORKING_DIR = Path('/kaggle/working')\n"
+        "WORKING_DIR.mkdir(parents=True, exist_ok=True)\n"
+        f"ARM_SHA = {shas!r}\n"
+        f"ARM_FILES = {files!r}\n"
+        f"ARM_BUDGETS = {budgets!r}\n"
+        f"ARM_DIRS = {{label: WORKING_DIR / 'candidates' / ARM_SHA[label][:12] "
+        f"for label in ('A', 'B')}}\n"
+        f"{setups}"
+        "for _label in ('A', 'B'):\n"
+        "    install_arm(globals()[f'payload_{_label}'], ARM_SHA[_label], "
+        "ARM_DIRS[_label], ARM_FILES[_label])\n"
+        "    _zip = WORKING_DIR / 'arms' / _label / 'submission.zip'\n"
+        "    _zip.parent.mkdir(parents=True, exist_ok=True)\n"
+        "    _zip.write_bytes(globals()[f'payload_{_label}'])\n"
+        "TASKS_PATH = DATA_DIR / 'tasks.jsonl'\n"
+        "tasks = load_tasks(TASKS_PATH)\n"
+        f"TASK_IDS = {cohort_ids!r}\n"
+        "assert set(TASK_IDS) <= {t.instance_id for t in tasks}, 'Unknown task IDs'\n"
+        f"REPEATS = {int(protocol['repeats'])!r}\n"
+        f"SHUFFLE_SEED = {protocol.get('shuffle_seed')!r}\n"
+        f"SCHEDULE_SHA = {schedule['sha256']!r}\n"
+        "RECOMPUTED = build_schedule(TASK_IDS, repeats=REPEATS, shuffle_seed=SHUFFLE_SEED)\n"
+        "assert RECOMPUTED['sha256'] == SCHEDULE_SHA\n"
+        f"SESSION_REPEATS = {list(session_repeats)!r}\n"
+        "SESSION_SCHEDULE = [entry for entry in RECOMPUTED['entries'] "
+        "if entry['repeat'] in SESSION_REPEATS]\n"
+        f"PROTOCOL_SHA = {protocol['_sha256']!r}\n"
+        f"PINS_MODE = {protocol['pins_mode']!r}\n"
+        f"GRADING_PINS = {pins['files']!r}\n"
+        f"PYTEST_LITERALS = {list(pins['pytest_command_literals'])!r}\n"
+        f"SRC_LAYOUT_REPOS = {repos!r}\n"
+        f"EXCLUDE_IMPORT_ORIGIN = {bool(protocol.get('exclude_import_origin_risk', True))!r}\n"
+        f"EARLY_STOP = {protocol.get('early_stop')!r}\n"
+        f"SESSION_BUDGET_SECONDS = {int(protocol['session_budget_seconds'])!r}\n"
+        f"PAIR_PAD_SECONDS = {int(protocol.get('pair_start_pad_seconds', 60))!r}\n"
+        f"TIMING_TIER = {int(protocol.get('timing_tier', 2))!r}\n"
+        "TASK_FILE_SHA = hashlib.sha256(TASKS_PATH.read_bytes()).hexdigest()\n"
+        f"EXPECTED_TASK_SHA = {protocol['cohort'].get('task_file_sha256')!r}\n"
+        "if EXPECTED_TASK_SHA:\n"
+        "    assert TASK_FILE_SHA == EXPECTED_TASK_SHA, (TASK_FILE_SHA, EXPECTED_TASK_SHA)\n"
+        "IMPORT_ORIGINS = {}\n"
+        "for _task in tasks:\n"
+        "    if _task.instance_id not in set(TASK_IDS):\n"
+        "        continue\n"
+        "    _members = None\n"
+        "    for _suffix in ('.tar', '.tar.gz', '.tgz'):\n"
+        "        _candidate = DATA_DIR / 'snapshots' / f'{_task.instance_id}{_suffix}'\n"
+        "        if _candidate.is_file():\n"
+        "            _members = list_tar_members(_candidate)\n"
+        "            break\n"
+        "    IMPORT_ORIGINS[_task.instance_id] = import_origin_risk("
+        "        _task.repo, SRC_LAYOUT_REPOS, _members)\n"
+        "MANIFEST = {\n"
+        "    'protocol_sha256': PROTOCOL_SHA,\n"
+        "    'schedule_sha256': SCHEDULE_SHA,\n"
+        "    'order_rule': 'per_task_parity_v1',\n"
+        "    'task_ids': TASK_IDS,\n"
+        "    'task_file_sha256': TASK_FILE_SHA,\n"
+        "    'pins_mode': PINS_MODE,\n"
+        "    'grading_pins': GRADING_PINS,\n"
+        "    'arms': {label: {'sha256': ARM_SHA[label], 'budgets': ARM_BUDGETS[label]} "
+        "for label in ('A', 'B')},\n"
+        "    'session_repeats': SESSION_REPEATS,\n"
+        "    'packages': {name: importlib.metadata.version(name) for name in "
+        "['swegemma', 'adk-submission', 'adk-eval-core', 'vllm', 'google-adk']},\n"
+        "    'status': 'loaded',\n"
+        "}\n"
+        "(WORKING_DIR / 'schedule.json').write_text("
+        "json.dumps(RECOMPUTED, indent=2, sort_keys=True))\n"
+        "(WORKING_DIR / 'pair_manifest.json').write_text("
+        "json.dumps(MANIFEST, indent=2, sort_keys=True))\n"
+        "print(f'Paired schedule {SCHEDULE_SHA[:12]} tasks={len(TASK_IDS)} "
+        "repeats={SESSION_REPEATS}')\n"
+    )
+
+
+def load_import_repos():
+    from gemma_lab.paired import load_import_origin_repos
+
+    return load_import_origin_repos()
+
+
+def _pair_server_cell(source, protocol, pins):
+    source = _replace_required(
+        source,
+        ["declared_model = validate_single_declared_model(AGENT_DIR)\n"],
+        (
+            "declared_models = [validate_single_declared_model(ARM_DIRS[label]) "
+            "for label in ('A', 'B')]\n"
+            "assert declared_models[0] == declared_models[1] == TARGET_MODEL_NAME\n"
+            "declared_model = declared_models[0]\n"
+        ),
+        "declared model",
+    )
+    source = _replace_required(
+        source,
+        [
+            "adapters = discover_adapters(str(AGENT_DIR), "
+            "adapter_extensions=ALLOWED_ADAPTER_EXTENSIONS)\n"
+        ],
+        (
+            "adapter_sets = [discover_adapters(str(ARM_DIRS[label]), "
+            "adapter_extensions=ALLOWED_ADAPTER_EXTENSIONS) for label in ('A', 'B')]\n"
+            "def _adapters_empty(manifest):\n"
+            "    found = getattr(manifest, 'adapters', manifest)\n"
+            "    return not found\n"
+            "assert _adapters_empty(adapter_sets[0]) and _adapters_empty(adapter_sets[1]), "
+            "'LoRA arms are refused in paired v1'\n"
+            "adapters = adapter_sets[0]\n"
+        ),
+        "adapter discovery",
+    )
+    pin_block = (
+        "import importlib.util\n"
+        "_pin_origins = {}\n"
+        "for _module_name, _rel in GRADING_MODULES:\n"
+        "    _spec = importlib.util.find_spec(_module_name)\n"
+        "    if _spec is None or not _spec.origin:\n"
+        "        raise PinError(f'missing grading module {_module_name}')\n"
+        "    _pin_origins[_module_name] = _spec.origin\n"
+        "MANIFEST['grading_observation'] = verify_grading_pins("
+        "GRADING_PINS, PINS_MODE, _pin_origins)\n"
+        "import swegemma.harness.verification as _verification\n"
+        "assert_pytest_command_source("
+        "inspect.getsource(_verification.verify_task), PYTEST_LITERALS)\n"
+    )
+    source = _replace_required(
+        source,
+        ["server_instance.start()\n"],
+        pin_block
+        + "_LOAD_T0 = time.perf_counter()\nserver_instance.start()\n"
+        + "MODEL_LOAD_SECONDS = time.perf_counter() - _LOAD_T0\n"
+        + "MODEL_READY_SECONDS = MODEL_LOAD_SECONDS\n",
+        "server start",
+    )
+    source += (
+        "\nSESSION_OVERHEAD_SECONDS = time.time() - SESSION_WALL_T0\n"
+        "MANIFEST.setdefault('session', []).append({\n"
+        "    'repeats': list(SESSION_REPEATS),\n"
+        "    'model_load_seconds': MODEL_LOAD_SECONDS,\n"
+        "    'model_ready_seconds': MODEL_READY_SECONDS,\n"
+        "    'session_overhead_seconds': SESSION_OVERHEAD_SECONDS,\n"
+        "    'health_blocked_inside_start': True,\n"
+        "})\n"
+        "MANIFEST['hardware'] = {'gpu_count': torch.cuda.device_count(), "
+        "'gpu_names': [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())], "
+        "'tensor_parallel_size': tp_size}\n"
+        "(WORKING_DIR / 'pair_manifest.json').write_text("
+        "json.dumps(MANIFEST, indent=2, sort_keys=True))\n"
+        "append_jsonl(WORKING_DIR / 'events.jsonl', "
+        "{'event': 'server_ready', 'model_load_seconds': MODEL_LOAD_SECONDS})\n"
+    )
+    return source
+
+
+def _pair_eval_cell(source, protocol, budgets, skipped):
+    source = source.replace(
+        _BUDGET_HARDCODE,
+        (
+            "# Budgets come from each arm's packed eval_config.\n"
+            "# Starter fallback defaults are not used.\n"
+            "_frozen = ARM_BUDGETS['A']\n"
+            "max_tool_calls = int(_frozen['max_tool_calls'])\n"
+            "max_time_minutes = float(_frozen['max_time_minutes'])\n"
+            "assert max_tool_calls == ARM_BUDGETS['B']['max_tool_calls']\n"
+            "assert max_time_minutes == ARM_BUDGETS['B']['max_time_minutes']\n"
+        ),
+    )
+    source = source.replace(
+        "SAMPLE_TASKS = tasks[:2]",
+        "SAMPLE_TASKS = [t for t in tasks if t.instance_id in TASK_IDS]",
+    )
+    start, end = _call_span(source, "eval_config = EvalConfig(")
+    config = source[start:end]
+    config = _replace_required(
+        config,
+        ["results_dir=WORKING_DIR / 'results'", 'results_dir=WORKING_DIR / "results"'],
+        "results_dir=results_dir",
+        "results_dir",
+    )
+    config = _replace_required(
+        config,
+        ["submission_dir=AGENT_DIR"],
+        "submission_dir=arm_dir",
+        "submission_dir",
+    )
+    if "sandbox='subprocess'" not in config and 'sandbox="subprocess"' not in config:
+        raise ValueError("Official starter structure changed; missing subprocess sandbox")
+    frame = source.index("submission_df =", end)
+    cap = float(budgets["A"]["max_time_minutes"]) * 60.0
+    indented = "\n".join(("    " + line if line.strip() else line) for line in config.splitlines())
+    safe_config = indented.replace("{", "{{").replace("}", "}}")
+    skipped_literal = repr([] if not skipped else [skipped])
+    driver = f"""def make_evaluator(label, repeat):
+    arm_dir = ARM_DIRS[label]
+    results_dir = WORKING_DIR / 'results' / label / f'r{{repeat}}'
+    results_dir.mkdir(parents=True, exist_ok=True)
+    budgets = ARM_BUDGETS[label]
+    disk = read_arm_budgets(arm_dir)
+    assert disk == budgets, (label, disk, budgets)
+    max_tool_calls = int(budgets['max_tool_calls'])
+    max_time_minutes = float(budgets['max_time_minutes'])
+    timeout_seconds = int(budgets['timeout_seconds'])
+    max_turns = int(budgets['max_turns'])
+    {safe_config}
+    assert eval_config.concurrency == 1
+    assert eval_config.max_tool_calls == max_tool_calls
+    assert eval_config.max_time_minutes == max_time_minutes
+    assert eval_config.sandbox == 'subprocess'
+    return Evaluator(eval_config)
+
+def rebuild(label, repeat):
+    return make_evaluator(label, repeat)
+
+def run_evaluate(evaluator, task, dashboard, task_index, total_tasks):
+    return run_sync(evaluator.evaluate_task, task=task, task_index=task_index,
+                    total_tasks=total_tasks, slot_id=0, dashboard=dashboard)
+
+def server_health():
+    import urllib.request
+    try:
+        with urllib.request.urlopen(
+            server_instance.base_url.rstrip('/') + '/health', timeout=5) as resp:
+            return 200 <= getattr(resp, 'status', 200) < 300
+    except Exception:
+        return False
+
+def restart_model_server():
+    _t0 = time.perf_counter()
+    server_instance.start()
+    return time.perf_counter() - _t0
+
+def read_prefix_cache():
+    import urllib.request
+    try:
+        with urllib.request.urlopen(
+            server_instance.base_url.rstrip('/') + '/metrics', timeout=2) as resp:
+            return parse_prefix_cache_metrics(resp.read().decode('utf-8', 'replace'))
+    except Exception:
+        return None
+
+ARMS = {{
+    label: {{'sha256': ARM_SHA[label], 'root': ARM_DIRS[label], 'files': ARM_FILES[label]}}
+    for label in ('A', 'B')
+}}
+TASKS = {{task.instance_id: task for task in tasks if task.instance_id in set(TASK_IDS)}}
+SESSION_RESULT = execute_session(
+    schedule=SESSION_SCHEDULE,
+    tasks=TASKS,
+    rebuild=rebuild,
+    run_evaluate=run_evaluate,
+    output_dir=WORKING_DIR,
+    arms=ARMS,
+    schedule_sha256=SCHEDULE_SHA,
+    cap_seconds={cap!r},
+    session_budget_seconds=SESSION_BUDGET_SECONDS,
+    clock=time.perf_counter,
+    session_start=SESSION_PERF_T0,
+    health=server_health,
+    restart_server=restart_model_server,
+    import_origins=IMPORT_ORIGINS,
+    early_stop=EARLY_STOP,
+    prefix_cache=read_prefix_cache,
+    model_load_seconds=MODEL_LOAD_SECONDS,
+    session_overhead_seconds=SESSION_OVERHEAD_SECONDS,
+    pair_pad_seconds=PAIR_PAD_SECONDS,
+    manifest=MANIFEST,
+    sandbox_tmp=Path('/tmp'),
+    session_start_epoch=SESSION_WALL_T0,
+    exclude_import_origin=EXCLUDE_IMPORT_ORIGIN,
+    protocol_sha256=PROTOCOL_SHA,
+    requested_tier=TIMING_TIER,
+    initial_stopped={skipped_literal},
+)
+predictions = []
+"""
+    return source[:start] + driver + source[frame:]

@@ -161,8 +161,13 @@ def wait_for_run(kernel, output, timeout_minutes=45, interval_seconds=45):
                 "status": status.strip(),
                 "output": str(output),
             }
+            pair_manifest = output / "pair_manifest.json"
             rows = output / "task_results.jsonl"
-            if rows.exists():
+            if pair_manifest.exists():
+                from gemma_lab.paired import summarize_pair_run
+
+                result["paired"] = summarize_pair_run(output)
+            elif rows.exists():
                 result["metrics"] = summary(load_results(rows))
             write_json(output / "collection.json", result)
             if "KernelWorkerStatus.COMPLETE" not in status:
