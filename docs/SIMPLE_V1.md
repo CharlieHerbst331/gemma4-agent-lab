@@ -148,5 +148,5 @@ The submitted source is `agents/simple-v3`, SHA256
 Official dev13 evaluation resolved3/13, exactly the same three as v2, with no
 infrastructure errors and ten budget failures. Locator capability restriction removed
 observed workspace repro pollution; performance and timely finalization remain limited.
-The checked uploader accepted submission56905832; leaderboard score is pending.
+The checked uploader accepted submission56905832; the leaderboard status is ERROR, with no score.
 See STATUS.md for reproducible evidence and next steps.

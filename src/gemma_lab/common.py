@@ -40,6 +40,35 @@ def kaggle(*args, timeout=120):
     return proc.stdout
 
 
-def git_revision():
-    proc = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True)
-    return proc.stdout.strip() if proc.returncode == 0 else "uncommitted"
+def _git(args, cwd=None):
+    try:
+        return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+    except OSError:
+        return subprocess.CompletedProcess(["git", *args], 1, "", "")
+
+
+def git_revision(cwd=None):
+    """HEAD used for packing. Appends '-dirty' when `git status --porcelain` is non-empty."""
+    head = _git(["rev-parse", "HEAD"], cwd)
+    if head.returncode != 0 or not head.stdout.strip():
+        return "uncommitted"
+    revision = head.stdout.strip()
+    status = _git(["status", "--porcelain"], cwd)
+    if status.returncode == 0 and status.stdout.strip():
+        return revision + "-dirty"
+    return revision
+
+
+def candidate_source_commit(source, cwd=None):
+    """Last commit that changed `source`, independent of the commit used for packing.
+
+    Appends '-dirty' when that path itself has porcelain changes.
+    """
+    log = _git(["log", "-1", "--format=%H", "--", str(source)], cwd)
+    if log.returncode != 0 or not log.stdout.strip():
+        return "uncommitted"
+    commit = log.stdout.strip()
+    status = _git(["status", "--porcelain", "--", str(source)], cwd)
+    if status.returncode == 0 and status.stdout.strip():
+        return commit + "-dirty"
+    return commit

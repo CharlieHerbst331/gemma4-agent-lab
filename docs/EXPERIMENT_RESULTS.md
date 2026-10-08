@@ -9,17 +9,19 @@ The Mac only packages and controls jobs. Holdout has not been evaluated.
 | Baseline | Fixed dev3 | 0/3 | Three agent timeouts; Requests verification fixture errors |
 | Initial AgentTool v1 | Same dev3 | 1/3 | Two timeouts; Requests scratch/debug pollution; not submitted |
 | Shorter AgentTool R1 | Same dev3 | 0/3 | Three timeouts; no investigator dispatched |
-| AgentTool R1 | Full frozen dev14 | 3/14 | All wins FastAPI; ten budget failures; Requests fixture failure; Rich grading patch failed after agent test edit |
+| AgentTool R1 | Full frozen dev14 | 3/14 | All wins FastAPI; 9 recorded budget failures and 2 recorded infrastructure failures (rich_3472, rich_3454); Requests fixture failure; Rich grading patch failed after agent test edit |
 | Sequential v2 | Unaffected dev2 pilot | 1/2 | No reported runner errors; no patch pollution; FastAPI used fallback patch capture |
-| Sequential v3 | Same usable dev13 | 3/13 | Read-only locator eliminated observed scratch leakage; ten budget failures; accepted submission56905832, score pending |
+| Sequential v3 | Same usable dev13 | 3/13 | Read-only locator eliminated observed scratch leakage; ten budget failures; accepted submission56905832, leaderboard status ERROR, no score |
 | Sequential v2 | Full usable dev13 | 3/13 | Nine timeouts; one paired win and one regression versus R1 on identical IDs; locator created workspace repro files |
 
 The dev3 IDs are `fastapi_11194`, `requests_7502`, `rich_3105`. The unaffected pilot
 keeps FastAPI/Rich IDs. Dev13 contains every ID from the frozen dev partition except
 `requests_7502`. These are different cohorts: do not compare their rates as paired
-performance improvements. On the identical unaffected pilot, baseline resolved 0/2
-versus v2's 1/2, one win and no regression. Bundled architecture, sampling, prompt,
-and budget changes prevent attributing that win to a single component.
+performance improvements. Baseline was not run on the unaffected dev2 pilot. The
+0/2 figure previously cited here is the fastapi_11194 and rich_3105 subset of
+baseline-dev3, and both of those tasks were unresolved. It is not a paired baseline
+for the dev2 pilot. Bundled architecture, sampling, prompt,
+and budget changes prevent attributing the v2 pilot's 1/2 to a single component.
 
 Requests diagnostics show recursive dependency in the official `httpbin` fixture,
 so Requests patch correctness is inconclusive. Raw official rows/results remain
@@ -54,6 +56,6 @@ patches have no workspace repro/debug pollution or protected-file changes. A suc
 Rich patch also modifies repository tests; those changes did not establish its score,
 which comes from fresh official verification. Locator cannot execute shell commands,
 but soft exploration caps are still ignored. Submission56905832 was accepted October7
-at08:41UTC; leaderboard status PENDING. No competitive-performance claim is justified.
+at08:41UTC; leaderboard status ERROR, no score. No competitive-performance claim is justified.
 
-Publication-time update:submission56905832 now reports ERROR,no leaderboard score. Previous PENDING notes describe earlier observations, not current success. See HANDOFF/STATUS.
+Publication-time account history reports ERROR and no leaderboard score. See HANDOFF/STATUS.

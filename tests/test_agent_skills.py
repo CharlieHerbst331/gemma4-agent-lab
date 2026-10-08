@@ -11,12 +11,29 @@ import pytest
 
 from gemma_lab.bundle import load_yaml, validate
 
-CANDIDATE = Path("agents/structured-v4").resolve()
+
+def skill_candidates():
+    """Every agent that ships skills, each from its own directory."""
+    found = []
+    for path in sorted(item for item in Path("agents").iterdir() if item.is_dir()):
+        skills = path / "skills"
+        needed = [
+            skills / "task-memory/scripts/ledger.py",
+            skills / "source-lookup/scripts/lookup.py",
+            skills / "verify-patch/scripts/check.py",
+        ]
+        if all(item.is_file() for item in needed):
+            found.append(path.resolve())
+    if len(found) < 2:
+        raise RuntimeError("expected more than one candidate with its own skills directory")
+    return found
 
 
-def module(skill, filename):
-    path = CANDIDATE / "skills" / skill / "scripts" / filename
-    spec = importlib.util.spec_from_file_location(skill.replace("-", "_"), path)
+def module(candidate, skill, filename):
+    path = candidate / "skills" / skill / "scripts" / filename
+    spec = importlib.util.spec_from_file_location(
+        f"{candidate.name}_{skill.replace('-', '_')}_{filename[:-3]}", path
+    )
     result = importlib.util.module_from_spec(spec)
     prior = sys.dont_write_bytecode
     try:
@@ -27,9 +44,29 @@ def module(skill, filename):
     return result
 
 
-memory = module("task-memory", "ledger.py")
-lookup = module("source-lookup", "lookup.py")
-check = module("verify-patch", "check.py")
+CANDIDATE = None
+memory = None
+lookup = None
+check = None
+
+
+@pytest.fixture(params=skill_candidates(), ids=lambda path: path.name)
+def candidate(request):
+    return request.param
+
+
+@pytest.fixture(autouse=True)
+def _bind_candidate_skills(candidate, monkeypatch):
+    monkeypatch.setattr(sys.modules[__name__], "CANDIDATE", candidate)
+    monkeypatch.setattr(
+        sys.modules[__name__], "memory", module(candidate, "task-memory", "ledger.py")
+    )
+    monkeypatch.setattr(
+        sys.modules[__name__], "lookup", module(candidate, "source-lookup", "lookup.py")
+    )
+    monkeypatch.setattr(
+        sys.modules[__name__], "check", module(candidate, "verify-patch", "check.py")
+    )
 
 
 def git(root, *args):
@@ -57,7 +94,10 @@ def workspace(tmp_path):
 
 
 def test_triage_has_no_exploration_or_skill_loop():
-    config = load_yaml(CANDIDATE / "sub_agents/triage.yaml", CANDIDATE)
+    triage = CANDIDATE / "sub_agents" / "triage.yaml"
+    if not triage.is_file():
+        pytest.skip(f"{CANDIDATE.name} has no sub_agents/triage.yaml")
+    config = load_yaml(triage, CANDIDATE)
     assert config["tools"] == []
     assert not config.get("skills") and not config.get("sub_agents")
     for name in ["repair", "verify"]:
@@ -324,6 +364,15 @@ def test_explicit_scope_can_search_legitimate_data_source(workspace):
     (root / "data/parser.py").write_text("VALUE = 7\n")
     assert not any(h["path"].startswith("data/") for h in lookup.lookup(root, ["VALUE"])["hits"])
     assert lookup.lookup(root, ["VALUE"], ["data"])["hits"][0]["path"] == "data/parser.py"
+
+
+def test_skill_modules_load_from_this_candidates_directory():
+    assert Path(memory.__file__).resolve().is_relative_to(CANDIDATE / "skills" / "task-memory")
+    assert Path(lookup.__file__).resolve().is_relative_to(CANDIDATE / "skills" / "source-lookup")
+    assert Path(check.__file__).resolve().is_relative_to(CANDIDATE / "skills" / "verify-patch")
+    ledgers = [path / "skills/task-memory/scripts/ledger.py" for path in skill_candidates()]
+    assert len({item.resolve() for item in ledgers}) == len(ledgers)
+    assert {path.name for path in skill_candidates()} >= {"structured-v4", "structured-v4-10m"}
 
 
 def test_baseline_contract_rejects_changed_assertions_but_allows_extra_probe(workspace):

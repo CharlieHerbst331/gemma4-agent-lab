@@ -23,3 +23,5 @@ kaggle.json
 access_token
 credentials.json
 notebooks/generated/
+hygiene.json
+projection.json

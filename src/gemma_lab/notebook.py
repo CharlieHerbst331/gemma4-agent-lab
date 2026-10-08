@@ -133,8 +133,37 @@ for idx, task in enumerate(SAMPLE_TASKS, start=1):
             details = vars(result)
         else:
             details = {'result': str(result)}
+        def _jsonable(value, _seen=None):
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                return value
+            if _seen is None:
+                _seen = set()
+            identity = id(value)
+            if identity in _seen:
+                return None
+            if isinstance(value, dict):
+                _seen.add(identity)
+                return {str(key): _jsonable(item, _seen) for key, item in value.items()}
+            if isinstance(value, (list, tuple)):
+                _seen.add(identity)
+                return [_jsonable(item, _seen) for item in value]
+            dump = getattr(value, 'to_dict', None)
+            if not callable(dump):
+                dump = getattr(value, 'model_dump', None)
+            if callable(dump):
+                _seen.add(identity)
+                try:
+                    return _jsonable(dump(), _seen)
+                except Exception:
+                    pass
+            if hasattr(value, '__dict__'):
+                _seen.add(identity)
+                return _jsonable(vars(value), _seen)
+            return str(value)
+        # Evaluator record only. The harness writes ATIF to
+        # results/traces/trace_<id>.json; this cell must not replace that file.
         (WORKING_DIR / 'results' / f'{task.instance_id}.json').write_text(
-            json.dumps(details, default=str, indent=2))
+            json.dumps(_jsonable(details), indent=2))
     except Exception as exc:
         import traceback
         traceback.print_exc()
@@ -149,8 +178,14 @@ for idx, task in enumerate(SAMPLE_TASKS, start=1):
 """
         + codes[4][end:]
     )
+    codes[3] = (
+        "import time as _gemma_lab_time\n"
+        "_gemma_lab_model_load_started = _gemma_lab_time.perf_counter()\n" + codes[3]
+    )
     codes[3] += (
-        "\nRUN_PROVENANCE['hardware'] = {'gpu_count': torch.cuda.device_count(), "
+        "\nRUN_PROVENANCE['model_load_seconds'] = "
+        "_gemma_lab_time.perf_counter() - _gemma_lab_model_load_started\n"
+        "RUN_PROVENANCE['hardware'] = {'gpu_count': torch.cuda.device_count(), "
         "'gpu_names': [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())], "
         "'tensor_parallel_size': tp_size}\n"
         "(WORKING_DIR / 'run_manifest.json').write_text(json.dumps(RUN_PROVENANCE, indent=2))\n"

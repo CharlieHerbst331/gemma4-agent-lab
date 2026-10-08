@@ -25,6 +25,7 @@ without a leaderboard score.
 | [10minute diagnostic](docs/STRUCTURED_V4_10M_DIAGNOSTIC.md) | Latest paired results, stage timing, skill behavior and hygiene |
 | [Harness review](docs/HARNESS_REVIEW.md) | Evidence-based priorities and experiment roadmap |
 | [RUNBOOK](docs/RUNBOOK.md) | Environment, official GPU evaluation, collection and checked uploads |
+| [HYGIENE](docs/HYGIENE.md) | Offline patch-hygiene rule IDs and the measured-mean runtime gate |
 | [COMPETITION](docs/COMPETITION.md) | Contract summary; official rules remain authoritative |
 
 Earlier designs/results: [SIMPLE_V1](docs/SIMPLE_V1.md),

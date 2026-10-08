@@ -1,13 +1,17 @@
 import csv
 import io
 import json
+import math
 import os
 import shutil
 import subprocess
+import sys
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
 import requests
+import yaml
 
 from gemma_lab.bundle import validate_archive
 from gemma_lab.common import COMPETITION, STARTER, kaggle, now, sha256, write_json
@@ -172,7 +176,154 @@ def wait_for_run(kernel, output, timeout_minutes=45, interval_seconds=45):
     raise RuntimeError(f"Run still pending after {timeout_minutes} minutes: {kernel}")
 
 
-def check_evaluation(archive, evaluation):
+# Submit/promotion gates use the measured per-task mean. They are not a
+# precondition for dev GPU runs, and the per-task cap never blocks.
+# Overhead is added only to the 120-task block and the worst-case warning:
+#   120 * (mean + overhead) <= 11 h
+#   L + 129 * mean <= 10.8 h          (no overhead)
+#   L + 129 * (cap_wall + overhead) > 12 h warns only
+PROJECTED_HIDDEN_TASKS = 120
+PROJECTED_PUBLIC_TASKS = 129
+PROJECTED_RUNTIME_LIMIT_SECONDS = 11 * 60 * 60
+PROJECTED_LOAD_LIMIT_SECONDS = 38_880
+WORST_CASE_WARN_SECONDS = 12 * 60 * 60
+DEFAULT_MODEL_LOAD_SECONDS = 900
+DEFAULT_SCORER_OVERHEAD_SECONDS = 70
+
+
+def _finite_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def task_durations(rows):
+    if not rows:
+        raise ValueError(
+            "Refusing upload: evaluation has no task rows, so projected runtime cannot be checked"
+        )
+    missing = []
+    durations = []
+    for row in rows:
+        value = row.get("duration_seconds")
+        if not _finite_number(value):
+            missing.append(row.get("instance_id", "?"))
+        else:
+            durations.append(float(value))
+    if missing:
+        raise ValueError(
+            "Refusing upload: evaluation is missing duration_seconds for "
+            + ", ".join(str(item) for item in missing)
+            + ", so the projected total runtime cannot be checked"
+        )
+    return durations
+
+
+def model_load_seconds(manifest):
+    if not isinstance(manifest, dict) or "model_load_seconds" not in manifest:
+        return float(DEFAULT_MODEL_LOAD_SECONDS), "default"
+    value = manifest.get("model_load_seconds")
+    if not _finite_number(value) or value < 0:
+        raise ValueError(
+            "Refusing upload: run_manifest.json model_load_seconds must be a non-negative number"
+        )
+    return float(value), "measured"
+
+
+def cap_wall_seconds(archive):
+    """Per-task wall cap from the packed eval_config, in seconds."""
+    try:
+        with zipfile.ZipFile(archive) as bundle:
+            text = bundle.read("eval_config.yaml").decode()
+    except (KeyError, OSError, zipfile.BadZipFile, UnicodeError):
+        return None
+    loaded = yaml.safe_load(text) or {}
+    if not isinstance(loaded, dict):
+        return None
+    section = loaded.get("evaluation", loaded)
+    if not isinstance(section, dict):
+        return None
+    minutes = section.get("max_time_minutes")
+    if not _finite_number(minutes) or minutes < 0:
+        return None
+    return float(minutes) * 60
+
+
+def runtime_projection(rows, manifest, archive, overhead):
+    if not _finite_number(overhead) or overhead < 0:
+        raise ValueError(
+            "Refusing upload: scorer overhead must be a non-negative number of seconds"
+        )
+    durations = task_durations(rows)
+    mean = sum(durations) / len(durations)
+    overhead = float(overhead)
+    load, load_source = model_load_seconds(manifest)
+    # Blocks use the measured mean. Overhead is not part of the 129-task block.
+    projected = (mean + overhead) * PROJECTED_HIDDEN_TASKS
+    combined = load + PROJECTED_PUBLIC_TASKS * mean
+    cap = cap_wall_seconds(archive)
+    # The cap feeds the warning only. It is never compared against a block limit.
+    worst = None if cap is None else load + PROJECTED_PUBLIC_TASKS * (cap + overhead)
+    return {
+        "basis": "measured_mean",
+        "applies_at": "submit_or_promotion",
+        "dev_gpu_precondition": False,
+        "blocks_use_cap_wall": False,
+        "mean_seconds": mean,
+        "n_tasks": len(durations),
+        "L_seconds": load,
+        "L_source": load_source,
+        "scorer_overhead_seconds_per_task": overhead,
+        "overhead_in_120_block": True,
+        "overhead_in_129_block": False,
+        "overhead_in_worst_case_warn": True,
+        "P_seconds": combined,
+        "P_limit": PROJECTED_LOAD_LIMIT_SECONDS,
+        "P_ok": combined <= PROJECTED_LOAD_LIMIT_SECONDS,
+        "projected_120_seconds": projected,
+        "limit_120": PROJECTED_RUNTIME_LIMIT_SECONDS,
+        "ok_120": projected <= PROJECTED_RUNTIME_LIMIT_SECONDS,
+        "cap_wall_seconds": cap,
+        "worst_case_seconds": worst,
+        "worst_case_warn": worst is not None and worst > WORST_CASE_WARN_SECONDS,
+    }
+
+
+def check_projected_runtime(rows, manifest, archive, evaluation, overhead):
+    report = runtime_projection(rows, manifest, archive, overhead)
+    write_json(Path(evaluation) / "projection.json", report)
+    reasons = []
+    if not report["ok_120"]:
+        reasons.append(
+            "projected total runtime is "
+            f"{report['projected_120_seconds'] / 3600:.2f} h "
+            f"((mean {report['mean_seconds']:.2f} s/task + "
+            f"{report['scorer_overhead_seconds_per_task']:g} s scorer overhead) "
+            f"× {PROJECTED_HIDDEN_TASKS} tasks), which exceeds the 11 hour limit "
+            "(1 hour margin under the 12 hour competition cap)"
+        )
+    if not report["P_ok"]:
+        reasons.append(
+            "projected load-adjusted runtime is "
+            f"{report['P_seconds'] / 3600:.2f} h "
+            f"(model load {report['L_seconds']:.0f} s [{report['L_source']}] + "
+            f"{PROJECTED_PUBLIC_TASKS} × mean {report['mean_seconds']:.2f} s), "
+            "which exceeds the 10.8 hour limit"
+        )
+    if reasons:
+        raise ValueError("Refusing upload: " + "; ".join(reasons))
+    if report["worst_case_warn"]:
+        print(
+            "Warning: worst-case runtime "
+            f"{report['worst_case_seconds'] / 3600:.2f} h exceeds 12 hours "
+            f"(model load {report['L_seconds']:.0f} s + "
+            f"{PROJECTED_PUBLIC_TASKS} × (cap {report['cap_wall_seconds']:.0f} s + "
+            f"{report['scorer_overhead_seconds_per_task']:g} s scorer overhead)). "
+            "The per-task cap does not block the upload.",
+            file=sys.stderr,
+        )
+    return report
+
+
+def check_evaluation(archive, evaluation, scorer_overhead_seconds=DEFAULT_SCORER_OVERHEAD_SECONDS):
     from gemma_lab.metrics import load_results, summary
 
     if evaluation is None:
@@ -214,10 +365,26 @@ def check_evaluation(archive, evaluation):
                 raise ValueError(
                     "Resolve official verification httpbin fixture errors before uploading"
                 )
-    return summary(rows)
+    projection = check_projected_runtime(
+        rows, manifest, archive, evaluation, scorer_overhead_seconds
+    )
+    result = summary(rows)
+    result["projection"] = {
+        "ok_120": projection["ok_120"],
+        "P_ok": projection["P_ok"],
+        "worst_case_warn": projection["worst_case_warn"],
+    }
+    return result
 
 
-def submit(archive, message, ledger=Path("runs/submissions.jsonl"), execute=False, evaluation=None):
+def submit(
+    archive,
+    message,
+    ledger=Path("runs/submissions.jsonl"),
+    execute=False,
+    evaluation=None,
+    scorer_overhead_seconds=DEFAULT_SCORER_OVERHEAD_SECONDS,
+):
     archive = Path(archive).resolve()
     validate_archive(archive)
     digest = sha256(archive)
@@ -231,7 +398,9 @@ def submit(archive, message, ledger=Path("runs/submissions.jsonl"), execute=Fals
     }
     if not execute:
         return plan
-    plan["evaluation"] = check_evaluation(archive, evaluation)
+    plan["evaluation"] = check_evaluation(
+        archive, evaluation, scorer_overhead_seconds=scorer_overhead_seconds
+    )
     # Reserve before upload so an interrupted upload cannot cause an automatic duplicate.
     # The local lock serializes this user's processes; Kaggle remains authoritative for team usage.
     import fcntl
