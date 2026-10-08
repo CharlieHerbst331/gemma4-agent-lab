@@ -46,6 +46,8 @@ def test_notebook_pins_candidate_and_preserves_inputs(tmp_path, monkeypatch):
     assert code.index("import torch") < code.index("RUN_PROVENANCE['hardware']")
     assert "model_load_seconds" in code
     assert "_jsonable" in code
+    jsonable = code[code.index("def _jsonable") :]
+    assert jsonable.index("'to_dict'") < jsonable.index("'model_dump'")
     assert "default=str" not in code
     assert "task_results.jsonl" in code
     assert "SAMPLE_TASKS = [t for t in tasks if t.instance_id in TASK_IDS]" in code
@@ -87,8 +89,11 @@ def test_returned_runner_errors_survive_collection(tmp_path, monkeypatch, messag
     loop = code[code.index("results_path =") : code.index("submission_df =")]
 
     class Trace:
+        def to_dict(self):
+            return {"schema_version": "ATIF-v1.7", "steps": [{"step_id": 1, "source": "agent"}]}
+
         def model_dump(self):
-            return {"schema_version": "ATIF-v1.2", "steps": [{"step_id": 1}]}
+            return {"internal": "SessionTrace"}
 
     result = SimpleNamespace(
         agent_patch="",
@@ -113,7 +118,10 @@ def test_returned_runner_errors_survive_collection(tmp_path, monkeypatch, messag
     assert row.get("failure_class") == failure_class
     assert bool(row.get("error")) == (failure_class == "infrastructure_or_harness")
     details = json.loads((tmp_path / "results" / "task.json").read_text())
-    assert details["trace"] == {"schema_version": "ATIF-v1.2", "steps": [{"step_id": 1}]}
+    assert details["trace"] == {
+        "schema_version": "ATIF-v1.7",
+        "steps": [{"step_id": 1, "source": "agent"}],
+    }
     assert "SessionTrace" not in (tmp_path / "results" / "task.json").read_text()
 
 

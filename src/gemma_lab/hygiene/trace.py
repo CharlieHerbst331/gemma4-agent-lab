@@ -1,8 +1,11 @@
 """Normalize trace JSON into tool events.
 
-Recognized shapes are the synthetic `gemma-lab/trace/v1` event list and a small
-ADK-like `function_call` / `function_response` shape. Anything else is `unknown`.
-Unknown traces are never treated as a fallback diff.
+Recognized shapes are the synthetic `gemma-lab/trace/v1` event list, a small
+ADK-like `function_call` / `function_response` shape, and ATIF steps. ATIF tool
+output is read from `observation.results[]` and from `observation.content`
+(a string or a list of parts). A later observation-only step can fill the
+matching call. Anything else is `unknown`. Unknown traces are never treated
+as a fallback diff.
 """
 
 from dataclasses import dataclass, field
@@ -127,26 +130,39 @@ def _atif_events(payload: dict) -> list[ToolEvent]:
     for step in payload.get("steps") or []:
         if not isinstance(step, dict):
             continue
-        author = _step_author(step, root)
         calls = step.get("tool_calls")
-        if not isinstance(calls, list):
+        if not isinstance(calls, list) or not calls:
+            _attach_observation(events, step, root)
             continue
-        outputs = _atif_outputs(step.get("observation"))
-        for call in calls:
-            if not isinstance(call, dict):
-                continue
+        observation = step.get("observation")
+        outputs = _atif_outputs(observation)
+        content = _observation_text(observation)
+        obs_tool = _observation_tool(observation)
+        named = [
+            call
+            for call in calls
+            if isinstance(call, dict) and str(call.get("function_name") or "")
+        ]
+        for call in named:
             name = str(call.get("function_name") or "")
-            if not name:
-                continue
             call_id = str(call.get("tool_call_id") or "")
             output = outputs.get(call_id, "")
-            if not output and len(calls) == 1:
+            if not output and len(named) == 1:
                 output = outputs.get("", "")
+            if not output and content and (len(named) == 1 or name == obs_tool):
+                output = content
             arguments = call.get("arguments")
             if arguments is None:
                 arguments = {}
-            events.append(ToolEvent(author, name, arguments, output))
+            events.append(ToolEvent(_call_author(call, step, root), name, arguments, output))
     return events
+
+
+def _call_author(call: dict, step: dict, root: str) -> str:
+    extra = call.get("extra")
+    if isinstance(extra, dict) and extra.get("author"):
+        return str(extra["author"])
+    return _step_author(step, root)
 
 
 def _step_author(step: dict, root: str) -> str:
@@ -161,6 +177,60 @@ def _step_author(step: dict, root: str) -> str:
     return root
 
 
+def _attach_observation(events: list[ToolEvent], step: dict, root: str) -> None:
+    """Attach a later observation-only step to the matching call.
+
+    Official ATIF can deliver one result of a parallel batch on a following
+    source:system step that has observation.content and no tool_calls.
+    """
+    observation = step.get("observation")
+    content = _observation_text(observation)
+    tool_name = _observation_tool(observation)
+    if not content or not tool_name:
+        return
+    extra = observation.get("extra") if isinstance(observation, dict) else None
+    author = ""
+    if isinstance(extra, dict) and extra.get("author"):
+        author = str(extra["author"])
+    else:
+        author = _step_author(step, root)
+    for item in reversed(events):
+        if item.tool == tool_name and item.agent == author and not item.output:
+            item.output = content
+            return
+
+
+def _observation_tool(observation) -> str:
+    if not isinstance(observation, dict):
+        return ""
+    extra = observation.get("extra")
+    if isinstance(extra, dict) and extra.get("tool_name"):
+        return str(extra["tool_name"])
+    return ""
+
+
+def _observation_text(observation) -> str:
+    if not isinstance(observation, dict):
+        return ""
+    return _content_text(observation.get("content"))
+
+
+def _content_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = [_content_text(item) for item in value]
+        return "\n".join(part for part in parts if part)
+    if isinstance(value, dict):
+        for key in ("text", "content", "raw"):
+            if value.get(key) is not None:
+                return _content_text(value[key])
+        return ""
+    return _text(value)
+
+
 def _atif_outputs(observation) -> dict[str, str]:
     found: dict[str, str] = {}
     if not isinstance(observation, dict):
@@ -172,7 +242,7 @@ def _atif_outputs(observation) -> dict[str, str]:
     for result in results:
         if not isinstance(result, dict):
             continue
-        content = _text(result.get("content"))
+        content = _content_text(result.get("content"))
         source = result.get("source_call_id")
         if source:
             found[str(source)] = content

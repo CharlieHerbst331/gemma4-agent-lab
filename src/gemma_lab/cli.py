@@ -82,7 +82,12 @@ def main(argv=None):
         "--scorer-overhead-seconds",
         type=float,
         default=operations.DEFAULT_SCORER_OVERHEAD_SECONDS,
-        help="Hosted scorer seconds added to each task before the runtime projection",
+        help=(
+            "Hosted scorer seconds added per task to the 120-task block and the "
+            "worst-case warning only. The 129-task block uses the measured mean "
+            "with no overhead. Checked at submit --execute, never from the "
+            "per-task cap and never as a precondition for dev GPU runs."
+        ),
     )
     hygiene = sub.add_parser("hygiene", help="Offline patch hygiene and finalization checks")
     hygiene_commands = hygiene.add_subparsers(dest="hygiene_command", required=True)

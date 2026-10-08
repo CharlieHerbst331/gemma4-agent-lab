@@ -4,8 +4,10 @@ Severities follow the coordinator override where it differs from the design spec
 See the module docstring on `audit_files` for those choices.
 """
 
+import ast
 import io
 import re
+import textwrap
 import tokenize
 from fnmatch import fnmatch
 from pathlib import PurePosixPath
@@ -14,6 +16,7 @@ from gemma_lab.hygiene.diffparse import FileDiff
 from gemma_lab.hygiene.trace import ToolEvent, TraceView
 
 VERIFIERS = {"verify", "verifier"}
+STRUCTURED_AUTHORS = {"triage", "repair"}
 DEBUGGERS = {"pdb", "ipdb", "pudb"}
 PATH_HACKS = {("sys", "path", "insert"), ("sys", "path", "append"), ("sys", "path", "extend")}
 HOST_IMPORT = re.compile(r"/site-packages/\S+")
@@ -64,6 +67,9 @@ def audit_files(files: list[FileDiff], events: list[ToolEvent], policy: dict) ->
       pytest.ini, .pytest.ini, pyproject.toml, setup.cfg, tox.ini, every file under
       tests/ or test/, and .py files under testing/. Directory names are matched
       case-insensitively. noxfile.py and setup.py are WARN H8, not a block.
+      swegemma 0.2.7 resets with one git checkout of paths a normal workspace
+      lacks, so that checkout aborts and tracked test edits survive. H2 stays
+      a block. The hosted scorer has not been re-run to confirm this.
     - H5a blocks site-packages, `.venv`, and `build/lib` paths, sys.path hacks, and
       import hooks grading resets (*.pth, sitecustomize.py, usercustomize.py,
       _swegemma_stubs.py). Plain `venv/`, dist-packages, PYTHONPATH, and
@@ -110,15 +116,29 @@ def finalization(trace: TraceView, patch_text: str, *, trace_was_supplied: bool)
         state = "fallback"
     else:
         state = "none"
-    verifier_author = any(event.agent in VERIFIERS for event in trace.events)
     return {
         "finalization": state,
-        "verifier_reached": True if verifier_author else None,
+        "verifier_reached": _verifier_reached(trace.events),
         "submit_calls": len(submits),
         "submitting_agents": [event.agent for event in submits],
         "edit_after_submit": edit_after,
         "warn_unknown": False,
     }
+
+
+def _verifier_reached(events: list[ToolEvent]):
+    """True when a verify role spoke. False when a structured role never did.
+
+    A single-agent trace (no verify/verifier and no triage/repair author) stays
+    null so the reach rate is skipped. A run directory has no candidate tree,
+    so triage/repair authors are the signal that a verify role existed.
+    """
+    agents = {event.agent for event in events if event.agent}
+    if agents & VERIFIERS:
+        return True
+    if agents & STRUCTURED_AUTHORS:
+        return False
+    return None
 
 
 def finalization_findings(info: dict) -> list[dict]:
@@ -310,6 +330,7 @@ def _h4_and_h5a_lines(files, policy) -> list[dict]:
                 found.append(
                     finding("H5a.sys_path", "block", parsed.path, line_no, evidence=text.strip())
                 )
+        found.extend(_alias_findings(parsed.path, lines, found))
     return found
 
 
@@ -441,6 +462,144 @@ def _written_by_edit(path: str, events: list[ToolEvent]) -> bool:
             if value == path:
                 return True
     return False
+
+
+_ALIAS_PATH_CALLS = {
+    "sys.path.insert",
+    "sys.path.append",
+    "sys.path.extend",
+    "site.addsitedir",
+}
+_ALIAS_DEBUG_CALLS = {
+    "breakpoint",
+    "builtins.breakpoint",
+    "pdb.set_trace",
+    "ipdb.set_trace",
+    "pudb.set_trace",
+    "code.interact",
+}
+_ALIAS_DYNAMIC_IMPORTS = {"importlib.import_module", "__import__"}
+
+
+def _alias_findings(path: str, lines: list[tuple[int, str]], existing: list[dict]) -> list[dict]:
+    """Block import aliases the line scanner cannot see.
+
+    Tracks `import sys as s`, `from sys import path as P`, and
+    `from importlib import import_module` across the added lines. Does not
+    follow `p = sys.path`, `exec`, or string-concatenated imports.
+    """
+    texts = [text for _, text in lines]
+    numbers = [number for number, _ in lines]
+    if not any(text.strip() for text in texts):
+        return []
+    try:
+        tree = ast.parse(textwrap.dedent("\n".join(texts)))
+    except SyntaxError:
+        return []
+    scanner = _AliasScanner()
+    scanner.visit(tree)
+    seen = {
+        (item["rule"], item.get("line"))
+        for item in existing
+        if item.get("path") == path and item["rule"] in {"H4.debug", "H5a.sys_path"}
+    }
+    found = []
+    for rule, lineno, evidence in scanner.found:
+        if lineno < 1 or lineno > len(numbers):
+            continue
+        line_no = numbers[lineno - 1]
+        if (rule, line_no) in seen:
+            continue
+        seen.add((rule, line_no))
+        found.append(finding(rule, "block", path, line_no, evidence=evidence or texts[lineno - 1]))
+    return found
+
+
+class _AliasScanner(ast.NodeVisitor):
+    def __init__(self):
+        self.aliases: dict[str, str] = {}
+        self.found: list[tuple[str, int, str]] = []
+
+    def visit_Import(self, node):
+        for alias in node.names:
+            if alias.asname:
+                self.aliases[alias.asname] = alias.name
+            else:
+                self.aliases[alias.name.split(".")[0]] = alias.name.split(".")[0]
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node):
+        module = node.module or ""
+        for alias in node.names:
+            local = alias.asname or alias.name
+            self.aliases[local] = f"{module}.{alias.name}" if module else alias.name
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        resolved = _resolve_expr(node.func, self.aliases)
+        if resolved in _ALIAS_PATH_CALLS:
+            self._add("H5a.sys_path", node)
+        elif resolved in _ALIAS_DEBUG_CALLS or self._getattr_breakpoint(node, resolved):
+            self._add("H4.debug", node)
+        elif resolved in _ALIAS_DYNAMIC_IMPORTS and _call_mentions_debugger(node):
+            self._add("H4.debug", node)
+        self.generic_visit(node)
+
+    def visit_Assign(self, node):
+        for target in node.targets:
+            if _is_sys_path_target(target, self.aliases):
+                self._add("H5a.sys_path", node)
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node):
+        if isinstance(node.op, ast.Add) and _is_sys_path_target(node.target, self.aliases):
+            self._add("H5a.sys_path", node)
+        self.generic_visit(node)
+
+    def _getattr_breakpoint(self, node, resolved: str) -> bool:
+        if resolved != "getattr" or len(node.args) < 2:
+            return False
+        target = _resolve_expr(node.args[0], self.aliases)
+        if target != "builtins":
+            return False
+        argument = node.args[1]
+        return isinstance(argument, ast.Constant) and argument.value == "breakpoint"
+
+    def _add(self, rule: str, node):
+        self.found.append((rule, getattr(node, "lineno", 0), ""))
+
+
+def _resolve_expr(node, aliases: dict[str, str]) -> str:
+    if isinstance(node, ast.Name):
+        return aliases.get(node.id, node.id)
+    if isinstance(node, ast.Attribute):
+        base = _resolve_expr(node.value, aliases)
+        if not base:
+            return ""
+        return f"{base}.{node.attr}"
+    return ""
+
+
+def _is_sys_path_target(node, aliases: dict[str, str]) -> bool:
+    current = node
+    if isinstance(current, ast.Subscript):
+        current = current.value
+    return _resolve_expr(current, aliases) == "sys.path"
+
+
+def _call_mentions_debugger(node: ast.Call) -> bool:
+    values = []
+    for argument in node.args:
+        if isinstance(argument, ast.Constant) and isinstance(argument.value, str):
+            values.append(argument.value)
+    for keyword in node.keywords:
+        if (
+            keyword.arg in {None, "name"}
+            and isinstance(keyword.value, ast.Constant)
+            and isinstance(keyword.value.value, str)
+        ):
+            values.append(keyword.value.value)
+    return any(name in value for name in DEBUGGERS for value in values)
 
 
 def _is_debugger(tokens) -> bool:

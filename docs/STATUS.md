@@ -110,17 +110,21 @@ from infrastructure, and blocks known grading fixture failures. It never rewrite
 results to conceal failures. Alternate official wheelhouse mount discovery handles a
 worker that previously failed with zero wheels; missing mounts fail explicitly.
 
-The checked uploader refuses an archive when either projected block fails. Both
-add `scorer_overhead_seconds` (default 70, `--scorer-overhead-seconds`) to the mean
-per-task `duration_seconds`: 120 × (mean + overhead) must be at most 11 hours, and
-model-load seconds (from `run_manifest.json`, else 900) + 129 × (mean + overhead)
-must be at most 10.8 hours. A cap-based worst case above 12 hours warns and does
-not block. The numbers are written to `projection.json`. `git_revision()` appends
-`-dirty` when the worktree is dirty, and the public findings export keeps that
-marker plus the pack provenance fields. `gemma-lab hygiene candidate|run|patch`
-audits patches offline and reads ATIF traces from `results/traces/trace_<id>.json`.
-It does not edit agents or raw run files; the CLI writes `hygiene.json` beside the
-input.
+The checked uploader refuses an archive when either projected block fails. Gates
+run on the measured per-task mean at `submit --execute` only (`projection.json`
+`basis` is `measured_mean`). They are not a precondition for dev GPU runs, and
+the per-task cap never blocks. `--scorer-overhead-seconds` (default 70) is added
+only to the 120-task block and the worst-case warning: 120 × (mean + overhead)
+must be at most 11 hours, and model-load seconds (from `run_manifest.json`, else
+900) + 129 × mean, with no overhead, must be at most 10.8 hours. A worst case of
+load + 129 × (cap + overhead) above 12 hours warns and does not block.
+`git_revision()` appends `-dirty` when the worktree is dirty, and the public
+findings export keeps that marker plus the pack provenance fields. `gemma-lab
+hygiene candidate|run|patch` audits patches offline. Rule IDs, the 0.2.7
+checkout-abort reason H2 stays a block, and the trace paths are in
+`docs/HYGIENE.md`. It does not edit agents or raw run files; the CLI writes
+`hygiene.json` beside the input. Candidate lint is not wired into submit or pack.
+Frozen structured-v4 and structured-v4-10m block that lint on `G2.superset`.
 
 ## Submission evidence and next actions
 

@@ -8,10 +8,16 @@ import yaml
 from gemma_lab.hygiene.errors import HygieneInputError
 
 DEFAULT_POLICY = Path("configs/hygiene/default.yaml")
+# src/gemma_lab/hygiene/policy.py -> repository root.
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def load_policy(path: Path | None = None) -> tuple[dict, str]:
     policy_path = Path(path) if path else DEFAULT_POLICY
+    if not policy_path.is_file():
+        rooted = policy_path if policy_path.is_absolute() else REPO_ROOT / policy_path
+        if rooted.is_file():
+            policy_path = rooted
     if not policy_path.is_file():
         raise HygieneInputError(f"Policy file not found: {policy_path}")
     raw = policy_path.read_bytes()

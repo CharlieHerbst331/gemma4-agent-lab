@@ -75,16 +75,16 @@ def audit_run(directory, policy=None, task_ids=None, *, require_trace=False):
     if not directory.is_dir():
         raise HygieneInputError(f"Run directory not found: {directory}")
     policy, policy_sha = _policy(policy, None)
-    selected = _task_ids(directory, task_ids)
+    selected = _selected_tasks(directory, task_ids)
     manifest = _read_json(directory / "run_manifest.json")
     tasks = []
-    for instance_id in selected:
-        patch_path = _patch_file(directory, instance_id)
+    for group, instance_id in selected:
+        patch_path = _patch_file(directory, group, instance_id)
         patch_text = patch_path.read_text() if patch_path else ""
-        # Real runs store an ATIF trajectory here. results/<id>.json stringifies
-        # SessionTrace via default=str, so it is not a trace source.
-        trace_path = directory / "results" / "traces" / f"trace_{instance_id}.json"
-        trace = _read_trace(trace_path)
+        # Parsed source is the harness ATIF file trace_<id>.json. The notebook
+        # may JSON-encode SessionTrace into results/<id>.json; that file is not
+        # a trace source. Paired notebooks nest traces at results/<arm>/r<k>/traces/.
+        trace = _read_trace(_find_trace(directory, group, instance_id))
         if require_trace and trace is None:
             raise HygieneInputError(f"Missing trace for {instance_id}")
         report = audit_patch(
@@ -310,6 +310,81 @@ def _rate_findings(tasks, policy) -> list[dict]:
     return sort_findings(found)
 
 
+def _trace_name(instance_id: str) -> str:
+    return "trace_" + instance_id.replace("/", "__") + ".json"
+
+
+def _group_has_tasks(path: Path) -> bool:
+    return any(
+        candidate.exists()
+        for candidate in (
+            path / "task_results.jsonl",
+            path / "patches",
+            path / "traces",
+            path / "results" / "patches",
+            path / "results" / "traces",
+        )
+    )
+
+
+def _run_groups(directory: Path) -> list[Path]:
+    groups = []
+    if _group_has_tasks(directory):
+        groups.append(directory)
+    results = directory / "results"
+    if results.is_dir():
+        for arm in sorted(path for path in results.iterdir() if path.is_dir()):
+            for replicate in sorted(path for path in arm.iterdir() if path.is_dir()):
+                if _group_has_tasks(replicate):
+                    groups.append(replicate)
+    return groups
+
+
+def _ids_from_jsonl(path: Path) -> list[str]:
+    identifiers = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if "instance_id" not in row:
+            raise HygieneInputError(f"{path} row has no instance_id")
+        identifiers.append(row["instance_id"])
+    return identifiers
+
+
+def _ids_in_group(group: Path) -> list[str]:
+    rows_path = group / "task_results.jsonl"
+    if rows_path.is_file():
+        return _ids_from_jsonl(rows_path)
+    for patch_dir in (group / "results" / "patches", group / "patches"):
+        if patch_dir.is_dir():
+            names = sorted(path.stem for path in patch_dir.glob("*.patch") if path.is_file())
+            if names:
+                return names
+    return []
+
+
+def _selected_tasks(directory: Path, task_ids) -> list[tuple[Path, str]]:
+    if task_ids:
+        return [(directory, instance_id) for instance_id in _task_ids(directory, task_ids)]
+    nested = []
+    root_ids: list[str] = []
+    for group in _run_groups(directory):
+        identifiers = _ids_in_group(group)
+        if group == directory:
+            root_ids = identifiers
+        else:
+            nested.extend((group, instance_id) for instance_id in identifiers)
+    nested_ids = {instance_id for _, instance_id in nested}
+    selected = [
+        (directory, instance_id) for instance_id in root_ids if instance_id not in nested_ids
+    ]
+    selected.extend(nested)
+    if not selected:
+        raise HygieneInputError("Run directory has no task_results.jsonl, patches, or --task-ids")
+    return selected
+
+
 def _task_ids(directory: Path, task_ids) -> list[str]:
     if task_ids:
         path = Path(task_ids)
@@ -341,14 +416,52 @@ def _task_ids(directory: Path, task_ids) -> list[str]:
     raise HygieneInputError("Run directory has no task_results.jsonl, patches, or --task-ids")
 
 
-def _patch_file(directory: Path, instance_id: str) -> Path | None:
-    for relative in (
-        Path("results/patches") / f"{instance_id}.patch",
-        Path("patches") / f"{instance_id}.patch",
-    ):
-        path = directory / relative
+def _patch_names(instance_id: str) -> list[str]:
+    names = [f"{instance_id}.patch"]
+    safe = instance_id.replace("/", "__")
+    if safe != instance_id:
+        names.append(f"{safe}.patch")
+    return names
+
+
+def _patch_file(directory: Path, group: Path, instance_id: str) -> Path | None:
+    names = _patch_names(instance_id)
+    roots = [
+        group / "results" / "patches",
+        group / "patches",
+        directory / "results" / "patches",
+        directory / "patches",
+    ]
+    for root in roots:
+        for name in names:
+            path = root / name
+            if path.is_file():
+                return path
+    results = directory / "results"
+    if results.is_dir():
+        for name in names:
+            matches = sorted(path for path in results.glob(f"*/*/patches/{name}") if path.is_file())
+            if matches:
+                return matches[0]
+    return None
+
+
+def _find_trace(directory: Path, group: Path, instance_id: str) -> Path | None:
+    name = _trace_name(instance_id)
+    candidates = [
+        group / "traces" / name,
+        group / "results" / "traces" / name,
+        directory / "results" / "traces" / name,
+        directory / "traces" / name,
+    ]
+    for path in candidates:
         if path.is_file():
             return path
+    results = directory / "results"
+    if results.is_dir():
+        matches = sorted(path for path in results.glob(f"*/*/traces/{name}") if path.is_file())
+        if matches:
+            return matches[0]
     return None
 
 
@@ -362,9 +475,9 @@ def _read_json(path):
         raise HygieneInputError(f"Invalid JSON: {path}") from exc
 
 
-def _read_trace(path: Path):
+def _read_trace(path: Path | None):
     """Load one ATIF file. Missing or invalid JSON is unknown, not an exception."""
-    if not path.is_file():
+    if path is None or not path.is_file():
         return None
     try:
         return json.loads(path.read_text())

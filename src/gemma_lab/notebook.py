@@ -147,7 +147,9 @@ for idx, task in enumerate(SAMPLE_TASKS, start=1):
             if isinstance(value, (list, tuple)):
                 _seen.add(identity)
                 return [_jsonable(item, _seen) for item in value]
-            dump = getattr(value, 'model_dump', None)
+            dump = getattr(value, 'to_dict', None)
+            if not callable(dump):
+                dump = getattr(value, 'model_dump', None)
             if callable(dump):
                 _seen.add(identity)
                 try:

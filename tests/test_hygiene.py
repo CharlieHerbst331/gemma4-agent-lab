@@ -319,6 +319,39 @@ def test_h5a_sys_path_slice_and_imported_name_block(line):
     assert report["gate"] == "block"
 
 
+@pytest.mark.parametrize(
+    ("body", "rule"),
+    [
+        ("import sys as s\ns.path.insert(0, '/tmp')", "H5a.sys_path"),
+        ("from sys import path as P\nP.append('/tmp')", "H5a.sys_path"),
+        ("from sys import path as P\nP[0:0] = ['/tmp']", "H5a.sys_path"),
+        ("from importlib import import_module\nimport_module('pdb')", "H4.debug"),
+        ("import importlib as il\nil.import_module('ipdb')", "H4.debug"),
+        ("getattr(builtins, 'breakpoint')", "H4.debug"),
+        ('getattr(builtins, "breakpoint")', "H4.debug"),
+    ],
+)
+def test_aliased_path_and_debugger_bypasses_block(body, rule):
+    report = audit_patch(added("pkg/core.py", body + "\n"))
+    assert rules(report, rule)
+    assert report["gate"] == "block"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "p = sys.path\np.insert(0, '/tmp')",
+        "sys.path.__setitem__(0, '/tmp')",
+        "exec('import pdb')",
+        "__import__('pd' + 'b')",
+    ],
+)
+def test_untracked_alias_bypasses_stay_open(body):
+    report = audit_patch(added("pkg/core.py", body + "\n"))
+    assert not rules(report, "H4.debug")
+    assert not rules(report, "H5a.sys_path")
+
+
 def test_h5a_imported_path_mutation_on_a_later_line_blocks():
     body = (
         "diff --git a/pkg/__init__.py b/pkg/__init__.py\n"
@@ -614,6 +647,15 @@ def test_cli_exit_codes(tmp_path, capsys, monkeypatch):
     assert caught.value.code == 2
 
 
+def test_cli_resolves_default_policy_from_another_directory(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    patch = tmp_path / "clean.patch"
+    patch.write_text(modified("pkg/core.py"))
+    main(["hygiene", "patch", str(patch)])
+    assert json.loads(capsys.readouterr().out)["gate"] == "pass"
+    assert (tmp_path / "hygiene.json").is_file()
+
+
 def test_cli_writes_hygiene_json_without_rewriting_raw_files(tmp_path, capsys, monkeypatch):
     policy = str(Path("configs/hygiene/default.yaml").resolve())
     monkeypatch.chdir(tmp_path)
@@ -728,7 +770,7 @@ def atif_trace(agent, steps):
     }
 
 
-def test_atif_trace_drives_finalization_and_host_rules(tmp_path):
+def test_atif_results_array_still_attaches_output():
     payload = atif_trace(
         "verify",
         [
@@ -740,16 +782,112 @@ def test_atif_trace_drives_finalization_and_host_rules(tmp_path):
             ("submit_patch", {}, "ok"),
         ],
     )
-    _write_run(tmp_path, [("alpha", modified("pkg/core.py"), payload)])
+    report = audit_patch(modified("pkg/core.py"), payload)
+    assert report["trace_schema"] == "atif"
+    assert rules(report, "H5b.host_import")
+    assert rules(report, "H5c.host_metadata")
+
+
+def test_atif_observation_content_list_marks_host_import_and_missed_verify():
+    payload = {
+        "schema_version": "ATIF-v1.7",
+        "agent": {"name": "adk-eval-core"},
+        "steps": [
+            {
+                "source": "agent",
+                "extra": {"author": "triage"},
+                "tool_calls": [
+                    {
+                        "tool_call_id": "c1",
+                        "function_name": "run_command",
+                        "arguments": {"command": "python -c 'import x'"},
+                        "extra": {"author": "repair"},
+                    }
+                ],
+                "observation": {
+                    "content": [{"text": 'File "/usr/lib/python3.12/site-packages/x.py"'}],
+                    "extra": {"tool_name": "run_command", "author": "repair"},
+                },
+            }
+        ],
+    }
+    report = audit_patch(modified("pkg/core.py"), payload)
+    assert rules(report, "H5b.host_import")
+    assert report["submitting_agents"] == []
+    assert report["verifier_reached"] is False
+
+
+OFFICIAL_ATIF = Path(__file__).parent / "fixtures" / "atif" / "run1"
+
+
+def test_official_atif_fixtures_drive_host_rules_and_rates():
+    report = audit_run(OFFICIAL_ATIF)
+    by_id = {task["instance_id"]: task for task in report["tasks"]}
+    struct = by_id["task_struct"]
+    assert struct["trace_schema"] == "atif"
+    assert struct["finalization"] == "explicit"
+    assert struct["verifier_reached"] is True
+    assert struct["submit_calls"] == 2
+    assert rules(struct, "H3.submit_count")[0]["severity"] == "info"
+    assert rules(struct, "H5b.host_import")[0]["evidence_blocked"] is True
+    assert rules(struct, "H5c.host_metadata")
+    assert rules(struct, "H5d.python_flags")
+    assert not rules(struct, "H3.edit_after_submit")
+    assert not any(item["severity"] == "block" for item in struct["findings"])
+    single = by_id["task_single"]
+    assert single["verifier_reached"] is None
+    assert single["finalization"] == "explicit"
+    assert not rules(single, "H3.edit_after_submit")
+    assert single["gate"] == "pass"
+    nosub = by_id["task_nosub"]
+    assert nosub["finalization"] == "fallback"
+    assert nosub["verifier_reached"] is False
+    assert rules(nosub, "H3.fallback")
+    assert report["candidate"]["explicit_finalization"] == [2, 3]
+    assert report["candidate"]["verifier_reached"] == [1, 3]
+    assert rules(report["candidate"], "R.explicit_submit_rate")
+    assert rules(report["candidate"], "R.verifier_reach_rate")
+    assert report["gate"] == "warn"
+
+
+def test_nested_arm_traces_pair_with_that_arm(tmp_path):
+    import shutil
+
+    arm = tmp_path / "results" / "control" / "r0"
+    shutil.copytree(OFFICIAL_ATIF / "results" / "traces", arm / "traces")
+    shutil.copytree(OFFICIAL_ATIF / "results" / "patches", arm / "patches")
+    shutil.copy(OFFICIAL_ATIF / "task_results.jsonl", arm / "task_results.jsonl")
+    (tmp_path / "results" / "task_struct.json").write_text(
+        json.dumps({"trace": "<SessionTrace object at 0x1>"})
+    )
+    report = audit_run(tmp_path)
+    struct = next(task for task in report["tasks"] if task["instance_id"] == "task_struct")
+    assert struct["trace_schema"] == "atif"
+    assert not rules(struct, "H3.unknown")
+    assert rules(struct, "H5b.host_import")
+    on_arm = audit_run(arm)
+    assert {task["trace_schema"] for task in on_arm["tasks"]} == {"atif"}
+    assert not any(rules(task, "H3.unknown") for task in on_arm["tasks"])
+
+
+def test_slash_task_ids_use_double_underscore_trace_names(tmp_path):
+    payload = trace([{"agent": "single_v1", "tool": "submit_patch", "args": {}, "output": "ok"}])
+    traces = tmp_path / "results" / "traces"
+    patches = tmp_path / "results" / "patches"
+    traces.mkdir(parents=True)
+    patches.mkdir()
+    (traces / "trace_org__repo.json").write_text(json.dumps(payload))
+    (patches / "org__repo.patch").write_text(modified("pkg/core.py"))
+    (tmp_path / "task_results.jsonl").write_text(
+        json.dumps({"instance_id": "org/repo", "duration_seconds": 1}) + "\n"
+    )
     report = audit_run(tmp_path)
     task = report["tasks"][0]
-    assert task["trace_schema"] == "atif"
+    assert task["instance_id"] == "org/repo"
+    assert task["trace_schema"] == "gemma-lab/trace/v1"
     assert task["finalization"] == "explicit"
-    assert task["verifier_reached"] is True
-    assert task["submit_calls"] == 1
-    assert rules(task, "H5b.host_import")
-    assert rules(task, "H5c.host_metadata")
-    assert report["gate"] == "warn"
+    assert task["verifier_reached"] is None
+    assert not rules(task, "H3.unknown")
 
 
 def test_missing_or_unparseable_atif_is_unknown_not_fallback(tmp_path):

@@ -1,4 +1,5 @@
 import json
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -157,6 +158,7 @@ def test_projected_runtime_boundary(tmp_path):
     with pytest.raises(ValueError, match="10.8 hour limit") as raised:
         check_evaluation(archive, evaluation, scorer_overhead_seconds=0)
     assert "Refusing upload" in str(raised.value)
+    assert "overhead" not in str(raised.value)
     # Equality on the 120-task gate is not enough when the load gate fails.
     row["duration_seconds"] = 330
     _set_rows(evaluation, [row], model_load=0)
@@ -164,26 +166,36 @@ def test_projected_runtime_boundary(tmp_path):
     assert report["ok_120"] is True
     assert report["projected_120_seconds"] == 39600
     assert report["P_ok"] is False
-    with pytest.raises(ValueError, match="10.8 hour limit"):
+    with pytest.raises(ValueError, match="10.8 hour limit") as raised:
         check_evaluation(archive, evaluation, scorer_overhead_seconds=0)
+    assert "overhead" not in str(raised.value)
 
 
 def test_projected_runtime_uses_the_mean_of_every_task(tmp_path):
     archive = tmp_path / "submission.zip"
     pack(Path("agents/baseline"), archive)
     evaluation = evidence(tmp_path, archive)
-    # 200 and 220 average 210. With the default 70s overhead the adjusted mean is 280,
-    # under both gates. 200 and 250 average 225 and the load gate refuses.
+    # 200 and 220 average 210. Default overhead 70 applies only to the 120-task
+    # block: 120 * 280 = 33600. The 129-task block is 900 + 129 * 210.
     rows = [
         {"instance_id": "fast", "resolved": True, "patch_chars": 10, "duration_seconds": 200},
         {"instance_id": "slow", "resolved": False, "patch_chars": 10, "duration_seconds": 220},
     ]
     _set_rows(evaluation, rows)
     assert check_evaluation(archive, evaluation)["tasks"] == 2
-    rows[1]["duration_seconds"] = 250
+    # 260 and 280 average 270. 120 * (270 + 70) exceeds 11 hours. The 129-task
+    # block uses the measured mean alone and still passes.
+    rows[0]["duration_seconds"] = 260
+    rows[1]["duration_seconds"] = 280
     _set_rows(evaluation, rows)
-    with pytest.raises(ValueError, match="10.8 hour limit"):
+    with pytest.raises(ValueError, match="11 hour limit") as raised:
         check_evaluation(archive, evaluation)
+    assert "10.8 hour limit" not in str(raised.value)
+    projection = json.loads((evaluation / "projection.json").read_text())
+    assert projection["basis"] == "measured_mean"
+    assert projection["ok_120"] is False
+    assert projection["P_ok"] is True
+    assert projection["overhead_in_129_block"] is False
 
 
 def test_simple_v3_dev13_mean_is_refused(tmp_path):
@@ -211,6 +223,13 @@ def test_simple_v3_dev13_mean_is_refused(tmp_path):
     assert projection["P_ok"] is False
     assert projection["P_limit"] == 38880
     assert projection["limit_120"] == 39600
+    assert projection["basis"] == "measured_mean"
+    assert projection["applies_at"] == "submit_or_promotion"
+    assert projection["dev_gpu_precondition"] is False
+    assert projection["blocks_use_cap_wall"] is False
+    assert projection["overhead_in_120_block"] is True
+    assert projection["overhead_in_129_block"] is False
+    assert projection["overhead_in_worst_case_warn"] is True
 
 
 def test_structured_v4_10m_diagnostic_mean_is_refused(tmp_path):
@@ -241,12 +260,41 @@ def test_scorer_overhead_flag_changes_the_gate(tmp_path):
         "instance_id": "task",
         "resolved": True,
         "patch_chars": 10,
-        "duration_seconds": 250,
+        "duration_seconds": 280,
     }
     _set_rows(evaluation, [row])
     assert check_evaluation(archive, evaluation, scorer_overhead_seconds=0)["resolved"] == 1
-    with pytest.raises(ValueError, match="10.8 hour limit"):
+    with pytest.raises(ValueError, match="11 hour limit"):
         check_evaluation(archive, evaluation, scorer_overhead_seconds=70)
+    projection = json.loads((evaluation / "projection.json").read_text())
+    assert projection["ok_120"] is False
+    assert projection["P_ok"] is True
+    # 250s with the default 70s overhead still passes both measured-mean blocks.
+    row["duration_seconds"] = 250
+    _set_rows(evaluation, [row])
+    assert check_evaluation(archive, evaluation, scorer_overhead_seconds=70)["resolved"] == 1
+
+
+def test_cap_wall_warns_and_does_not_block(tmp_path, capsys):
+    archive = tmp_path / "submission.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("eval_config.yaml", "evaluation:\n  max_time_minutes: 4.5\n")
+    evaluation = evidence(tmp_path, archive)
+    result = check_evaluation(archive, evaluation)
+    assert result["resolved"] == 1
+    assert result["projection"]["worst_case_warn"] is True
+    assert result["projection"]["ok_120"] is True
+    assert result["projection"]["P_ok"] is True
+    projection = json.loads((evaluation / "projection.json").read_text())
+    assert projection["basis"] == "measured_mean"
+    assert projection["dev_gpu_precondition"] is False
+    assert projection["blocks_use_cap_wall"] is False
+    assert projection["cap_wall_seconds"] == 270
+    assert projection["ok_120"] is True
+    assert projection["P_ok"] is True
+    assert projection["worst_case_warn"] is True
+    assert projection["worst_case_seconds"] == 900 + 129 * (270 + 70)
+    assert "does not block" in capsys.readouterr().err
 
 
 def test_cli_forwards_scorer_overhead(tmp_path, monkeypatch):

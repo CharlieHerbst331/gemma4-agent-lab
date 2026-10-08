@@ -1,0 +1,74 @@
+{
+  "schema_version": "ATIF-v1.7",
+  "agent": {
+    "name": "adk-eval-core",
+    "version": "1.0"
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "source": "agent",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_0",
+          "function_name": "edit_file",
+          "arguments": {
+            "path": "pkg/c.py",
+            "old_str": "a",
+            "new_str": "b"
+          },
+          "extra": {
+            "elapsed_s": 0.00013327598571777344,
+            "timestamp": 1791489134.324975,
+            "author": "repair"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"raw\": \"ok\"}",
+        "extra": {
+          "tool_name": "edit_file",
+          "elapsed_s": 0.0001385211944580078,
+          "timestamp": 1791489134.3249803,
+          "author": "repair"
+        }
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 0.00013327598571777344,
+        "timestamp": 1791489134.324975,
+        "author": "repair"
+      }
+    },
+    {
+      "step_id": 2,
+      "source": "agent",
+      "message": "done",
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "final",
+        "elapsed_s": 0.00015401840209960938,
+        "timestamp": 1791489134.3249958,
+        "author": "repair"
+      }
+    },
+    {
+      "step_id": 3,
+      "source": "system",
+      "message": "please submit",
+      "extra": {
+        "event_type": "continuation_nudge",
+        "elapsed_s": 0.00016307830810546875,
+        "timestamp": 1791489134.3250048,
+        "author": "harness"
+      }
+    }
+  ],
+  "final_metrics": {
+    "total_prompt_tokens": 0,
+    "total_completion_tokens": 0,
+    "total_cached_tokens": 0,
+    "total_tokens": 0,
+    "total_steps": 3
+  }
+}

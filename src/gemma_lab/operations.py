@@ -176,9 +176,12 @@ def wait_for_run(kernel, output, timeout_minutes=45, interval_seconds=45):
     raise RuntimeError(f"Run still pending after {timeout_minutes} minutes: {kernel}")
 
 
-# Two blocks, both using mean duration plus hosted scorer overhead:
-# 120 hidden tasks stay at or under 11 hours, and model load plus 129 public
-# tasks stay at or under 10.8 hours. A cap-based 12 hour worst case warns only.
+# Submit/promotion gates use the measured per-task mean. They are not a
+# precondition for dev GPU runs, and the per-task cap never blocks.
+# Overhead is added only to the 120-task block and the worst-case warning:
+#   120 * (mean + overhead) <= 11 h
+#   L + 129 * mean <= 10.8 h          (no overhead)
+#   L + 129 * (cap_wall + overhead) > 12 h warns only
 PROJECTED_HIDDEN_TASKS = 120
 PROJECTED_PUBLIC_TASKS = 129
 PROJECTED_RUNTIME_LIMIT_SECONDS = 11 * 60 * 60
@@ -251,18 +254,27 @@ def runtime_projection(rows, manifest, archive, overhead):
         )
     durations = task_durations(rows)
     mean = sum(durations) / len(durations)
-    adjusted = mean + float(overhead)
+    overhead = float(overhead)
     load, load_source = model_load_seconds(manifest)
-    projected = adjusted * PROJECTED_HIDDEN_TASKS
-    combined = load + PROJECTED_PUBLIC_TASKS * adjusted
+    # Blocks use the measured mean. Overhead is not part of the 129-task block.
+    projected = (mean + overhead) * PROJECTED_HIDDEN_TASKS
+    combined = load + PROJECTED_PUBLIC_TASKS * mean
     cap = cap_wall_seconds(archive)
-    worst = None if cap is None else load + PROJECTED_PUBLIC_TASKS * cap
+    # The cap feeds the warning only. It is never compared against a block limit.
+    worst = None if cap is None else load + PROJECTED_PUBLIC_TASKS * (cap + overhead)
     return {
+        "basis": "measured_mean",
+        "applies_at": "submit_or_promotion",
+        "dev_gpu_precondition": False,
+        "blocks_use_cap_wall": False,
         "mean_seconds": mean,
         "n_tasks": len(durations),
         "L_seconds": load,
         "L_source": load_source,
-        "scorer_overhead_seconds_per_task": float(overhead),
+        "scorer_overhead_seconds_per_task": overhead,
+        "overhead_in_120_block": True,
+        "overhead_in_129_block": False,
+        "overhead_in_worst_case_warn": True,
         "P_seconds": combined,
         "P_limit": PROJECTED_LOAD_LIMIT_SECONDS,
         "P_ok": combined <= PROJECTED_LOAD_LIMIT_SECONDS,
@@ -293,8 +305,7 @@ def check_projected_runtime(rows, manifest, archive, evaluation, overhead):
             "projected load-adjusted runtime is "
             f"{report['P_seconds'] / 3600:.2f} h "
             f"(model load {report['L_seconds']:.0f} s [{report['L_source']}] + "
-            f"{PROJECTED_PUBLIC_TASKS} × (mean {report['mean_seconds']:.2f} s + "
-            f"{report['scorer_overhead_seconds_per_task']:g} s overhead)), "
+            f"{PROJECTED_PUBLIC_TASKS} × mean {report['mean_seconds']:.2f} s), "
             "which exceeds the 10.8 hour limit"
         )
     if reasons:
@@ -304,8 +315,9 @@ def check_projected_runtime(rows, manifest, archive, evaluation, overhead):
             "Warning: worst-case runtime "
             f"{report['worst_case_seconds'] / 3600:.2f} h exceeds 12 hours "
             f"(model load {report['L_seconds']:.0f} s + "
-            f"{PROJECTED_PUBLIC_TASKS} × cap {report['cap_wall_seconds']:.0f} s). "
-            "This does not block the upload.",
+            f"{PROJECTED_PUBLIC_TASKS} × (cap {report['cap_wall_seconds']:.0f} s + "
+            f"{report['scorer_overhead_seconds_per_task']:g} s scorer overhead)). "
+            "The per-task cap does not block the upload.",
             file=sys.stderr,
         )
     return report

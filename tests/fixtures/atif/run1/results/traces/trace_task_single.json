@@ -1,0 +1,169 @@
+{
+  "schema_version": "ATIF-v1.7",
+  "agent": {
+    "name": "adk-eval-core",
+    "version": "1.0"
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "source": "user",
+      "message": "fix bug",
+      "extra": {
+        "event_type": "task_prompt",
+        "elapsed_s": 1.430511474609375e-06,
+        "timestamp": 1791489134.3244085,
+        "author": "harness"
+      }
+    },
+    {
+      "step_id": 2,
+      "source": "agent",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_1",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python -m pytest -q"
+          },
+          "extra": {
+            "elapsed_s": 0.00033473968505859375,
+            "timestamp": 1791489134.3247418,
+            "author": "single_v1"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"raw\": \"1 failed\"}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 0.00034546852111816406,
+          "timestamp": 1791489134.3247526,
+          "author": "single_v1"
+        }
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 0.00033473968505859375,
+        "timestamp": 1791489134.3247418,
+        "author": "single_v1"
+      }
+    },
+    {
+      "step_id": 3,
+      "source": "agent",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_3",
+          "function_name": "edit_file",
+          "arguments": {
+            "path": "pkg/b.py",
+            "old_str": "a",
+            "new_str": "b"
+          },
+          "extra": {
+            "elapsed_s": 0.00037598609924316406,
+            "timestamp": 1791489134.324783,
+            "author": "single_v1"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"raw\": \"ok\"}",
+        "extra": {
+          "tool_name": "edit_file",
+          "elapsed_s": 0.00037980079650878906,
+          "timestamp": 1791489134.324787,
+          "author": "single_v1"
+        }
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 0.00037598609924316406,
+        "timestamp": 1791489134.324783,
+        "author": "single_v1"
+      }
+    },
+    {
+      "step_id": 4,
+      "source": "agent",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_5",
+          "function_name": "submit_patch",
+          "arguments": {},
+          "extra": {
+            "elapsed_s": 0.0003941059112548828,
+            "timestamp": 1791489134.3248012,
+            "author": "single_v1"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"raw\": \"Patch submitted\"}",
+        "extra": {
+          "tool_name": "submit_patch",
+          "elapsed_s": 0.00039696693420410156,
+          "timestamp": 1791489134.324804,
+          "author": "single_v1"
+        }
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 0.0003941059112548828,
+        "timestamp": 1791489134.3248012,
+        "author": "single_v1"
+      }
+    },
+    {
+      "step_id": 5,
+      "source": "agent",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_7",
+          "function_name": "get_status",
+          "arguments": {},
+          "extra": {
+            "elapsed_s": 0.000408172607421875,
+            "timestamp": 1791489134.3248153,
+            "author": "single_v1"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"raw\": \"ok\"}",
+        "extra": {
+          "tool_name": "get_status",
+          "elapsed_s": 0.00041031837463378906,
+          "timestamp": 1791489134.3248174,
+          "author": "single_v1"
+        }
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 0.000408172607421875,
+        "timestamp": 1791489134.3248153,
+        "author": "single_v1"
+      }
+    },
+    {
+      "step_id": 6,
+      "source": "agent",
+      "message": "Submitted.",
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "final",
+        "elapsed_s": 0.00041866302490234375,
+        "timestamp": 1791489134.3248258,
+        "author": "single_v1"
+      }
+    }
+  ],
+  "final_metrics": {
+    "total_prompt_tokens": 0,
+    "total_completion_tokens": 0,
+    "total_cached_tokens": 0,
+    "total_tokens": 0,
+    "total_steps": 6
+  }
+}
