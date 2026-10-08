@@ -41,9 +41,13 @@ dist/ directories at any depth, and .adk_exec_*.py, are excluded from the patch.
 Never create a real source file under a nested build/ or dist/ directory. Do not
 create files. The repro already lives outside the workspace.
 
-If audit lists a protected path (conftest.py, test_*.py, tests/, test/, pytest.ini,
-pyproject.toml, setup.cfg), revert that edit with edit_file when you still have the
-original text, then continue. Do not edit tests to make a check pass.
+If audit lists a forbidden path, revert that edit with edit_file when you still
+have the original text, then continue. The audit matches grading's protected set:
+conftest.py, pytest.ini, pyproject.toml, tox.ini, setup.cfg, .pytest.ini,
+sitecustomize.py, usercustomize.py, _swegemma_stubs.py, any .pth file, test_*.py,
+*_test.py, and any .py file under a tests, test, or testing directory (names are
+case-insensitive). A non-Python file under those directories is not protected.
+Do not edit tests to make a check pass.
 
 Submission rules: edits after the last submit_patch are dropped, so any edit_file
 must be followed by another submit_patch. A text reply after a submission ends the

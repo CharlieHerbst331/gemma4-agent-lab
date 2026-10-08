@@ -55,14 +55,29 @@ def snapshot(root):
 
 
 def protected_path(name):
-    """Paths fresh grading resets, including nested tests and config files."""
+    """Match grading's _is_protected_test_or_config_path, including nested paths."""
     path = PurePosixPath(str(name).replace("\\", "/"))
-    if any(part in {"test", "tests"} for part in path.parts[:-1]):
-        return True
     base = path.name
-    if base in {"conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg"}:
+    if base in {
+        "conftest.py",
+        "pytest.ini",
+        "pyproject.toml",
+        "tox.ini",
+        "setup.cfg",
+        ".pytest.ini",
+        "sitecustomize.py",
+        "usercustomize.py",
+        "_swegemma_stubs.py",
+    }:
         return True
-    return base.startswith("test_") and base.endswith(".py")
+    if base.endswith(".pth"):
+        return True
+    if base.startswith("test_") and base.endswith(".py"):
+        return True
+    if base.endswith("_test.py"):
+        return True
+    parts = {part.lower() for part in path.parts[:-1]}
+    return bool({"tests", "test", "testing"} & parts and base.endswith(".py"))
 
 
 def third_party_modules(code):
@@ -94,8 +109,10 @@ def probe_module(root, module, environment):
         "print(origin + '\\t' + path)\n"
     )
     try:
+        # -P keeps the cwd off sys.path so this probe matches the scratch child.
+        # It is not python -I or python -E; PYTHONPATH is still honored.
         completed = subprocess.run(
-            [sys.executable, "-c", script],
+            [sys.executable, "-P", "-c", script],
             cwd=root,
             env=environment,
             capture_output=True,
@@ -241,7 +258,9 @@ def repro(workspace, scratch, phase, code=None, timeout=20):
         )
     _, _, fingerprint = snapshot(root)
     environment = dict(os.environ)
-    environment["PYTHONPATH"] = os.pathsep.join([str(root), str(root / "src")])
+    # Same order as the repair prompt: src first, then the workspace root.
+    # default_import_origin below stays root-only, which is the sandbox default.
+    environment["PYTHONPATH"] = os.pathsep.join([str(root / "src"), str(root)])
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
     origins, default_origins = import_report(root, code, environment)
     output_path = scratch / "gemma-agent-repro.log"

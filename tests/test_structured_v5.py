@@ -160,6 +160,11 @@ def test_prompts_state_import_scratch_and_final_submit_rules():
     assert "run_command" in verify and "write_file" in verify
     assert "import_origin" in skill and "default_import_origin" in skill
     assert "pyproject.toml" in skill and "setup.cfg" in skill
+    assert "PYTHONPATH to /workspace/src first, then the workspace root" in skill
+    assert "tox.ini" in skill and "_test.py" in skill
+    script = (CANDIDATE / "skills/verify-patch/scripts/check.py").read_text()
+    assert 'os.pathsep.join([str(root / "src"), str(root)])' in script
+    assert 'default_env["PYTHONPATH"] = str(root)' in script
 
 
 def test_v5_memory_and_lookup_roundtrip(workspace):
@@ -176,21 +181,33 @@ def test_v5_memory_and_lookup_roundtrip(workspace):
     [
         ("pkg/app.py", False),
         ("pkg/test.py", False),
-        ("testing/helper.py", False),
+        ("testing/helper.py", True),
+        ("Testing/helper.py", True),
+        ("tests/data.json", False),
+        ("tests/notes.md", False),
         ("pytest.ini", True),
         ("pkg/pytest.ini", True),
         ("pyproject.toml", True),
         ("src/setup.cfg", True),
+        ("tox.ini", True),
+        ("pkg/tox.ini", True),
+        (".pytest.ini", True),
         ("conftest.py", True),
         ("pkg/conftest.py", True),
+        ("sitecustomize.py", True),
+        ("usercustomize.py", True),
+        ("_swegemma_stubs.py", True),
+        ("src/_extra.pth", True),
         ("test_foo.py", True),
         ("pkg/test_extra.py", True),
+        ("foo_test.py", True),
+        ("pkg/widget_test.py", True),
         ("tests/helper.py", True),
         ("src/test/util.py", True),
         ("tests/test_pkg.py", True),
     ],
 )
-def test_protected_path_matches_the_grading_set(path, flagged):
+def test_protected_path_matches_the_grading_predicate(path, flagged):
     assert check.protected_path(path) is flagged
 
 
@@ -206,10 +223,14 @@ def test_audit_flags_nested_protected_paths_and_not_implementation(workspace):
     (root / "src/test").mkdir(parents=True)
     (root / "src/test/util.py").write_text("VALUE = 1\n")
     (root / "pkg/pytest.ini").write_text("[pytest]\n")
+    (root / "tox.ini").write_text("[tox]\n")
+    (root / "tests/data.json").write_text("{}\n")
     result = check.audit(root)
     assert not result["passed"]
     assert "pkg/impl.py" in result["untracked"]
     assert "pkg/impl.py" not in result["forbidden"]
+    assert "tests/data.json" in result["untracked"]
+    assert "tests/data.json" not in result["forbidden"]
     assert {
         "pytest.ini",
         "tests/test_pkg.py",
@@ -219,6 +240,7 @@ def test_audit_flags_nested_protected_paths_and_not_implementation(workspace):
         "test_root.py",
         "src/test/util.py",
         "pkg/pytest.ini",
+        "tox.ini",
     } <= set(result["forbidden"])
 
 
@@ -248,3 +270,20 @@ def test_repro_reports_workspace_and_default_import_origin(workspace):
     host = check.repro(root, scratch, "probe", "import pytest\nassert pytest.__file__\n")
     assert host["imports_installed_copy"] is True
     assert host["import_origin"][0]["origin"] == "INSTALLED-COPY"
+    dual_root = root / "dualpkg"
+    dual_src = root / "src" / "dualpkg"
+    dual_root.mkdir()
+    dual_src.mkdir()
+    (dual_root / "__init__.py").write_text("MARKER = 'from-root'\n")
+    (dual_src / "__init__.py").write_text("MARKER = 'from-src'\n")
+    preferred = check.repro(
+        root,
+        scratch,
+        "probe",
+        "import dualpkg\nassert dualpkg.MARKER == 'from-src'\n",
+    )
+    assert preferred["passed"]
+    assert preferred["import_origin"][0]["origin"] == "WORKSPACE"
+    assert "src/dualpkg" in preferred["import_origin"][0]["file"].replace("\\", "/")
+    assert preferred["default_import_origin"][0]["origin"] == "WORKSPACE"
+    assert "src/dualpkg" not in preferred["default_import_origin"][0]["file"].replace("\\", "/")

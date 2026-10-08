@@ -42,8 +42,9 @@ behavior clue, return UNCERTAIN and loop_iteration immediately. No searches, no 
    (get_status tool_calls_used) or about 95 seconds (agent_elapsed_seconds),
    whichever comes first. 95 seconds is 35 percent of the 270 second cap. Do not
    keep searching past that point. Use edit_file with an exact unique old_string
-   and a small replacement. Do not edit tests, conftest.py, pytest.ini,
-   pyproject.toml, or setup.cfg.
+   and a small replacement. Do not edit a path the verify-patch audit flags:
+   conftest.py, pytest.ini, pyproject.toml, tox.ini, setup.cfg, sitecustomize.py,
+   any .pth file, test_*.py, *_test.py, or a .py file under tests, test, or testing.
 
 4. Check the workspace copy with verify-patch. Exact call: skill_name
    "verify-patch", file_path "scripts/check.py", args
