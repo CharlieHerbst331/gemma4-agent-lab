@@ -79,6 +79,7 @@ def audit_run(directory, policy=None, task_ids=None, *, require_trace=False):
     manifest = _read_json(directory / "run_manifest.json")
     tasks = []
     for group, instance_id in selected:
+        arm, replicate = _arm_replicate(directory, group)
         patch_path = _patch_file(directory, group, instance_id)
         patch_text = patch_path.read_text() if patch_path else ""
         # Parsed source is the harness ATIF file trace_<id>.json. The notebook
@@ -116,6 +117,8 @@ def audit_run(directory, policy=None, task_ids=None, *, require_trace=False):
             report["gate"] = _gate(report["findings"])
         tasks.append(
             {
+                "arm": arm,
+                "replicate": replicate,
                 "instance_id": instance_id,
                 "gate": report["gate"],
                 "finalization": report["finalization"],
@@ -129,9 +132,27 @@ def audit_run(directory, policy=None, task_ids=None, *, require_trace=False):
                 "findings": report["findings"],
             }
         )
-    tasks.sort(key=lambda item: item["instance_id"])
-    rate_findings = _rate_findings(tasks, policy)
-    candidate_gate = _gate([*rate_findings, *(item for task in tasks for item in task["findings"])])
+    tasks.sort(key=lambda item: (item["arm"] or "", item["replicate"] or "", item["instance_id"]))
+    arm_reports = _arm_reports(tasks, policy)
+    multi_arm = len(arm_reports) > 1
+    if multi_arm:
+        rate_findings = _tagged_arm_rates(arm_reports)
+        candidate_gate = _gate(
+            [*rate_findings, *(item for task in tasks for item in task["findings"])]
+        )
+        candidate = {
+            "gate": candidate_gate,
+            "explicit_finalization": None,
+            "verifier_reached": None,
+            "scratch_leak_tasks": None,
+            "test_edit_tasks": None,
+            "debug_print_tasks": None,
+            "reasons": [item["evidence"] for item in rate_findings],
+            "findings": rate_findings,
+        }
+    else:
+        candidate = _cohort(tasks, policy)
+        candidate_gate = candidate["gate"]
     schemas = {task["trace_schema"] for task in tasks}
     recognized = schemas - {"absent", "unknown"}
     if len(recognized) == 1 and schemas <= recognized | {"absent"}:
@@ -140,7 +161,7 @@ def audit_run(directory, policy=None, task_ids=None, *, require_trace=False):
         trace_schema = next(iter(schemas))
     else:
         trace_schema = "mixed"
-    return {
+    report = {
         "schema": SCHEMA,
         "checker_version": CHECKER_VERSION,
         "policy_sha256": policy_sha,
@@ -148,18 +169,12 @@ def audit_run(directory, policy=None, task_ids=None, *, require_trace=False):
         "archive_sha256": manifest.get("sha256") if isinstance(manifest, dict) else None,
         "trace_schema": trace_schema,
         "gate": candidate_gate,
-        "candidate": {
-            "gate": candidate_gate,
-            "explicit_finalization": _ratio(tasks, lambda task: task["finalization"] == "explicit"),
-            "verifier_reached": _verifier_ratio(tasks),
-            "scratch_leak_tasks": _ratio(tasks, lambda task: _has(task, "H1.scratch", "block")),
-            "test_edit_tasks": _ratio(tasks, lambda task: _has(task, "H2.protected", "block")),
-            "debug_print_tasks": _ratio(tasks, lambda task: _has(task, "H4.print", "warn")),
-            "reasons": [item["evidence"] for item in rate_findings],
-            "findings": rate_findings,
-        },
+        "candidate": candidate,
         "tasks": tasks,
     }
+    if arm_reports:
+        report["arms"] = arm_reports
+    return report
 
 
 def lint_candidate(directory, policy=None):
@@ -254,6 +269,53 @@ def _exit_code(report, fail_on: str) -> int:
     return 0
 
 
+def _cohort(tasks, policy) -> dict:
+    rate_findings = _rate_findings(tasks, policy)
+    return {
+        "gate": _gate([*rate_findings, *(item for task in tasks for item in task["findings"])]),
+        "explicit_finalization": _ratio(tasks, lambda task: task["finalization"] == "explicit"),
+        "verifier_reached": _verifier_ratio(tasks),
+        "scratch_leak_tasks": _ratio(tasks, lambda task: _has(task, "H1.scratch", "block")),
+        "test_edit_tasks": _ratio(tasks, lambda task: _has(task, "H2.protected", "block")),
+        "debug_print_tasks": _ratio(tasks, lambda task: _has(task, "H4.print", "warn")),
+        "reasons": [item["evidence"] for item in rate_findings],
+        "findings": rate_findings,
+    }
+
+
+def _arm_reports(tasks, policy) -> list[dict]:
+    names = sorted({task["arm"] for task in tasks if task.get("arm")})
+    reports = []
+    for arm in names:
+        arm_tasks = [task for task in tasks if task.get("arm") == arm]
+        summary = _cohort(arm_tasks, policy)
+        summary["arm"] = arm
+        replicates = []
+        labels = sorted({task.get("replicate") or "" for task in arm_tasks})
+        for label in labels:
+            subset = [task for task in arm_tasks if (task.get("replicate") or "") == label]
+            replicate = _cohort(subset, policy)
+            replicate["replicate"] = label or None
+            replicates.append(replicate)
+        summary["replicates"] = replicates
+        reports.append(summary)
+    return reports
+
+
+def _tagged_arm_rates(arm_reports: list[dict]) -> list[dict]:
+    """Rate findings stay inside an arm. Replicates of one arm may pool; arms do not."""
+    found = []
+    for arm in arm_reports:
+        for item in arm["findings"]:
+            tagged = dict(item)
+            tagged["path"] = arm["arm"]
+            prefix = f"{arm['arm']}: "
+            if not tagged["evidence"].startswith(prefix):
+                tagged["evidence"] = prefix + tagged["evidence"]
+            found.append(tagged)
+    return sort_findings(found)
+
+
 def _ratio(tasks, predicate) -> list[int]:
     return [sum(1 for task in tasks if predicate(task)), len(tasks)]
 
@@ -308,6 +370,21 @@ def _rate_findings(tasks, policy) -> list[dict]:
                 }
             )
     return sort_findings(found)
+
+
+def _arm_replicate(directory: Path, group: Path) -> tuple[str | None, str | None]:
+    """results/<arm>/<replicate> relative to the audited directory, or the directory itself."""
+    try:
+        relative = group.resolve().relative_to(directory.resolve())
+    except ValueError:
+        relative = Path()
+    parts = relative.parts
+    if len(parts) >= 3 and parts[0] == "results":
+        return parts[1], parts[2]
+    absolute = group.resolve().parts
+    if len(absolute) >= 3 and absolute[-3] == "results":
+        return absolute[-2], absolute[-1]
+    return None, None
 
 
 def _trace_name(instance_id: str) -> str:
@@ -457,11 +534,14 @@ def _find_trace(directory: Path, group: Path, instance_id: str) -> Path | None:
     for path in candidates:
         if path.is_file():
             return path
-    results = directory / "results"
-    if results.is_dir():
-        matches = sorted(path for path in results.glob(f"*/*/traces/{name}") if path.is_file())
-        if matches:
-            return matches[0]
+    # A replicate group must not borrow another arm's trace. The glob is only
+    # for a root task list whose traces live under results/<arm>/<replicate>/.
+    if group == directory:
+        results = directory / "results"
+        if results.is_dir():
+            matches = sorted(path for path in results.glob(f"*/*/traces/{name}") if path.is_file())
+            if matches:
+                return matches[0]
     return None
 
 
@@ -490,7 +570,10 @@ def _summary(report) -> str:
         lines = ["instance_id gate finalization rules"]
         for task in report["tasks"]:
             rules = ",".join(sorted({item["rule"] for item in task["findings"]})) or "-"
-            lines.append(f"{task['instance_id']} {task['gate']} {task['finalization']} {rules}")
+            label = task["instance_id"]
+            if task.get("arm"):
+                label = f"{task['arm']}/{task.get('replicate') or '-'}/{label}"
+            lines.append(f"{label} {task['gate']} {task['finalization']} {rules}")
         gate = report["gate"]
         lines.append(f"candidate {gate}")
         return "\n".join(lines)

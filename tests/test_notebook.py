@@ -125,6 +125,55 @@ def test_returned_runner_errors_survive_collection(tmp_path, monkeypatch, messag
     assert "SessionTrace" not in (tmp_path / "results" / "task.json").read_text()
 
 
+def test_preexisting_harness_trace_is_left_byte_identical(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    agent = Path("agents/baseline").resolve()
+    starter(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    output = tmp_path / "generated"
+    generate(agent, "owner", "experiment-v1", output)
+    notebook = json.loads((output / "evaluation.ipynb").read_text())
+    code = "".join(notebook["cells"][5]["source"])
+    loop = code[code.index("results_path =") : code.index("submission_df =")]
+    assert "results/traces" not in loop.replace("results/traces/trace_<id>.json", "")
+    harness = tmp_path / "results" / "traces" / "trace_task.json"
+    harness.parent.mkdir(parents=True)
+    payload = b'{"schema_version": "ATIF-v1.7", "steps": [{"step_id": 1}]}\n'
+    harness.write_bytes(payload)
+
+    class Trace:
+        def save(self, path):
+            Path(path).write_text("raw dump\n")
+
+        def to_dict(self):
+            return {"schema_version": "not-the-harness-file"}
+
+    result = SimpleNamespace(
+        agent_patch="diff\n",
+        resolved=True,
+        test_exit_code=0,
+        tool_calls=1,
+        duration_seconds=2,
+        error_message=None,
+        test_output="",
+        trace=Trace(),
+    )
+    namespace = dict(
+        WORKING_DIR=tmp_path,
+        SAMPLE_TASKS=[SimpleNamespace(instance_id="task", repo="example/repo")],
+        evaluator=SimpleNamespace(evaluate_task=None),
+        run_sync=lambda *args, **kwargs: result,
+        predictions=[],
+        json=json,
+    )
+    exec(loop, namespace)
+    assert harness.read_bytes() == payload
+    assert sorted(path.name for path in harness.parent.iterdir()) == ["trace_task.json"]
+    details = json.loads((tmp_path / "results" / "task.json").read_text())
+    assert details["trace"]["schema_version"] == "not-the-harness-file"
+
+
 def test_official_wheelhouse_mount_fallback(tmp_path, monkeypatch):
     agent = Path("agents/baseline").resolve()
     starter(tmp_path)

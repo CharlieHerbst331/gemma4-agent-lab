@@ -160,6 +160,8 @@ for idx, task in enumerate(SAMPLE_TASKS, start=1):
                 _seen.add(identity)
                 return _jsonable(vars(value), _seen)
             return str(value)
+        # Evaluator record only. The harness writes ATIF to
+        # results/traces/trace_<id>.json; this cell must not replace that file.
         (WORKING_DIR / 'results' / f'{task.instance_id}.json').write_text(
             json.dumps(_jsonable(details), indent=2))
     except Exception as exc:

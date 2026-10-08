@@ -330,7 +330,7 @@ def _h4_and_h5a_lines(files, policy) -> list[dict]:
                 found.append(
                     finding("H5a.sys_path", "block", parsed.path, line_no, evidence=text.strip())
                 )
-        found.extend(_alias_findings(parsed.path, lines, found))
+        found.extend(_alias_findings(parsed.path, lines, found, _post_patch_lines(parsed)))
     return found
 
 
@@ -481,38 +481,222 @@ _ALIAS_DEBUG_CALLS = {
 _ALIAS_DYNAMIC_IMPORTS = {"importlib.import_module", "__import__"}
 
 
-def _alias_findings(path: str, lines: list[tuple[int, str]], existing: list[dict]) -> list[dict]:
+def _post_patch_lines(parsed: FileDiff) -> list[tuple[int, str]]:
+    """Context plus additions, in post-patch order. Removed lines are omitted."""
+    found = []
+    for hunk in parsed.hunks:
+        line_no = hunk.new_start
+        for raw in hunk.lines:
+            if raw.startswith("\\") or raw.startswith("-"):
+                continue
+            text = raw[1:] if raw[:1] in {"+", " "} else raw
+            found.append((line_no, text))
+            line_no += 1
+    return found
+
+
+def _alias_findings(
+    path: str,
+    lines: list[tuple[int, str]],
+    existing: list[dict],
+    post_patch: list[tuple[int, str]] | None = None,
+) -> list[dict]:
     """Block import aliases the line scanner cannot see.
 
     Tracks `import sys as s`, `from sys import path as P`, and
-    `from importlib import import_module` across the added lines. Does not
-    follow `p = sys.path`, `exec`, or string-concatenated imports.
+    `from importlib import import_module`. A real diff often fails to parse
+    as a module (the import and the use sit in different hunks, or the import
+    is an unchanged line), so the AST pass falls back to a line scan of the
+    alias imports plus the post-patch hunk text. Does not follow `p = sys.path`,
+    `exec`, or string-concatenated imports.
     """
-    texts = [text for _, text in lines]
-    numbers = [number for number, _ in lines]
-    if not any(text.strip() for text in texts):
+    if not any(text.strip() for _, text in lines):
         return []
-    try:
-        tree = ast.parse(textwrap.dedent("\n".join(texts)))
-    except SyntaxError:
-        return []
-    scanner = _AliasScanner()
-    scanner.visit(tree)
+    added_numbers = {number for number, _ in lines}
     seen = {
         (item["rule"], item.get("line"))
         for item in existing
         if item.get("path") == path and item["rule"] in {"H4.debug", "H5a.sys_path"}
     }
-    found = []
+    found: list[dict] = []
+    added_tree = _parse_lines(lines)
+    if added_tree is not None:
+        _collect_alias_hits(found, seen, path, lines, added_tree, added_numbers)
+    post = post_patch or []
+    if post and (added_tree is None or len(post) > len(lines)):
+        post_tree = _parse_lines(post)
+        if post_tree is not None:
+            _collect_alias_hits(found, seen, path, post, post_tree, added_numbers)
+        else:
+            _collect_line_alias_hits(found, seen, path, lines, post)
+    elif added_tree is None:
+        _collect_line_alias_hits(found, seen, path, lines, lines)
+    return found
+
+
+def _parse_lines(lines: list[tuple[int, str]]):
+    source = "\n".join(text for _, text in lines)
+    for candidate in (source, textwrap.dedent(source)):
+        try:
+            return ast.parse(candidate)
+        except SyntaxError:
+            continue
+    return None
+
+
+def _collect_alias_hits(found, seen, path, lines, tree, added_numbers) -> None:
+    scanner = _AliasScanner()
+    scanner.visit(tree)
+    numbers = [number for number, _ in lines]
+    texts = [text for _, text in lines]
     for rule, lineno, evidence in scanner.found:
         if lineno < 1 or lineno > len(numbers):
             continue
         line_no = numbers[lineno - 1]
-        if (rule, line_no) in seen:
+        if line_no not in added_numbers or (rule, line_no) in seen:
             continue
         seen.add((rule, line_no))
         found.append(finding(rule, "block", path, line_no, evidence=evidence or texts[lineno - 1]))
-    return found
+
+
+def _collect_line_alias_hits(found, seen, path, added, alias_lines) -> None:
+    aliases: dict[str, str] = {}
+    for _, text in alias_lines:
+        aliases.update(_import_aliases(text))
+    for _, text in added:
+        aliases.update(_import_aliases(text))
+    for line_no, text in added:
+        rule = _alias_use(text, aliases)
+        if not rule or (rule, line_no) in seen:
+            continue
+        seen.add((rule, line_no))
+        found.append(finding(rule, "block", path, line_no, evidence=text))
+
+
+def _import_aliases(text: str) -> dict[str, str]:
+    tokens = [value for _, value in _lex(text)]
+    if not tokens:
+        return {}
+    if tokens[0] == "import":
+        return _import_bindings(tokens[1:])
+    if tokens[0] == "from" and "import" in tokens:
+        cut = tokens.index("import")
+        module = "".join(tokens[1:cut])
+        return _from_bindings(module, tokens[cut + 1 :])
+    return {}
+
+
+def _import_bindings(tokens: list[str]) -> dict[str, str]:
+    aliases = {}
+    for part in _split_commas(tokens):
+        if not part:
+            continue
+        if "as" in part:
+            cut = part.index("as")
+            local = part[cut + 1] if cut + 1 < len(part) else ""
+            if local:
+                aliases[local] = "".join(part[:cut])
+        else:
+            canonical = "".join(part).split(".")[0]
+            if canonical:
+                aliases[canonical] = canonical
+    return aliases
+
+
+def _from_bindings(module: str, tokens: list[str]) -> dict[str, str]:
+    aliases = {}
+    for part in _split_commas(tokens):
+        if not part or part[0] == "*":
+            continue
+        if "as" in part:
+            cut = part.index("as")
+            local = part[cut + 1] if cut + 1 < len(part) else ""
+            canonical = part[0]
+        else:
+            local = part[0]
+            canonical = part[0]
+        if local:
+            aliases[local] = f"{module}.{canonical}" if module else canonical
+    return aliases
+
+
+def _split_commas(tokens: list[str]) -> list[list[str]]:
+    parts: list[list[str]] = [[]]
+    for token in tokens:
+        if token == ",":
+            parts.append([])
+        else:
+            parts[-1].append(token)
+    return parts
+
+
+def _alias_use(text: str, aliases: dict[str, str]) -> str:
+    tokens = _lex(text)
+    for chain in _calls(tokens):
+        resolved = _resolve_chain(chain, aliases)
+        if resolved in _ALIAS_PATH_CALLS:
+            return "H5a.sys_path"
+        if resolved in _ALIAS_DEBUG_CALLS or _line_getattr_breakpoint(tokens, aliases):
+            return "H4.debug"
+        if resolved in _ALIAS_DYNAMIC_IMPORTS and _line_mentions_debugger(tokens):
+            return "H4.debug"
+    if _line_assigns_sys_path(tokens, aliases):
+        return "H5a.sys_path"
+    return ""
+
+
+def _resolve_chain(chain: tuple[str, ...], aliases: dict[str, str]) -> str:
+    if not chain:
+        return ""
+    head = aliases.get(chain[0], chain[0])
+    if len(chain) == 1:
+        return head
+    return head + "." + ".".join(chain[1:])
+
+
+def _line_getattr_breakpoint(tokens, aliases: dict[str, str]) -> bool:
+    values = [value for _, value in tokens]
+    if "getattr" not in values or "breakpoint" not in values:
+        return False
+    for chain in _calls(tokens):
+        if _resolve_chain(chain, aliases) != "getattr":
+            continue
+        # getattr(builtins, "breakpoint") — the first name after getattr is the target.
+        try:
+            start = values.index("getattr")
+        except ValueError:
+            return False
+        tail = values[start + 1 :]
+        target = next((item for item in tail if item not in {"(", ")", ","}), "")
+        if aliases.get(target, target) != "builtins":
+            return False
+        return any(token[0] == tokenize.STRING and "breakpoint" in token[1] for token in tokens)
+    return False
+
+
+def _line_mentions_debugger(tokens) -> bool:
+    return any(
+        token[0] == tokenize.STRING and any(name in token[1] for name in DEBUGGERS)
+        for token in tokens
+    )
+
+
+def _line_assigns_sys_path(tokens, aliases: dict[str, str]) -> bool:
+    for index, token in enumerate(tokens):
+        if token[0] != tokenize.NAME:
+            continue
+        resolved = aliases.get(token[1], token[1])
+        if resolved == "sys.path" and _assigns(tokens, index):
+            return True
+        if (
+            resolved == "sys"
+            and index + 2 < len(tokens)
+            and tokens[index + 1] == (tokenize.OP, ".")
+            and tokens[index + 2] == (tokenize.NAME, "path")
+            and _assigns(tokens, index + 2)
+        ):
+            return True
+    return False
 
 
 class _AliasScanner(ast.NodeVisitor):

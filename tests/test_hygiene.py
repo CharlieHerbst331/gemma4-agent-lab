@@ -352,6 +352,48 @@ def test_untracked_alias_bypasses_stay_open(body):
     assert not rules(report, "H5a.sys_path")
 
 
+def test_alias_import_and_use_in_separate_hunks_block():
+    body = (
+        "diff --git a/pkg/core.py b/pkg/core.py\n"
+        "--- a/pkg/core.py\n"
+        "+++ b/pkg/core.py\n"
+        "@@ -1,3 +1,4 @@\n"
+        " import os\n"
+        "+import sys as s\n"
+        " VALUE = 1\n"
+        "@@ -10,3 +11,4 @@\n"
+        " def ready():\n"
+        "+    s.path.insert(0, '/tmp')\n"
+        "     return 1\n"
+    )
+    report = audit_patch(body)
+    assert rules(report, "H5a.sys_path")
+    assert report["gate"] == "block"
+    debugger = body.replace("import sys as s", "from importlib import import_module").replace(
+        "s.path.insert(0, '/tmp')", "import_module('pdb')"
+    )
+    report = audit_patch(debugger)
+    assert rules(report, "H4.debug")
+    assert report["gate"] == "block"
+
+
+def test_alias_defined_on_an_unchanged_line_still_blocks():
+    body = (
+        "diff --git a/pkg/core.py b/pkg/core.py\n"
+        "--- a/pkg/core.py\n"
+        "+++ b/pkg/core.py\n"
+        "@@ -1,4 +1,5 @@\n"
+        " import sys as s\n"
+        " \n"
+        " def ready():\n"
+        "+    s.path.insert(0, '/tmp')\n"
+        "     return 1\n"
+    )
+    report = audit_patch(body)
+    assert rules(report, "H5a.sys_path")
+    assert report["gate"] == "block"
+
+
 def test_h5a_imported_path_mutation_on_a_later_line_blocks():
     body = (
         "diff --git a/pkg/__init__.py b/pkg/__init__.py\n"
@@ -817,6 +859,81 @@ def test_atif_observation_content_list_marks_host_import_and_missed_verify():
     assert report["verifier_reached"] is False
 
 
+def test_parallel_same_tool_matches_output_by_id_then_order():
+    host = 'File "/usr/lib/python3.12/site-packages/x.py"'
+    by_id = {
+        "schema_version": "ATIF-v1.7",
+        "agent": {"name": "adk-eval-core"},
+        "steps": [
+            {
+                "source": "agent",
+                "extra": {"author": "repair"},
+                "tool_calls": [
+                    {
+                        "tool_call_id": "c1",
+                        "function_name": "run_command",
+                        "arguments": {"command": "echo ok"},
+                        "extra": {"author": "repair"},
+                    },
+                    {
+                        "tool_call_id": "c2",
+                        "function_name": "run_command",
+                        "arguments": {"command": "python -c 'import x'"},
+                        "extra": {"author": "repair"},
+                    },
+                ],
+                "observation": {
+                    "content": "ok",
+                    "extra": {"tool_name": "run_command", "author": "repair", "tool_call_id": "c1"},
+                },
+            },
+            {
+                "source": "system",
+                "observation": {
+                    "content": host,
+                    "extra": {"tool_name": "run_command", "author": "repair", "tool_call_id": "c2"},
+                },
+            },
+        ],
+    }
+    report = audit_patch(modified("pkg/core.py"), by_id)
+    found = rules(report, "H5b.host_import")
+    assert len(found) == 1 and "site-packages" in found[0]["evidence"]
+    by_order = {
+        "schema_version": "ATIF-v1.7",
+        "agent": {"name": "adk-eval-core"},
+        "steps": [
+            {
+                "source": "agent",
+                "extra": {"author": "repair"},
+                "tool_calls": [
+                    {
+                        "tool_call_id": "c1",
+                        "function_name": "run_command",
+                        "arguments": {"command": "echo ok"},
+                        "extra": {"author": "repair"},
+                    },
+                    {
+                        "tool_call_id": "c2",
+                        "function_name": "run_command",
+                        "arguments": {"command": "python -c 'import x'"},
+                        "extra": {"author": "repair"},
+                    },
+                ],
+                "observation": {
+                    "results": [
+                        {"content": "ok"},
+                        {"content": host},
+                    ]
+                },
+            }
+        ],
+    }
+    report = audit_patch(modified("pkg/core.py"), by_order)
+    found = rules(report, "H5b.host_import")
+    assert len(found) == 1 and "site-packages" in found[0]["evidence"]
+
+
 OFFICIAL_ATIF = Path(__file__).parent / "fixtures" / "atif" / "run1"
 
 
@@ -868,6 +985,50 @@ def test_nested_arm_traces_pair_with_that_arm(tmp_path):
     on_arm = audit_run(arm)
     assert {task["trace_schema"] for task in on_arm["tasks"]} == {"atif"}
     assert not any(rules(task, "H3.unknown") for task in on_arm["tasks"])
+
+
+def test_paired_run_rates_stay_inside_each_arm(tmp_path):
+    def submit(agent):
+        return trace([{"agent": agent, "tool": "submit_patch", "args": {}, "output": "ok"}])
+
+    def write_group(arm, replicate, agent):
+        group = tmp_path / "results" / arm / replicate
+        (group / "traces").mkdir(parents=True)
+        (group / "patches").mkdir()
+        rows = []
+        for task_id in ("alpha", "beta"):
+            (group / "patches" / f"{task_id}.patch").write_text(modified("pkg/core.py"))
+            (group / "traces" / f"trace_{task_id}.json").write_text(json.dumps(submit(agent)))
+            rows.append({"instance_id": task_id, "duration_seconds": 1})
+        (group / "task_results.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+    for replicate in ("r0", "r1"):
+        write_group("structured", replicate, "verify")
+        write_group("single", replicate, "single_v1")
+    report = audit_run(tmp_path)
+    keys = [(task["arm"], task["replicate"], task["instance_id"]) for task in report["tasks"]]
+    assert keys == [
+        ("single", "r0", "alpha"),
+        ("single", "r0", "beta"),
+        ("single", "r1", "alpha"),
+        ("single", "r1", "beta"),
+        ("structured", "r0", "alpha"),
+        ("structured", "r0", "beta"),
+        ("structured", "r1", "alpha"),
+        ("structured", "r1", "beta"),
+    ]
+    assert len(set(keys)) == 8
+    assert report["candidate"]["verifier_reached"] is None
+    assert not rules(report["candidate"], "R.verifier_reach_rate")
+    assert report["gate"] == "pass"
+    by_arm = {item["arm"]: item for item in report["arms"]}
+    assert by_arm["structured"]["verifier_reached"] == [4, 4]
+    assert by_arm["single"]["verifier_reached"] is None
+    assert not rules(by_arm["structured"], "R.verifier_reach_rate")
+    assert not rules(by_arm["single"], "R.verifier_reach_rate")
+    replicates = {item["replicate"]: item for item in by_arm["structured"]["replicates"]}
+    assert replicates["r0"]["verifier_reached"] == [2, 2]
+    assert replicates["r1"]["verifier_reached"] == [2, 2]
 
 
 def test_slash_task_ids_use_double_underscore_trace_names(tmp_path):

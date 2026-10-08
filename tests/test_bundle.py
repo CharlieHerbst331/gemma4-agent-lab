@@ -90,6 +90,22 @@ def test_generation_ceiling(agent):
         validate(agent)
 
 
+def test_stray_hygiene_files_do_not_change_the_archive_hash(tmp_path):
+    source = tmp_path / "simple-v3"
+    shutil.copytree(Path("agents/simple-v3"), source)
+    (source / "hygiene.json").write_text('{"gate": "pass"}\n')
+    (source / "projection.json").write_text("{}\n")
+    (source / "sub_agents" / "hygiene.json").write_text("{}\n")
+    archive = tmp_path / "submission.zip"
+    manifest = pack(source, archive)
+    assert manifest["sha256"] == "50d7b69dd4d0f6a5b4925bda919f69e57196b72337190bd6073be95591ff2646"
+    with zipfile.ZipFile(archive) as bundle:
+        names = bundle.namelist()
+    assert "hygiene.json" not in names
+    assert "projection.json" not in names
+    assert "sub_agents/hygiene.json" not in names
+
+
 def test_alias_cycle_rejected(agent):
     (agent / "loop.yaml").write_text("loop: &loop\n  self: *loop\n")
     with pytest.raises(ValueError, match="aliases"):

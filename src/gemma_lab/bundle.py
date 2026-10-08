@@ -16,6 +16,8 @@ from gemma_lab.common import MODEL, candidate_source_commit, git_revision, now, 
 MAX_BYTES = 3 * 1024**3
 # Conservative local policy. Official extension checks run in the GPU notebook too.
 EXTENSIONS = {".yaml", ".yml", ".md", ".txt", ".json", ".safetensors", ".py"}
+# Controller reports. A hygiene run inside a candidate must not change the archive.
+PACK_EXCLUDED_NAMES = {"hygiene.json", "projection.json"}
 TOOLS = {
     "run_command",
     "submit_patch",
@@ -94,6 +96,8 @@ def validate(source: Path):
     for path in sorted(source.rglob("*")):
         contained(source, path)
         if path.is_file():
+            if path.name in PACK_EXCLUDED_NAMES:
+                continue
             if path.suffix.lower() not in EXTENSIONS or any(
                 part.startswith(".") for part in path.relative_to(source).parts
             ):
