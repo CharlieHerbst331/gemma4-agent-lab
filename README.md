@@ -55,7 +55,7 @@ The submitted three-role candidate is `agents/simple-v3` (earlier pilots remain 
 
 The evaluated development candidate is `agents/structured-v4`: tool-free triage, isolated repair/verification contexts, and scoped task-memory, source-lookup, and verify-patch skills. See [STRUCTURED_V4](docs/STRUCTURED_V4.md). Its official three-task diagnostic resolved 1/3 with zero skill invocations; it is not promoted. See [diagnostic results](docs/STRUCTURED_V4_DIAGNOSTIC.md).
 
-The current longer-budget development variant is `agents/structured-v4-10m`: 10 minutes per task, 80 counted tool calls, 60 model turns, and a 300-second command timeout. It has not been evaluated or submitted.
+The current longer-budget development variant is `agents/structured-v4-10m`: 10 minutes per task, 80 counted tool calls, 60 model turns, and a 300-second command timeout. Its official three-task diagnostic resolved 3/3 versus the five-minute version’s 1/3, but two patches contain scratch files and use fallback finalization. It is not submitted. See [10-minute diagnostic](docs/STRUCTURED_V4_10M_DIAGNOSTIC.md).
 
 ## Develop and compare
 

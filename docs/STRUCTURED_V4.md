@@ -110,3 +110,11 @@ runtime including sandbox setup, excluding grading. A10minute cap does not guara
 an acceptable full-run average; measure actual generation/setup before a future upload.
 Prepared same-cohort diagnostic notebook is generated separately; no GPU run launched
 by this configuration change. Raising time does not make optional skills mandatory.
+
+## Ten-minute diagnostic completed
+
+The official same-task test resolved3/3 versus five-minute v4's1/3, with two paired
+wins and no regressions. First edits in the previously failing tasks occurred after
+five minutes. Skill adoption/clean finalization remain incomplete: verify-patch runs
+on one task, while two resolved fallback patches contain scratch. See
+`STRUCTURED_V4_10M_DIAGNOSTIC.md`. No broader performance/promotion claim or new upload.

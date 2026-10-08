@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: October 7, 2026 (Pacific).
+Last updated: October 8, 2026 (Pacific).
 
 ## Current development budget variant
 
@@ -12,9 +12,15 @@ changes. Candidate commit `b005268`, archive SHA256
 Archive `artifacts/structured-v4-10m/submission.zip`; same-cohort official notebook
 executed from `notebooks/generated/structured-v4-10m-diagnostic`.
 Private official run: https://www.kaggle.com/code/charlesaherbst/gemma4-structured-v4-10m-diagnostic
-(v1 QUEUED/RUNNING); collector/output `runs/kaggle/structured-v4-10m-diagnostic-v1`.
+(v1 COMPLETE); output `runs/kaggle/structured-v4-10m-diagnostic-v1`.
 Same frozen diagnostic IDs: fastapi_11194,fastapi_14786,rich_3454. Portable validation
-passed and local archive exactly matches notebook hash. Results pending; no submission. Original
+passed and archive hash matched. Official diagnostic3/3 versus five-minute v4's1/3:
+two paired wins,no regressions,1468.5taskseconds/104calls,zero recordedinfra/budgeterrors.
+Two tasks use fallback with scratch files; only fastapi14786 explicitly submits a clean
+patch and invokes verify-patch. No new competition submission. Full report:
+`docs/STRUCTURED_V4_10M_DIAGNOSTIC.md`. Outputs/stages/audit/paired comparison are saved;
+collector completed, no active run or recurring job. Do not generalize three-task success
+or promote without broader same-cohort measurement and patch-hygiene remediation. Original
 five-minute candidate, archive and results remain unchanged. The two diagnostic
 failures explicitly report session timeout, not single-command timeout. The12hour
 competition-wide generation limit still applies; longer caps require runtime evidence.
