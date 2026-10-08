@@ -665,11 +665,69 @@ def test_kill_process_group_terms_then_kills_a_recorded_pgid():
     assert kill_process_group(50, grace=5, sleep=fail_sleep, killpg=missing) == 50
 
 
+def test_kill_process_group_refuses_the_notebook_group(monkeypatch):
+    calls = []
+
+    def spy(pgid, sig):
+        calls.append((pgid, sig))
+
+    monkeypatch.setattr(os, "killpg", spy)
+    own = os.getpgrp()
+    with pytest.warns(UserWarning, match="notebook's own process group"):
+        assert kill_process_group(own, grace=5) is None
+    assert calls == []
+    for bad in (None, 0, -1, 1):
+        with pytest.warns(UserWarning, match="not a server process group"):
+            assert kill_process_group(bad) is None
+        assert calls == []
+
+
+def test_hung_nvidia_smi_returns_within_the_deadline(monkeypatch):
+    import shutil
+    import subprocess
+
+    from gemma_lab.paired import wait_for_server_release
+
+    deadline = 0.3
+    observed = []
+
+    def hung(args, **kwargs):
+        timeout = kwargs.get("timeout")
+        observed.append(timeout)
+        if len(observed) > 2 or timeout is None or timeout > deadline + 0.05:
+            time.sleep(1.0)
+            raise subprocess.TimeoutExpired(args, timeout or 1)
+        time.sleep(max(0.0, float(timeout)))
+        raise subprocess.TimeoutExpired(args, timeout)
+
+    monkeypatch.setattr(subprocess, "run", hung)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/nvidia-smi")
+    started = time.perf_counter()
+    with pytest.warns(UserWarning, match="unknown"):
+        log = wait_for_server_release(
+            None,
+            424242,
+            timeout=deadline,
+            nvidia_smi_present=True,
+            group_pids=lambda pgid: [],
+        )
+    elapsed = time.perf_counter() - started
+    assert observed
+    assert observed[0] is not None
+    assert observed[0] <= deadline + 1e-6
+    assert len(observed) == 1
+    assert elapsed < deadline + 0.5
+    assert log["gpu_memory"] == "unknown"
+    assert log["timed_out"] is False
+
+
 def test_server_release_waits_for_port_and_gpu():
     from gemma_lab.paired import server_process_pid, wait_for_server_release
 
-    assert kill_process_group(None) is None
-    assert kill_process_group(0) is None
+    with pytest.warns(UserWarning, match="not a server process group"):
+        assert kill_process_group(None) is None
+    with pytest.warns(UserWarning, match="not a server process group"):
+        assert kill_process_group(0) is None
 
     class Process:
         pid = 50
@@ -698,17 +756,18 @@ def test_server_release_waits_for_port_and_gpu():
         return now["t"] < 0.5
 
     server.stop()
-    log = release_server_after_stop(
-        None,
-        server.base_url,
-        timeout=60,
-        sleep=sleep,
-        clock=lambda: now["t"],
-        port_open=port_open,
-        gpu_pids=lambda: [50],
-        group_pids=lambda pgid: [50],
-        nvidia_smi_present=True,
-    )
+    with pytest.warns(UserWarning, match="not a server process group"):
+        log = release_server_after_stop(
+            None,
+            server.base_url,
+            timeout=60,
+            sleep=sleep,
+            clock=lambda: now["t"],
+            port_open=port_open,
+            gpu_pids=lambda: [50],
+            group_pids=lambda pgid: [50],
+            nvidia_smi_present=True,
+        )
     server.start()
     assert server.events == ["stop", "start"]
     assert log["waited_on"] == ["port"]

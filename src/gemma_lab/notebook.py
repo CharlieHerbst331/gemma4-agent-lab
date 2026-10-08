@@ -493,6 +493,9 @@ def generate_pair(
                 f"Adapted from the [official starter](https://www.kaggle.com/code/{STARTER}).\n",
                 "Two hash-pinned arms share one vLLM server. Grading is the official evaluator. "
                 "This private notebook does not submit to the leaderboard.\n",
+                "Restart will not signal the notebook's own process group. "
+                "Each nvidia-smi poll is capped by the time left in the 60 s "
+                "release deadline; a hung query is logged as unknown and GPU waiting stops.\n",
             ],
         },
         code_cell(codes[0]),

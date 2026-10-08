@@ -1765,6 +1765,9 @@ def _attach_import_origins(arms, origins):
 
 
 SERVER_RELEASE_TIMEOUT_SECONDS = 60.0
+NVIDIA_SMI_POLL_TIMEOUT_SECONDS = 10.0
+PORT_POLL_TIMEOUT_SECONDS = 0.2
+GPU_MEMORY_UNKNOWN = "unknown"
 
 
 def server_process_pid(server):
@@ -1825,15 +1828,44 @@ def session_pgid(pid):
         return pid
 
 
+def _refuse_kill_reason(pgid):
+    """Why ``pgid`` must not be signaled, or None when ``killpg`` is safe."""
+    if not isinstance(pgid, int) or pgid <= 0 or pgid == 1:
+        return (
+            f"Refusing to kill process group {pgid!r}: "
+            "not a server process group (refusing None, 0, -1, and 1)."
+        )
+    try:
+        own = _os.getpgrp()
+    except OSError:
+        own = None
+    if own is not None and pgid == own:
+        return f"Refusing to kill process group {pgid}: it is the notebook's own process group."
+    return None
+
+
+def _call_with_timeout(fn, timeout, *args):
+    """Call ``fn``, passing ``timeout`` only when that parameter exists."""
+    try:
+        accepts = "timeout" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        accepts = False
+    if accepts:
+        return fn(*args, timeout=timeout)
+    return fn(*args)
+
+
 def kill_process_group(pgid, grace=0.2, sleep=None, killpg=None):
     """SIGTERM ``pgid``, then SIGKILL after ``grace`` seconds.
 
     ``pgid`` is the id recorded before ``stop()``. This does not call
-    ``getpgid``. ``killpg(0)`` is rejected so a missing id cannot signal the
-    notebook's own group. A group that is already gone raises
-    ``ProcessLookupError`` and is ignored.
+    ``getpgid``. The notebook's own group, and None, 0, -1, and 1, are not
+    signaled. A group that is already gone raises ``ProcessLookupError``
+    and is ignored.
     """
-    if not isinstance(pgid, int) or pgid <= 0:
+    reason = _refuse_kill_reason(pgid)
+    if reason is not None:
+        _warnings.warn(reason, UserWarning, stacklevel=2)
         return None
     if killpg is None:
         killpg = _os.killpg
@@ -1860,13 +1892,13 @@ def port_from_base_url(url):
     return urlparse(str(url or "")).port
 
 
-def port_is_open(port, host="127.0.0.1"):
+def port_is_open(port, host="127.0.0.1", timeout=PORT_POLL_TIMEOUT_SECONDS):
     import socket
 
     if not port:
         return False
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(0.2)
+    sock.settimeout(max(0.0, float(timeout)))
     try:
         return sock.connect_ex((host, int(port))) == 0
     except OSError:
@@ -1893,19 +1925,32 @@ def process_group_pids(pgid, proc_root="/proc"):
     return found
 
 
-def nvidia_smi_gpu_pids():
-    """Pids holding GPU compute memory, or None when nvidia-smi is absent."""
+def nvidia_smi_gpu_pids(timeout=NVIDIA_SMI_POLL_TIMEOUT_SECONDS):
+    """Pids holding GPU compute memory.
+
+    Returns None when nvidia-smi is absent. Returns ``"unknown"`` when the
+    query exceeds ``timeout``, so a hung nvidia-smi cannot stall the notebook.
+    """
     import shutil
     import subprocess
 
     if shutil.which("nvidia-smi") is None:
         return None
-    completed = subprocess.run(
-        ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        _warnings.warn(
+            "nvidia-smi timed out; GPU memory state is unknown and will not be waited on",
+            UserWarning,
+            stacklevel=2,
+        )
+        return GPU_MEMORY_UNKNOWN
     pids = []
     for line in completed.stdout.splitlines():
         piece = line.strip().split(",")[0].strip()
@@ -1927,8 +1972,9 @@ def wait_for_server_release(
 ):
     """Wait until the port is free and this group holds no GPU memory.
 
-    The wait is bounded by ``timeout`` seconds. The returned mapping is the
-    log of what was waited on.
+    ``timeout`` is a deadline for every poll. Each port and nvidia-smi call
+    is capped at the time remaining. A timed-out nvidia-smi query is logged
+    as unknown and GPU memory is no longer waited on.
     """
     if sleep is None:
         sleep = _time.sleep
@@ -1948,13 +1994,36 @@ def wait_for_server_release(
     waited_on = []
     seen_gpu = []
     timed_out = False
+    gpu_memory = None
+
+    def remaining():
+        return timeout - (clock() - started)
+
     while True:
-        busy_port = bool(port) and bool(port_open(port))
+        if remaining() <= 0:
+            timed_out = True
+            break
+        busy_port = False
+        if port:
+            left = remaining()
+            if left <= 0:
+                timed_out = True
+                break
+            busy_port = bool(
+                _call_with_timeout(port_open, min(PORT_POLL_TIMEOUT_SECONDS, left), port)
+            )
         holders = []
-        if nvidia_smi_present and pgid is not None:
-            members = set(group_pids(pgid))
-            current = gpu_pids() or []
-            holders = [item for item in current if item in members]
+        if nvidia_smi_present and pgid is not None and gpu_memory != GPU_MEMORY_UNKNOWN:
+            left = remaining()
+            if left <= 0:
+                timed_out = True
+                break
+            current = _call_with_timeout(gpu_pids, min(NVIDIA_SMI_POLL_TIMEOUT_SECONDS, left))
+            if current == GPU_MEMORY_UNKNOWN:
+                gpu_memory = GPU_MEMORY_UNKNOWN
+            else:
+                members = set(group_pids(pgid))
+                holders = [item for item in (current or []) if item in members]
         if not busy_port and not holders:
             break
         if busy_port and "port" not in waited_on:
@@ -1964,16 +2033,18 @@ def wait_for_server_release(
                 seen_gpu.append(item)
         if holders and "gpu" not in waited_on:
             waited_on.append("gpu")
-        if clock() - started >= timeout:
+        left = remaining()
+        if left <= 0:
             timed_out = True
             break
-        sleep(0.25)
+        sleep(min(0.25, left))
     return {
         "waited_on": waited_on,
         "port": port,
         "pgid": pgid,
         "nvidia_smi": bool(nvidia_smi_present),
         "gpu_pids": seen_gpu,
+        "gpu_memory": gpu_memory,
         "timed_out": timed_out,
         "seconds": clock() - started,
     }
