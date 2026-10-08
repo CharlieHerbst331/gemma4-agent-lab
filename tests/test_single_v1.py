@@ -12,7 +12,7 @@ from gemma_lab.bundle import load_yaml, validate
 
 CANDIDATE = Path("agents/single-v1").resolve()
 FORK = Path("agents/structured-v4-10m")
-# Byte copies of structured-v5 at origin/cursor/structured-v5-3d40 (5d03a8b).
+# Byte copies of structured-v5 at origin/cursor/structured-v5-3d40 (38a51c8).
 V5_SHA256 = {
     "skills/verify-patch/scripts/check.py": (
         "c544234492a8846e5d4ba1082d20923b036ab0f4789a4748dc747500612baa4f"
@@ -20,7 +20,8 @@ V5_SHA256 = {
     "skills/verify-patch/SKILL.md": (
         "0ef00d11676ae17f367cd9fbe38194c64dc972972fa18574393a05957969af50"
     ),
-    "thinking.yaml": "f55a333a6a4f6c3855c532ad8edc5adfd71feff85cee1ad57479aa734e4d6acd",
+    "thinking.yaml": "8423bf3b5457acca91cda0b7a0893746cb32d5b48764bf3c71a890253a18332f",
+    "eval_config.yaml": "74ece35136e01df51b67a1718b36b1ef3a8ad49d33bebca1c0abda0843fa6232",
 }
 
 
@@ -132,20 +133,15 @@ def test_single_agent_matches_v5_control_knobs():
     assert budgets["max_turns"] == 64
     assert 40 <= budgets["max_tool_calls"] <= 60
     assert budgets["timeout_seconds"] == 300
-    eval_text = " ".join(
-        line.split("#", 1)[-1].strip()
-        for line in (CANDIDATE / "eval_config.yaml").read_text().splitlines()
-    )
-    assert "binding call cap" not in eval_text
-    assert "binding cap" not in eval_text
-    assert "Skill script runs count as tool calls" in eval_text
-    assert "roughly co-binding" in eval_text
-    assert "270s clock usually binds first" in eval_text
+    assert "forwards the numeric budget" in knob
+    assert "On 0.2.11 the same file compiles" in knob
     prompt = " ".join(root["instruction"].split())
     for phrase in [
         "{problem_description}",
         "{hints?}",
         "Name at most 3 candidate files",
+        "in the same response as your first tool call",
+        "Never send that list as a message of its own.",
         "end - start < 80",
         "head -n 40",
         "head -c 4000",

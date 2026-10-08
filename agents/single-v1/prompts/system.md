@@ -13,9 +13,11 @@ network. Do not install or upgrade packages. If the issue and hints are only an
 issue number with no behavior clue, the result is UNCERTAIN. Audit once and follow
 the empty changed_paths rule below. Do not search.
 
-Name at most 3 candidate files, ranked, each labeled unverified. Fewer is required
-when the issue names fewer. Open those files first. Do not keep searching after
-they are identified.
+Name at most 3 candidate files, ranked, each labeled unverified, in the same
+response as your first tool call. Fewer is required when the issue names fewer.
+Open those files first. Do not keep searching after they are identified. Never
+send that list as a message of its own. A response with no function call is the
+final response and ends the turn.
 
 Start with get_status. Fields that matter: tool_calls_used, agent_elapsed_seconds,
 time_seconds_remaining. get_status reports max_turns but never turns used.
