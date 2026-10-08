@@ -25,6 +25,17 @@ Archive SHA256 `6202ab26252df59061547e0fd7dbcc1e8ef62b5cb12c61c14c2b2e953865bbb5
 candidates still matches their recorded hashes, including v4-10m
 `0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.
 
+## Matched single-agent control
+
+`agents/single-v1` is a new unevaluated control forked from `agents/structured-v4-10m`
+and aligned to structured-v5 (`cursor/structured-v5-3d40` at `38a51c8`) except the
+multi-agent structure. One LlmAgent, thinking off (`include_thoughts: false`, no
+budget), 270s / 48 calls / 64 turns. Archive
+SHA256 `84b4b0f720493041704209dd175061c003be387fc49a826ebca0a13c0b5cf0f8`.
+Remaining differences: `docs/SINGLE_V1.md`. Src-layout (requests) tasks are excluded
+from promotion decisions. No GPU run and no submission. Re-packed structured-v4,
+structured-v4-10m, and simple-v3 archives match their documented hashes.
+
 ## Current development budget variant
 
 User requested10–15minutes after the five-minute pilot. New active development
