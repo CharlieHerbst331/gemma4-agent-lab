@@ -94,7 +94,10 @@ def workspace(tmp_path):
 
 
 def test_triage_has_no_exploration_or_skill_loop():
-    config = load_yaml(CANDIDATE / "sub_agents/triage.yaml", CANDIDATE)
+    triage = CANDIDATE / "sub_agents" / "triage.yaml"
+    if not triage.is_file():
+        pytest.skip(f"{CANDIDATE.name} has no sub_agents/triage.yaml")
+    config = load_yaml(triage, CANDIDATE)
     assert config["tools"] == []
     assert not config.get("skills") and not config.get("sub_agents")
     for name in ["repair", "verify"]:

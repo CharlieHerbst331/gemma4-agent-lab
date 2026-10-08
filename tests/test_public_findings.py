@@ -54,17 +54,31 @@ def test_public_export_drops_raw_competition_material_and_credentials(tmp_path):
     assert "execution.log" not in result["private_evidence_hashes"]
 
 
-def test_dirty_packing_revision_still_exports_the_commit(tmp_path):
+def test_dirty_packing_revision_keeps_the_marker_and_provenance(tmp_path):
     folder = tmp_path / "source/example"
     folder.mkdir(parents=True)
     commit = "ab" * 20
+    source = "cd" * 20
     (folder / "run_manifest.json").write_text(
-        json.dumps({"sha256": "c" * 64, "git_revision": commit + "-dirty"})
+        json.dumps(
+            {
+                "sha256": "c" * 64,
+                "git_revision": commit + "-dirty",
+                "packing_commit": commit,
+                "worktree_dirty": True,
+                "candidate_source_commit": source,
+                "candidate_source_dirty": True,
+            }
+        )
     )
     output = tmp_path / "public.json"
     public.export(tmp_path / "source", output)
     result = json.loads(output.read_text())["runs"][0]
-    assert result["source_git_revision"] == commit
+    assert result["source_git_revision"] == commit + "-dirty"
+    assert result["packing_commit"] == commit
+    assert result["worktree_dirty"] is True
+    assert result["candidate_source_commit"] == source
+    assert result["candidate_source_dirty"] is True
 
 
 def test_public_export_refuses_arbitrary_identifier_text():

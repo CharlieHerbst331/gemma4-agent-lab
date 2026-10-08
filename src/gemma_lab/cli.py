@@ -78,6 +78,12 @@ def main(argv=None):
     submit.add_argument(
         "--evaluation", type=Path, help="Completed GPU output folder for this archive"
     )
+    submit.add_argument(
+        "--scorer-overhead-seconds",
+        type=float,
+        default=operations.DEFAULT_SCORER_OVERHEAD_SECONDS,
+        help="Hosted scorer seconds added to each task before the runtime projection",
+    )
     hygiene = sub.add_parser("hygiene", help="Offline patch hygiene and finalization checks")
     hygiene_commands = hygiene.add_subparsers(dest="hygiene_command", required=True)
     for name in ("candidate", "run", "patch"):
@@ -90,7 +96,6 @@ def main(argv=None):
         elif name == "run":
             command.add_argument("directory", type=Path)
             command.add_argument("--task-ids", type=Path)
-            command.add_argument("--workspace-root", type=Path)
             command.add_argument("--require-trace", action="store_true")
         else:
             command.add_argument("patch_file", type=Path)
@@ -166,7 +171,11 @@ def main(argv=None):
                 result = operations.wait_for_run(args.kernel, args.output, args.timeout_minutes)
             case "submit":
                 result = operations.submit(
-                    args.archive, args.message, execute=args.execute, evaluation=args.evaluation
+                    args.archive,
+                    args.message,
+                    execute=args.execute,
+                    evaluation=args.evaluation,
+                    scorer_overhead_seconds=args.scorer_overhead_seconds,
                 )
             case "hygiene":
                 from gemma_lab.hygiene import HygieneInputError, run_cli

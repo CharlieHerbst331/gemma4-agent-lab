@@ -15,10 +15,15 @@ def read_json(path):
     return json.loads(path.read_text()) if path.exists() else {}
 
 
-def _clean_revision(value):
-    if isinstance(value, str) and value.endswith("-dirty"):
-        return value[: -len("-dirty")]
-    return value
+def revision_token(value):
+    """40-hex commit, keeping a trailing -dirty marker when the manifest has one."""
+    if not isinstance(value, str):
+        return None
+    dirty = value.endswith("-dirty")
+    commit = value[: -len("-dirty")] if dirty else value
+    if re.fullmatch(r"[0-9a-f]{40}", commit):
+        return commit + "-dirty" if dirty else commit
+    return None
 
 
 def digest(value, size=64):
@@ -76,10 +81,20 @@ def export_run(folder):
             (s for s in STATES if "KernelWorkerStatus." + s in status), "UNKNOWN"
         ),
         "archive_sha256": digest(manifest.get("sha256")),
-        "source_git_revision": digest(_clean_revision(manifest.get("git_revision")), 40),
+        "source_git_revision": revision_token(manifest.get("git_revision")),
         "task_source_sha256": digest(manifest.get("task_file_sha256")),
         "task_results": rows,
     }
+    packing = digest(manifest.get("packing_commit"), 40)
+    if packing:
+        result["packing_commit"] = packing
+    if isinstance(manifest.get("worktree_dirty"), bool):
+        result["worktree_dirty"] = manifest["worktree_dirty"]
+    source_commit = revision_token(manifest.get("candidate_source_commit"))
+    if source_commit:
+        result["candidate_source_commit"] = source_commit
+    if isinstance(manifest.get("candidate_source_dirty"), bool):
+        result["candidate_source_dirty"] = manifest["candidate_source_dirty"]
     kernel = collection.get("kernel")
     if isinstance(kernel, str) and re.fullmatch(r"[a-zA-Z0-9_-]+/[a-z0-9-]+", kernel):
         result["kaggle_notebook_url"] = "https://www.kaggle.com/code/" + kernel

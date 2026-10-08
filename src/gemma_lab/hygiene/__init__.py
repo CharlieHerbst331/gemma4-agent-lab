@@ -58,6 +58,8 @@ def audit_patch(text, trace=None, policy=None, *, require_trace=False, policy_sh
         "gate": _gate(findings),
         "finalization": info["finalization"],
         "verifier_reached": info["verifier_reached"],
+        "submit_calls": info["submit_calls"],
+        "submitting_agents": info["submitting_agents"],
         "evidence_blocked": any(item.get("evidence_blocked") for item in findings),
         "changed_paths": [parsed.path for parsed in files if parsed.path],
         "new_files": [parsed.path for parsed in files if parsed.added and parsed.path],
@@ -79,8 +81,10 @@ def audit_run(directory, policy=None, task_ids=None, *, require_trace=False):
     for instance_id in selected:
         patch_path = _patch_file(directory, instance_id)
         patch_text = patch_path.read_text() if patch_path else ""
-        trace_path = directory / "results" / f"{instance_id}.json"
-        trace = _read_json(trace_path) if trace_path.is_file() else None
+        # Real runs store an ATIF trajectory here. results/<id>.json stringifies
+        # SessionTrace via default=str, so it is not a trace source.
+        trace_path = directory / "results" / "traces" / f"trace_{instance_id}.json"
+        trace = _read_trace(trace_path)
         if require_trace and trace is None:
             raise HygieneInputError(f"Missing trace for {instance_id}")
         report = audit_patch(
@@ -116,6 +120,8 @@ def audit_run(directory, policy=None, task_ids=None, *, require_trace=False):
                 "gate": report["gate"],
                 "finalization": report["finalization"],
                 "verifier_reached": report["verifier_reached"],
+                "submit_calls": report["submit_calls"],
+                "submitting_agents": report["submitting_agents"],
                 "evidence_blocked": report["evidence_blocked"],
                 "changed_paths": len(report["changed_paths"]),
                 "new_files": len(report["new_files"]),
@@ -145,7 +151,7 @@ def audit_run(directory, policy=None, task_ids=None, *, require_trace=False):
         "candidate": {
             "gate": candidate_gate,
             "explicit_finalization": _ratio(tasks, lambda task: task["finalization"] == "explicit"),
-            "verifier_reached": _ratio(tasks, lambda task: bool(task["verifier_reached"])),
+            "verifier_reached": _verifier_ratio(tasks),
             "scratch_leak_tasks": _ratio(tasks, lambda task: _has(task, "H1.scratch", "block")),
             "test_edit_tasks": _ratio(tasks, lambda task: _has(task, "H2.protected", "block")),
             "debug_print_tasks": _ratio(tasks, lambda task: _has(task, "H4.print", "warn")),
@@ -211,10 +217,14 @@ def run_cli(args):
     else:
         raise HygieneInputError(f"Unknown hygiene command: {command}")
     output = getattr(args, "output", None)
-    if output:
-        destination = Path(output)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    if output is None:
+        if command == "run":
+            output = Path(args.directory) / "hygiene.json"
+        else:
+            output = Path("hygiene.json")
+    destination = Path(output)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     summary = _summary(report)
     if summary:
         print(summary, file=sys.stderr)
@@ -248,6 +258,12 @@ def _ratio(tasks, predicate) -> list[int]:
     return [sum(1 for task in tasks if predicate(task)), len(tasks)]
 
 
+def _verifier_ratio(tasks):
+    if not tasks or all(task["verifier_reached"] is None for task in tasks):
+        return None
+    return [sum(task["verifier_reached"] is True for task in tasks), len(tasks)]
+
+
 def _has(task, rule, severity) -> bool:
     return any(item["rule"] == rule and item["severity"] == severity for item in task["findings"])
 
@@ -257,7 +273,6 @@ def _rate_findings(tasks, policy) -> list[dict]:
     if not count:
         return []
     explicit = sum(task["finalization"] == "explicit" for task in tasks)
-    reached = sum(bool(task["verifier_reached"]) for task in tasks)
     severity = policy.get("rate_severity", "warn")
     if severity != "info":
         # Coordinator decision: these rates are WARN until a baseline exists.
@@ -277,16 +292,21 @@ def _rate_findings(tasks, policy) -> list[dict]:
                 ),
             }
         )
-    if reached / count < minimum_reached:
-        found.append(
-            {
-                "rule": "R.verifier_reach_rate",
-                "severity": severity,
-                "path": "",
-                "confidence": "high",
-                "evidence": f"verifier reached {reached}/{count} is below {minimum_reached:g}",
-            }
-        )
+    # Single-agent runs never author verify/verifier. Skip the rate when every
+    # task is null so that absence is not a permanent warning. A mix still counts
+    # null as not reached.
+    if any(task["verifier_reached"] is not None for task in tasks):
+        reached = sum(task["verifier_reached"] is True for task in tasks)
+        if reached / count < minimum_reached:
+            found.append(
+                {
+                    "rule": "R.verifier_reach_rate",
+                    "severity": severity,
+                    "path": "",
+                    "confidence": "high",
+                    "evidence": f"verifier reached {reached}/{count} is below {minimum_reached:g}",
+                }
+            )
     return sort_findings(found)
 
 
@@ -340,6 +360,16 @@ def _read_json(path):
         return json.loads(path.read_text())
     except json.JSONDecodeError as exc:
         raise HygieneInputError(f"Invalid JSON: {path}") from exc
+
+
+def _read_trace(path: Path):
+    """Load one ATIF file. Missing or invalid JSON is unknown, not an exception."""
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return {"schema_version": "unparseable"}
 
 
 def _summary(report) -> str:

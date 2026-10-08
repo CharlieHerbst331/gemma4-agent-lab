@@ -110,11 +110,17 @@ from infrastructure, and blocks known grading fixture failures. It never rewrite
 results to conceal failures. Alternate official wheelhouse mount discovery handles a
 worker that previously failed with zero wheels; missing mounts fail explicitly.
 
-The checked uploader also refuses an archive when the evaluation's mean per-task
-`duration_seconds` times 120 tasks is above 11 hours. `git_revision()` appends
-`-dirty` when the worktree is dirty. Pack manifests record `candidate_source_commit`
-separately from `packing_commit` (the commit used to pack). `gemma-lab hygiene
-candidate|run|patch` audits patches offline. It does not edit agents or raw run files.
+The checked uploader refuses an archive when either projected block fails. Both
+add `scorer_overhead_seconds` (default 70, `--scorer-overhead-seconds`) to the mean
+per-task `duration_seconds`: 120 × (mean + overhead) must be at most 11 hours, and
+model-load seconds (from `run_manifest.json`, else 900) + 129 × (mean + overhead)
+must be at most 10.8 hours. A cap-based worst case above 12 hours warns and does
+not block. The numbers are written to `projection.json`. `git_revision()` appends
+`-dirty` when the worktree is dirty, and the public findings export keeps that
+marker plus the pack provenance fields. `gemma-lab hygiene candidate|run|patch`
+audits patches offline and reads ATIF traces from `results/traces/trace_<id>.json`.
+It does not edit agents or raw run files; the CLI writes `hygiene.json` beside the
+input.
 
 ## Submission evidence and next actions
 

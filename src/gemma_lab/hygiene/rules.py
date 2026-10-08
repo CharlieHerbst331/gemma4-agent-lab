@@ -1,4 +1,4 @@
-"""Patch hygiene rules H1, H2, H3, H4, and H5.
+"""Patch hygiene rules H1, H2, H3, H4, H5, and H8.
 
 Severities follow the coordinator override where it differs from the design spec.
 See the module docstring on `audit_files` for those choices.
@@ -24,7 +24,10 @@ METADATA = re.compile(
     r"|\bimportlib\.metadata\b"
     r"|\bpkg_resources\b"
 )
-PROTECTED_FILES = {"pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini"}
+PROTECTED_FILES = {"pytest.ini", ".pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini"}
+IMPORT_HOOKS = {"sitecustomize.py", "usercustomize.py", "_swegemma_stubs.py"}
+PACKAGING_FILES = {"noxfile.py", "setup.py"}
+EDIT_AFTER_SUBMIT = {"edit_file", "write_file", "run_command"}
 
 
 def finding(rule, severity, path="", line=None, evidence="", confidence="high", **extra):
@@ -57,17 +60,24 @@ def audit_files(files: list[FileDiff], events: list[ToolEvent], policy: dict) ->
     """Return findings for one patch.
 
     Coordinator overrides applied here:
-    - H2 blocks every edit to pytest.ini, pyproject.toml, setup.cfg, and tox.ini,
-      not only pytest sections. It does not block noxfile.py, a `testing/` directory,
-      or docs_src/examples.
-    - H5a blocks site-packages, `.venv`, and `build/lib` paths plus sys.path hacks.
-      Plain `venv/`, dist-packages, PYTHONPATH, and importlib.reload are not H5a.
+    - H2 blocks the grading reset set: nested conftest.py, test_*.py, *_test.py,
+      pytest.ini, .pytest.ini, pyproject.toml, setup.cfg, tox.ini, every file under
+      tests/ or test/, and .py files under testing/. Directory names are matched
+      case-insensitively. noxfile.py and setup.py are WARN H8, not a block.
+    - H5a blocks site-packages, `.venv`, and `build/lib` paths, sys.path hacks, and
+      import hooks grading resets (*.pth, sitecustomize.py, usercustomize.py,
+      _swegemma_stubs.py). Plain `venv/`, dist-packages, PYTHONPATH, and
+      importlib.reload are not H5a path blocks.
     - H5b is warn on the task and marks the check invalid as behavior evidence.
     - H5c and H5d are warn. Run-level rates are applied by the run report, not here.
+    - H3 does not block repeated submit_patch, a later get_status, or a non-verifier
+      submit. An edit after the last submit is a warning. The count is info.
     """
     found = []
+    found.extend(_h5a_import_hooks(files, policy))
     found.extend(_h1(files, events, policy))
     found.extend(_h2(files, policy))
+    found.extend(_h8(files, policy))
     found.extend(_h4_and_h5a_lines(files, policy))
     found.extend(_h5a_paths(files, policy))
     found.extend(_h5_trace(events))
@@ -85,19 +95,28 @@ def finalization(trace: TraceView, patch_text: str, *, trace_was_supplied: bool)
             "warn_unknown": trace_was_supplied and trace.schema == "unknown",
         }
     submits = [event for event in trace.events if event.tool == "submit_patch"]
-    submit_is_last = bool(trace.events) and trace.events[-1].tool == "submit_patch"
+    last_submit = None
+    for index, event in enumerate(trace.events):
+        if event.tool == "submit_patch":
+            last_submit = index
+    edit_after = False
+    if last_submit is not None:
+        edit_after = any(
+            event.tool in EDIT_AFTER_SUBMIT for event in trace.events[last_submit + 1 :]
+        )
     if submits:
         state = "explicit"
     elif patch_text.strip():
         state = "fallback"
     else:
         state = "none"
+    verifier_author = any(event.agent in VERIFIERS for event in trace.events)
     return {
         "finalization": state,
-        "verifier_reached": any(event.agent in VERIFIERS for event in trace.events),
+        "verifier_reached": True if verifier_author else None,
         "submit_calls": len(submits),
         "submitting_agents": [event.agent for event in submits],
-        "submit_is_last": submit_is_last if submits else None,
+        "edit_after_submit": edit_after,
         "warn_unknown": False,
     }
 
@@ -122,24 +141,20 @@ def finalization_findings(info: dict) -> list[dict]:
     if info["submit_calls"] > 1:
         found.append(
             finding(
-                "H3.repeated_submit",
-                "block",
+                "H3.submit_count",
+                "info",
                 evidence=f"submit_patch called {info['submit_calls']} times",
             )
         )
-    if info["finalization"] == "explicit" and info["submit_is_last"] is False:
+    if info.get("edit_after_submit"):
         found.append(
             finding(
-                "H3.submit_not_last", "block", evidence="a tool call follows the last submit_patch"
-            )
-        )
-    outsiders = [agent for agent in info["submitting_agents"] if agent not in VERIFIERS]
-    if outsiders:
-        found.append(
-            finding(
-                "H3.non_verifier_submit",
-                "block",
-                evidence="submit_patch from " + ",".join(outsiders),
+                "H3.edit_after_submit",
+                "warn",
+                evidence=(
+                    "edits after the last submit_patch are discarded by the harness"
+                    " (agent_runner.py:758)"
+                ),
             )
         )
     return found
@@ -162,7 +177,7 @@ def _h1(files, events, policy) -> list[dict]:
         if parsed.binary:
             found.append(finding("H1.binary", "block", path, evidence="binary file added"))
             continue
-        if _is_protected(path):
+        if _is_import_hook(path) or _is_protected(path):
             continue
         if _explained_new_file(path, files, events):
             found.append(
@@ -187,6 +202,45 @@ def _h1(files, events, policy) -> list[dict]:
                         "new file is not a known scratch name and is not explained by an import"
                     ),
                     confidence="heuristic",
+                )
+            )
+    return found
+
+
+def _h5a_import_hooks(files, policy) -> list[dict]:
+    found = []
+    seen = set()
+    for parsed in files:
+        for path in (parsed.old_path, parsed.new_path):
+            if not path or path in seen or _allowed(path, policy) or not _is_import_hook(path):
+                continue
+            seen.add(path)
+            found.append(
+                finding(
+                    "H5a.import_hook",
+                    "block",
+                    path,
+                    evidence=("grading resets import hooks (verification.py:64-76,396-402)"),
+                )
+            )
+    return found
+
+
+def _h8(files, policy) -> list[dict]:
+    found = []
+    seen = set()
+    for parsed in files:
+        for path in (parsed.old_path, parsed.new_path):
+            name = PurePosixPath(path).name if path else ""
+            if not path or path in seen or _allowed(path, policy) or name not in PACKAGING_FILES:
+                continue
+            seen.add(path)
+            found.append(
+                finding(
+                    "H8.packaging",
+                    "warn",
+                    path,
+                    evidence="not reset by grading; review",
                 )
             )
     return found
@@ -233,7 +287,9 @@ def _h4_and_h5a_lines(files, policy) -> list[dict]:
         if not parsed.path.endswith(".py") or _allowed(parsed.path, policy):
             continue
         print_allowed = _print_allowed(parsed.path, policy)
-        for line_no, text in parsed.added_lines():
+        lines = list(parsed.added_lines())
+        imported_path = any(_imports_sys_path(_lex(text)) for _, text in lines)
+        for line_no, text in lines:
             tokens = _lex(text)
             if _is_debugger(tokens):
                 found.append(
@@ -250,7 +306,7 @@ def _h4_and_h5a_lines(files, policy) -> list[dict]:
                         confidence="heuristic",
                     )
                 )
-            if _sys_path_hack(tokens):
+            if _sys_path_hack(tokens, imported_sys_path=imported_path):
                 found.append(
                     finding("H5a.sys_path", "block", parsed.path, line_no, evidence=text.strip())
                 )
@@ -293,6 +349,11 @@ def _h5_trace(events: list[ToolEvent]) -> list[dict]:
     return found
 
 
+def _is_import_hook(path: str) -> bool:
+    name = PurePosixPath(path).name
+    return name in IMPORT_HOOKS or name.endswith(".pth")
+
+
 def _is_protected(path: str) -> bool:
     parts = PurePosixPath(path).parts
     if not parts:
@@ -302,7 +363,10 @@ def _is_protected(path: str) -> bool:
         return True
     if name.endswith(".py") and (name.startswith("test_") or name.endswith("_test.py")):
         return True
-    return any(part in {"tests", "test"} for part in parts[:-1])
+    directories = [part.lower() for part in parts[:-1]]
+    if any(part in {"tests", "test"} for part in directories):
+        return True
+    return name.endswith(".py") and any(part == "testing" for part in directories)
 
 
 def _is_h5a_path(path: str) -> bool:
@@ -336,7 +400,7 @@ def _is_scratch(path: str) -> bool:
         re.search(
             r"^(repro.*\.py|reproduce.*\.py|.*_repro\.py|comprehensive_repro\.py|"
             r"debug.*\.py|scratch.*|tmp.*|test_issue.*\.py|test_fix.*\.py|"
-            r"check_.*\.py|verify_.*\.py|notes.*\.md|[^/]+\.txt)$",
+            r"check_.*\.py|verify_.*\.py|notes.*\.md|requirements.*\.txt)$",
             name,
         )
     )
@@ -380,9 +444,10 @@ def _written_by_edit(path: str, events: list[ToolEvent]) -> bool:
 
 
 def _is_debugger(tokens) -> bool:
-    if any(chain[:1] == ("breakpoint",) and chain == ("breakpoint",) for chain in _calls(tokens)):
+    calls = _calls(tokens)
+    if any(chain in {("breakpoint",), ("builtins", "breakpoint")} for chain in calls):
         return True
-    if ("code", "interact") in _calls(tokens):
+    if ("code", "interact") in calls:
         return True
     if any(
         chain[:2] == ("pdb", "set_trace") or chain[:2] == ("ipdb", "set_trace")
@@ -391,7 +456,7 @@ def _is_debugger(tokens) -> bool:
         return True
     if ("pudb", "set_trace") in _calls(tokens):
         return True
-    if _imports_debugger(tokens) or _dunder_import_debugger(tokens):
+    if _imports_debugger(tokens) or _dynamic_debugger_import(tokens):
         return True
     return False
 
@@ -400,19 +465,62 @@ def _bare_print(tokens) -> bool:
     return ("print",) in _calls(tokens)
 
 
-def _sys_path_hack(tokens) -> bool:
+def _sys_path_hack(tokens, *, imported_sys_path=False) -> bool:
     calls = _calls(tokens)
     if any(call in PATH_HACKS or call == ("site", "addsitedir") for call in calls):
         return True
-    for index in range(len(tokens) - 3):
+    for index in range(len(tokens) - 2):
         if tokens[index : index + 3] == [
             (tokenize.NAME, "sys"),
             (tokenize.OP, "."),
             (tokenize.NAME, "path"),
-        ]:
-            operator = tokens[index + 3]
-            if operator[0] == tokenize.OP and operator[1] in {"=", "+="}:
-                return True
+        ] and _assigns(tokens, index + 2):
+            return True
+    if not imported_sys_path and not _imports_sys_path(tokens):
+        return False
+    if any(call in {("path", "insert"), ("path", "append"), ("path", "extend")} for call in calls):
+        return True
+    for index, token in enumerate(tokens):
+        if token != (tokenize.NAME, "path"):
+            continue
+        if index > 0 and tokens[index - 1] == (tokenize.OP, "."):
+            continue
+        if _assigns(tokens, index):
+            return True
+    return False
+
+
+def _assigns(tokens, index) -> bool:
+    cursor = _after_subscript(tokens, index + 1)
+    return (
+        cursor < len(tokens)
+        and tokens[cursor][0] == tokenize.OP
+        and tokens[cursor][1] in {"=", "+="}
+    )
+
+
+def _after_subscript(tokens, index) -> int:
+    if index >= len(tokens) or tokens[index] != (tokenize.OP, "["):
+        return index
+    depth = 0
+    while index < len(tokens):
+        if tokens[index] == (tokenize.OP, "["):
+            depth += 1
+        elif tokens[index] == (tokenize.OP, "]"):
+            depth -= 1
+            if depth == 0:
+                return index + 1
+        index += 1
+    return index
+
+
+def _imports_sys_path(tokens) -> bool:
+    for index, (_, value) in enumerate(tokens):
+        if value != "from":
+            continue
+        window = [token[1] for token in tokens[index : index + 4]]
+        if window == ["from", "sys", "import", "path"]:
+            return True
     return False
 
 
@@ -421,6 +529,9 @@ def _calls(tokens) -> list[tuple[str, ...]]:
     index = 0
     while index < len(tokens):
         if tokens[index][0] != tokenize.NAME:
+            index += 1
+            continue
+        if index > 0 and tokens[index - 1][1] in {"def", "class"}:
             index += 1
             continue
         chain = [tokens[index][1]]
@@ -463,16 +574,29 @@ def _imports_debugger(tokens) -> bool:
     return False
 
 
-def _dunder_import_debugger(tokens) -> bool:
+def _dynamic_debugger_import(tokens) -> bool:
     for index, (kind, value) in enumerate(tokens):
-        if kind != tokenize.NAME or value != "__import__" or index + 1 >= len(tokens):
+        if kind != tokenize.NAME or value not in {"__import__", "import_module"}:
             continue
-        if tokens[index + 1] != (tokenize.OP, "("):
-            continue
-        for kind, text in tokens[index + 2 : index + 5]:
-            if kind == tokenize.STRING and any(name in text for name in DEBUGGERS):
-                return True
+        if value == "import_module":
+            if (
+                index < 2
+                or tokens[index - 2] != (tokenize.NAME, "importlib")
+                or tokens[index - 1] != (tokenize.OP, ".")
+            ):
+                continue
+        argument = _call_string(tokens, index)
+        if argument and any(name in argument for name in DEBUGGERS):
+            return True
     return False
+
+
+def _call_string(tokens, index) -> str:
+    if index + 1 >= len(tokens) or tokens[index + 1] != (tokenize.OP, "("):
+        return ""
+    if index + 2 < len(tokens) and tokens[index + 2][0] == tokenize.STRING:
+        return tokens[index + 2][1]
+    return ""
 
 
 def _lex(line: str):

@@ -65,7 +65,8 @@ def command(agent, tool, text, output=""):
         "check_now.py",
         "verify_now.py",
         "notes.md",
-        "out.txt",
+        "requirements.txt",
+        "requirements-dev.txt",
         ".adk_exec_deadbeef.py",
         "gemma-agent-repro.py",
         "gemma-agent-probe.py",
@@ -83,6 +84,14 @@ def test_h1_scratch_names_block(path):
     assert rules(report, "H1.scratch")
     assert rules(report, "H1.scratch")[0]["severity"] == "block"
     assert report["gate"] == "block"
+
+
+@pytest.mark.parametrize("path", ["out.txt", "CHANGES.txt", "pkg/notes.txt"])
+def test_h1_plain_text_is_not_scratch(path):
+    report = audit_patch(added(path, "notes\n"))
+    assert not rules(report, "H1.scratch")
+    assert rules(report, "H1.unexplained")
+    assert report["gate"] == "warn"
 
 
 @pytest.mark.parametrize("path", ["src/pkg/check_utils.py", "src/pkg/debug.py", "pkg/readme.txt"])
@@ -144,9 +153,14 @@ def test_h1_binary_and_symlink_block():
         "test/test_pkg.py",
         "pytest.ini",
         "pkg/pytest.ini",
+        ".pytest.ini",
         "pyproject.toml",
         "setup.cfg",
         "tox.ini",
+        "pkg/testing/helper.py",
+        "testing/helper.py",
+        "Tests/helper.py",
+        "TEST/data.json",
     ],
 )
 def test_h2_protected_paths_block(path):
@@ -159,16 +173,30 @@ def test_h2_protected_paths_block(path):
     "path",
     [
         "fastapi/testclient.py",
-        "pkg/testing/helper.py",
         "src/pkg/core.py",
         "docs_src/tutorial.py",
-        "noxfile.py",
-        "setup.py",
+        "testing/notes.md",
+        "Testing/data.json",
     ],
 )
 def test_h2_does_not_flag_unprotected_paths(path):
     report = audit_patch(modified(path))
     assert not rules(report, "H2.protected")
+    assert report["gate"] == "pass"
+
+
+@pytest.mark.parametrize("path", ["noxfile.py", "setup.py", "pkg/setup.py"])
+def test_h8_packaging_files_warn(path):
+    report = audit_patch(modified(path))
+    assert rules(report, "H8.packaging")
+    assert rules(report, "H8.packaging")[0]["severity"] == "warn"
+    assert not rules(report, "H2.protected")
+    assert report["gate"] == "warn"
+
+
+def test_h4_method_named_breakpoint_is_not_a_debugger():
+    report = audit_patch(modified("pkg/core.py", "def breakpoint(self):"))
+    assert not rules(report, "H4.debug")
     assert report["gate"] == "pass"
 
 
@@ -186,6 +214,33 @@ def test_h4_debugger_blocks(line):
     report = audit_patch(modified("pkg/core.py", line))
     assert rules(report, "H4.debug")
     assert rules(report, "H4.debug")[0]["severity"] == "block"
+    assert report["gate"] == "block"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "builtins.breakpoint()",
+        "importlib.import_module('pdb')",
+        'importlib.import_module("ipdb")',
+        '__import__("pudb")',
+    ],
+)
+def test_h4_dynamic_debugger_imports_block(line):
+    report = audit_patch(modified("pkg/core.py", line))
+    assert rules(report, "H4.debug")
+    assert report["gate"] == "block"
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["sitecustomize.py", "pkg/usercustomize.py", "nested/_swegemma_stubs.py", "evil.pth"],
+)
+def test_h5a_import_hooks_block_before_scratch_warnings(path):
+    report = audit_patch(added(path, "import os\n"))
+    assert rules(report, "H5a.import_hook")
+    assert "verification.py:64-76" in rules(report, "H5a.import_hook")[0]["evidence"]
+    assert not rules(report, "H1.unexplained")
     assert report["gate"] == "block"
 
 
@@ -246,6 +301,36 @@ def test_h5a_paths_do_not_flag_workspace_or_unlisted_copies(path):
 )
 def test_h5a_sys_path_hacks_block(line):
     report = audit_patch(modified("pkg/__init__.py", line))
+    assert rules(report, "H5a.sys_path")
+    assert report["gate"] == "block"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'sys.path[0:0] = ["/workspace"]',
+        'from sys import path; path.insert(0, "/tmp")',
+        'from sys import path; path[0:0] = ["/tmp"]',
+    ],
+)
+def test_h5a_sys_path_slice_and_imported_name_block(line):
+    report = audit_patch(modified("pkg/__init__.py", line))
+    assert rules(report, "H5a.sys_path")
+    assert report["gate"] == "block"
+
+
+def test_h5a_imported_path_mutation_on_a_later_line_blocks():
+    body = (
+        "diff --git a/pkg/__init__.py b/pkg/__init__.py\n"
+        "--- a/pkg/__init__.py\n"
+        "+++ b/pkg/__init__.py\n"
+        "@@ -1,2 +1,4 @@\n"
+        " VALUE = 1\n"
+        "+from sys import path\n"
+        '+path.insert(0, "/tmp")\n'
+        " VALUE = 2\n"
+    )
+    report = audit_patch(body)
     assert rules(report, "H5a.sys_path")
     assert report["gate"] == "block"
 
@@ -373,6 +458,61 @@ def test_adk_like_submit_is_explicit():
     assert report["trace_schema"] == "adk-like"
     assert report["finalization"] == "explicit"
     assert report["verifier_reached"] is True
+    assert report["submit_calls"] == 1
+    assert report["submitting_agents"] == ["verify"]
+    assert report["gate"] == "pass"
+
+
+def test_v5_double_submit_is_not_a_block():
+    events = [
+        {"agent": "repair", "tool": "edit_file", "args": {}, "output": ""},
+        {"agent": "verify", "tool": "submit_patch", "args": {}, "output": "ok"},
+        {"agent": "verify", "tool": "edit_file", "args": {}, "output": ""},
+        {"agent": "verify", "tool": "submit_patch", "args": {}, "output": "ok"},
+    ]
+    report = audit_patch(modified("pkg/core.py"), trace(events))
+    assert report["submit_calls"] == 2
+    assert report["submitting_agents"] == ["verify", "verify"]
+    assert rules(report, "H3.submit_count")[0]["severity"] == "info"
+    assert not any(item["severity"] == "block" for item in report["findings"])
+    assert report["gate"] == "pass"
+
+
+@pytest.mark.parametrize("tool", ["edit_file", "write_file", "run_command"])
+def test_edit_after_submit_warns(tool):
+    events = [
+        {"agent": "verify", "tool": "submit_patch", "args": {}, "output": "ok"},
+        {"agent": "verify", "tool": tool, "args": {}, "output": ""},
+    ]
+    report = audit_patch(modified("pkg/core.py"), trace(events))
+    found = rules(report, "H3.edit_after_submit")
+    assert found and found[0]["severity"] == "warn"
+    assert "agent_runner.py:758" in found[0]["evidence"]
+    assert not any(item["severity"] == "block" for item in report["findings"])
+    assert report["gate"] == "warn"
+
+
+@pytest.mark.parametrize("tool", ["get_status", "read_file"])
+def test_read_after_submit_is_clean(tool):
+    events = [
+        {"agent": "verify", "tool": "submit_patch", "args": {}, "output": "ok"},
+        {"agent": "verify", "tool": tool, "args": {}, "output": ""},
+    ]
+    report = audit_patch(modified("pkg/core.py"), trace(events))
+    assert not rules(report, "H3.edit_after_submit")
+    assert report["gate"] == "pass"
+
+
+def test_single_v1_submit_is_not_a_block():
+    events = [
+        {"agent": "single_v1", "tool": "edit_file", "args": {}, "output": ""},
+        {"agent": "single_v1", "tool": "submit_patch", "args": {}, "output": "ok"},
+    ]
+    report = audit_patch(modified("pkg/core.py"), trace(events))
+    assert report["verifier_reached"] is None
+    assert report["submit_calls"] == 1
+    assert report["submitting_agents"] == ["single_v1"]
+    assert not any(item["severity"] == "block" for item in report["findings"])
     assert report["gate"] == "pass"
 
 
@@ -433,58 +573,70 @@ def test_evidence_snippets_are_omitted_from_the_public_view():
     assert public["evidence_blocked"] is False
 
 
-def test_cli_exit_codes(tmp_path, capsys):
+def test_cli_exit_codes(tmp_path, capsys, monkeypatch):
+    policy = str(Path("configs/hygiene/default.yaml").resolve())
+    monkeypatch.chdir(tmp_path)
     clean = tmp_path / "clean.patch"
     clean.write_text(modified("pkg/core.py"))
-    main(["hygiene", "patch", str(clean)])
+    main(["hygiene", "patch", str(clean), "--policy", policy])
     assert json.loads(capsys.readouterr().out)["gate"] == "pass"
     blocked = tmp_path / "blocked.patch"
     blocked.write_text(modified("pkg/core.py", "breakpoint()"))
     with pytest.raises(SystemExit) as caught:
-        main(["hygiene", "patch", str(blocked)])
+        main(["hygiene", "patch", str(blocked), "--policy", policy])
     assert caught.value.code == 1
     assert json.loads(capsys.readouterr().out)["gate"] == "block"
     warning = tmp_path / "warn.patch"
     warning.write_text(modified("pkg/core.py", 'print("DEBUG value", x)'))
-    main(["hygiene", "patch", str(warning)])
+    main(["hygiene", "patch", str(warning), "--policy", policy])
     assert json.loads(capsys.readouterr().out)["gate"] == "warn"
     with pytest.raises(SystemExit) as caught:
-        main(["hygiene", "patch", str(warning), "--fail-on", "warn"])
+        main(["hygiene", "patch", str(warning), "--fail-on", "warn", "--policy", policy])
     assert caught.value.code == 1
     with pytest.raises(SystemExit) as caught:
-        main(["hygiene", "patch", str(tmp_path / "missing.patch")])
+        main(["hygiene", "patch", str(tmp_path / "missing.patch"), "--policy", policy])
     assert caught.value.code == 2
     bad = tmp_path / "trace.json"
     bad.write_text('{"mystery": true}')
     with pytest.raises(SystemExit) as caught:
-        main(["hygiene", "patch", str(clean), "--trace", str(bad), "--require-trace"])
+        main(
+            [
+                "hygiene",
+                "patch",
+                str(clean),
+                "--trace",
+                str(bad),
+                "--require-trace",
+                "--policy",
+                policy,
+            ]
+        )
     assert caught.value.code == 2
 
 
-def test_cli_run_writes_only_the_requested_sidecar(tmp_path, capsys):
-    _write_run(tmp_path, [("alpha", modified("pkg/core.py"), _explicit())])
-    before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
-    destination = tmp_path / "hygiene.json"
-    main(
-        [
-            "hygiene",
-            "run",
-            str(tmp_path),
-            "--output",
-            str(destination),
-            "--workspace-root",
-            str(tmp_path),
-        ]
-    )
+def test_cli_writes_hygiene_json_without_rewriting_raw_files(tmp_path, capsys, monkeypatch):
+    policy = str(Path("configs/hygiene/default.yaml").resolve())
+    monkeypatch.chdir(tmp_path)
+    run = tmp_path / "run"
+    run.mkdir()
+    _write_run(run, [("alpha", modified("pkg/core.py"), _explicit())])
+    before = {path: path.read_bytes() for path in run.rglob("*") if path.is_file()}
+    main(["hygiene", "run", str(run), "--policy", policy])
+    destination = run / "hygiene.json"
     assert json.loads(capsys.readouterr().out)["gate"] == "pass"
     written = json.loads(destination.read_text())
     assert written["schema"] == "gemma-lab/hygiene/v1"
     after = {
-        path: path.read_bytes()
-        for path in tmp_path.rglob("*")
-        if path.is_file() and path != destination
+        path: path.read_bytes() for path in run.rglob("*") if path.is_file() and path != destination
     }
     assert before == after
+    patch = tmp_path / "clean.patch"
+    patch.write_text(modified("pkg/core.py"))
+    main(["hygiene", "patch", str(patch), "--policy", policy])
+    assert (tmp_path / "hygiene.json").is_file()
+    source = _candidate(tmp_path / "agent", tools_verify=["read_file", "submit_patch"])
+    main(["hygiene", "candidate", str(source), "--policy", policy])
+    assert json.loads((tmp_path / "hygiene.json").read_text())["gate"] == "pass"
 
 
 def test_candidate_lint_blocks_and_passes(tmp_path):
@@ -499,17 +651,30 @@ def test_candidate_lint_blocks_and_passes(tmp_path):
     assert not report["findings"]
 
 
-def test_structured_candidates_have_no_hygiene_block():
+def test_frozen_structured_candidates_block_only_on_known_audit_gaps():
+    """structured-v4 and structured-v4-10m are frozen. Their in-agent audit misses
+    nested tests and the grading-reset names added to the G2 fixture, so candidate
+    lint blocks. The agent trees themselves are not modified.
+    """
     for name in ("structured-v4", "structured-v4-10m"):
         source = Path("agents") / name
         before = sorted(path.relative_to(source).as_posix() for path in source.rglob("*"))
         report = lint_candidate(source)
         after = sorted(path.relative_to(source).as_posix() for path in source.rglob("*"))
         assert after == before
-        blocked = [item for item in report["findings"] if item["severity"] == "block"]
-        assert blocked == []
+        blocked = [item["rule"] for item in report["findings"] if item["severity"] == "block"]
+        assert blocked == ["G2.superset"]
+        gaps = {item["path"] for item in rules(report, "G2.grading_gap")}
+        assert gaps == {
+            ".pytest.ini",
+            "pkg/foo_test.py",
+            "sitecustomize.py",
+            "testing/helper.py",
+            "tox.ini",
+        }
+        assert all(item["severity"] == "warn" for item in rules(report, "G2.grading_gap"))
         assert any(item["rule"] == "G0.handoff_ratio" for item in report["findings"])
-        assert report["gate"] == "warn"
+        assert report["gate"] == "block"
 
 
 def test_parser_reads_a_real_git_diff(tmp_path):
@@ -535,8 +700,96 @@ def test_parser_reads_a_real_git_diff(tmp_path):
     assert rules(report, "H1.scratch")[0]["path"] == "repro.py"
 
 
+def atif_trace(agent, steps):
+    """Minimal ATIF trajectory: steps[].tool_calls plus observation results."""
+    built = []
+    for index, (tool, arguments, output) in enumerate(steps, start=1):
+        built.append(
+            {
+                "step_id": index,
+                "source": "agent",
+                "message": "",
+                "extra": {"author": agent},
+                "tool_calls": [
+                    {
+                        "tool_call_id": f"c{index}",
+                        "function_name": tool,
+                        "arguments": arguments,
+                    }
+                ],
+                "observation": {"results": [{"source_call_id": f"c{index}", "content": output}]},
+            }
+        )
+    return {
+        "schema_version": "ATIF-v1.2",
+        "session_id": "fixture",
+        "agent": {"name": agent, "version": "0"},
+        "steps": built,
+    }
+
+
+def test_atif_trace_drives_finalization_and_host_rules(tmp_path):
+    payload = atif_trace(
+        "verify",
+        [
+            (
+                "run_command",
+                {"command": "pip show fastapi"},
+                'File "/usr/lib/python3.12/site-packages/fastapi/__init__.py"',
+            ),
+            ("submit_patch", {}, "ok"),
+        ],
+    )
+    _write_run(tmp_path, [("alpha", modified("pkg/core.py"), payload)])
+    report = audit_run(tmp_path)
+    task = report["tasks"][0]
+    assert task["trace_schema"] == "atif"
+    assert task["finalization"] == "explicit"
+    assert task["verifier_reached"] is True
+    assert task["submit_calls"] == 1
+    assert rules(task, "H5b.host_import")
+    assert rules(task, "H5c.host_metadata")
+    assert report["gate"] == "warn"
+
+
+def test_missing_or_unparseable_atif_is_unknown_not_fallback(tmp_path):
+    _write_run(tmp_path, [("alpha", modified("pkg/core.py"), None)])
+    report = audit_run(tmp_path)
+    task = report["tasks"][0]
+    assert task["finalization"] == "unknown"
+    assert rules(task, "H3.unknown")
+    assert not rules(task, "H3.fallback")
+    dumped = json.loads((tmp_path / "results" / "alpha.json").read_text())
+    assert dumped["trace"].startswith("<SessionTrace")
+    trace_path = tmp_path / "results" / "traces" / "trace_alpha.json"
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    trace_path.write_text("{not json")
+    report = audit_run(tmp_path)
+    task = report["tasks"][0]
+    assert task["finalization"] == "unknown"
+    assert rules(task, "H3.unknown")
+    assert not rules(task, "H3.fallback")
+
+
+def test_single_agent_run_skips_the_verifier_rate(tmp_path):
+    payload = trace(
+        [
+            {"agent": "single_v1", "tool": "edit_file", "args": {}, "output": ""},
+            {"agent": "single_v1", "tool": "submit_patch", "args": {}, "output": "ok"},
+        ]
+    )
+    _write_run(tmp_path, [("alpha", modified("pkg/core.py"), payload)])
+    report = audit_run(tmp_path)
+    assert report["candidate"]["verifier_reached"] is None
+    assert not rules(report["candidate"], "R.verifier_reach_rate")
+    assert not rules(report["candidate"], "R.explicit_submit_rate")
+    assert report["tasks"][0]["verifier_reached"] is None
+    assert report["gate"] == "pass"
+
+
 def _write_run(directory, tasks):
     (directory / "results" / "patches").mkdir(parents=True)
+    (directory / "results" / "traces").mkdir(parents=True)
     identifiers = [task_id for task_id, _, _ in tasks]
     (directory / "run_manifest.json").write_text(
         json.dumps({"sha256": "ab" * 32, "task_ids": identifiers})
@@ -544,7 +797,14 @@ def _write_run(directory, tasks):
     rows = []
     for task_id, patch, payload in tasks:
         (directory / "results" / "patches" / f"{task_id}.patch").write_text(patch)
-        (directory / "results" / f"{task_id}.json").write_text(json.dumps(payload))
+        # The notebook used to stringify SessionTrace into this file. It is not the trace.
+        (directory / "results" / f"{task_id}.json").write_text(
+            json.dumps({"trace": "<SessionTrace object at 0x1>", "agent_patch": patch})
+        )
+        if payload is not None:
+            (directory / "results" / "traces" / f"trace_{task_id}.json").write_text(
+                json.dumps(payload)
+            )
         rows.append({"instance_id": task_id, "resolved": False, "duration_seconds": 1})
     (directory / "task_results.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
 

@@ -1,8 +1,8 @@
 """Static candidate lint (G0) and synthetic skill-audit replay (G2).
 
-G2 does not modify the candidate. Nested `pkg/tests/` paths are an intentional
-superset of the in-agent audit: missing them is INFO, not a BLOCK. A miss on the
-paths that audit already claims to flag is a BLOCK.
+G2 does not modify the candidate. A miss on the paths the in-agent audit already
+claims to flag is a BLOCK. Nested `pkg/tests/` missed by that audit is also a
+BLOCK. Other grading-reset paths the audit misses are WARN.
 """
 
 import importlib.util
@@ -21,6 +21,13 @@ from gemma_lab.hygiene.rules import finding
 HANDOFF = re.compile(r"By\s+(\d+)\s+elapsed seconds")
 REQUIRED_AUDIT_PATHS = {"repro.py", "tests/test_pkg.py", "conftest.py"}
 NESTED_TEST = "pkg/tests/test_nested.py"
+GRADING_GAP_PATHS = (
+    ".pytest.ini",
+    "pkg/foo_test.py",
+    "sitecustomize.py",
+    "testing/helper.py",
+    "tox.ini",
+)
 
 
 def lint_tree(source: Path, policy: dict) -> list[dict]:
@@ -153,13 +160,21 @@ def _g2(source: Path) -> list[dict]:
         found.append(
             finding(
                 "G2.superset",
-                "info",
+                "block",
                 path=NESTED_TEST,
-                evidence=(
-                    "nested tests/ is outside the in-agent audit and stays a controller-side BLOCK"
-                ),
+                evidence="in-agent audit missed nested tests/ that grading resets",
             )
         )
+    for path in GRADING_GAP_PATHS:
+        if path not in flagged:
+            found.append(
+                finding(
+                    "G2.grading_gap",
+                    "warn",
+                    path=path,
+                    evidence="in-agent audit missed a path grading resets",
+                )
+            )
     return found
 
 
@@ -170,9 +185,15 @@ def _audit_fixture(script: Path) -> set[str]:
         (root / "pkg/__init__.py").write_text("VALUE = 1\n")
         (root / "pkg/tests").mkdir()
         (root / "pkg/tests/test_nested.py").write_text("def test_nested():\n    assert True\n")
+        (root / "pkg/foo_test.py").write_text("def test_foo():\n    assert True\n")
+        (root / "testing").mkdir()
+        (root / "testing/helper.py").write_text("HELPER = 1\n")
         (root / "tests").mkdir()
         (root / "tests/test_pkg.py").write_text("def test_value():\n    assert True\n")
         (root / "conftest.py").write_text("# baseline\n")
+        (root / ".pytest.ini").write_text("[pytest]\n")
+        (root / "tox.ini").write_text("[tox]\n")
+        (root / "sitecustomize.py").write_text("# site\n")
         _git(root, "init", "-q")
         _git(root, "config", "user.name", "Hygiene fixture")
         _git(root, "config", "user.email", "hygiene@example.test")
@@ -181,6 +202,11 @@ def _audit_fixture(script: Path) -> set[str]:
         (root / "tests/test_pkg.py").write_text("def test_value():\n    assert False\n")
         (root / "conftest.py").write_text("# edited\n")
         (root / "pkg/tests/test_nested.py").write_text("def test_nested():\n    assert False\n")
+        (root / "pkg/foo_test.py").write_text("def test_foo():\n    assert False\n")
+        (root / "testing/helper.py").write_text("HELPER = 2\n")
+        (root / ".pytest.ini").write_text("[pytest]\naddopts = -q\n")
+        (root / "tox.ini").write_text("[tox]\nenvlist = py\n")
+        (root / "sitecustomize.py").write_text("# edited\n")
         (root / "repro.py").write_text("print('debug')\n")
         module = _load(script)
         result = module.audit(root)

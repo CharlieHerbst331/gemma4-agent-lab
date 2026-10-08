@@ -33,6 +33,12 @@ def parse_trace(payload) -> TraceView:
     if not isinstance(payload, dict):
         return TraceView("unknown", [])
     error = str(payload.get("error_message") or "")
+    version = payload.get("schema_version")
+    if isinstance(version, str) and version.startswith("ATIF"):
+        steps = payload.get("steps")
+        if not isinstance(steps, list):
+            return TraceView("unknown", [], error)
+        return TraceView("atif", _atif_events(payload), error)
     declared = payload.get("schema") or payload.get("trace_schema")
     events = payload.get("events")
     if events is None and isinstance(payload.get("trace"), list):
@@ -107,6 +113,74 @@ def _adk_events(events: list) -> list[ToolEvent]:
                 if not attached:
                     parsed.append(ToolEvent(author, name, {}, output))
     return parsed
+
+
+def _atif_events(payload: dict) -> list[ToolEvent]:
+    agent = payload.get("agent")
+    if isinstance(agent, dict):
+        root = str(agent.get("name") or "")
+    elif isinstance(agent, str):
+        root = agent
+    else:
+        root = ""
+    events: list[ToolEvent] = []
+    for step in payload.get("steps") or []:
+        if not isinstance(step, dict):
+            continue
+        author = _step_author(step, root)
+        calls = step.get("tool_calls")
+        if not isinstance(calls, list):
+            continue
+        outputs = _atif_outputs(step.get("observation"))
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            name = str(call.get("function_name") or "")
+            if not name:
+                continue
+            call_id = str(call.get("tool_call_id") or "")
+            output = outputs.get(call_id, "")
+            if not output and len(calls) == 1:
+                output = outputs.get("", "")
+            arguments = call.get("arguments")
+            if arguments is None:
+                arguments = {}
+            events.append(ToolEvent(author, name, arguments, output))
+    return events
+
+
+def _step_author(step: dict, root: str) -> str:
+    extra = step.get("extra")
+    if isinstance(extra, dict):
+        for key in ("author", "agent", "agent_name", "name"):
+            if extra.get(key):
+                return str(extra[key])
+    for key in ("author", "agent_name"):
+        if step.get(key):
+            return str(step[key])
+    return root
+
+
+def _atif_outputs(observation) -> dict[str, str]:
+    found: dict[str, str] = {}
+    if not isinstance(observation, dict):
+        return found
+    results = observation.get("results")
+    if not isinstance(results, list):
+        return found
+    loose = []
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+        content = _text(result.get("content"))
+        source = result.get("source_call_id")
+        if source:
+            found[str(source)] = content
+        elif content:
+            loose.append(content)
+    if loose:
+        found[""] = "\n".join(loose)
+    return found
 
 
 def _text(value) -> str:
