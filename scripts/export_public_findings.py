@@ -15,6 +15,12 @@ def read_json(path):
     return json.loads(path.read_text()) if path.exists() else {}
 
 
+def _clean_revision(value):
+    if isinstance(value, str) and value.endswith("-dirty"):
+        return value[: -len("-dirty")]
+    return value
+
+
 def digest(value, size=64):
     return (
         value
@@ -70,7 +76,7 @@ def export_run(folder):
             (s for s in STATES if "KernelWorkerStatus." + s in status), "UNKNOWN"
         ),
         "archive_sha256": digest(manifest.get("sha256")),
-        "source_git_revision": digest(manifest.get("git_revision"), 40),
+        "source_git_revision": digest(_clean_revision(manifest.get("git_revision")), 40),
         "task_source_sha256": digest(manifest.get("task_file_sha256")),
         "task_results": rows,
     }

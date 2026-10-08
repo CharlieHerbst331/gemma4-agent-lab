@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 
 import yaml
 
-from gemma_lab.common import MODEL, git_revision, now, sha256, write_json
+from gemma_lab.common import MODEL, candidate_source_commit, git_revision, now, sha256, write_json
 
 MAX_BYTES = 3 * 1024**3
 # Conservative local policy. Official extension checks run in the GPU notebook too.
@@ -217,9 +217,15 @@ def pack(source, output):
                 import shutil
 
                 shutil.copyfileobj(src, dst)
+    revision = git_revision()
+    source_commit = candidate_source_commit(source)
     manifest = {
         "created_at": now(),
-        "git_revision": git_revision(),
+        "git_revision": revision,
+        "packing_commit": _commit_id(revision),
+        "worktree_dirty": revision.endswith("-dirty"),
+        "candidate_source_commit": _commit_id(source_commit),
+        "candidate_source_dirty": source_commit.endswith("-dirty"),
         "sha256": sha256(output),
         "source": str(source),
         "archive": str(output),
@@ -228,6 +234,12 @@ def pack(source, output):
     }
     write_json(output.with_suffix(".manifest.json"), manifest)
     return manifest
+
+
+def _commit_id(revision):
+    if revision == "uncommitted":
+        return revision
+    return revision.removesuffix("-dirty")
 
 
 def validate_archive(path):

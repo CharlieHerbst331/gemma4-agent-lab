@@ -1,0 +1,15 @@
+# Offline patch-hygiene policy.
+# Severities for H1/H2/H4/H5 are fixed in code from the coordinator override.
+# This file holds thresholds and allowlists only.
+schema: gemma-lab/hygiene-policy/v1
+checker_version: "0.1.0"
+# Run-level explicit-submit and verifier-reach rates are WARN, never BLOCK.
+# No numeric baseline was authorized. 50% was named only as a later BLOCK revisit.
+# Until that revisit, any shortfall below these minimums is reported as WARN.
+explicit_submit_min_rate: 1.0
+verifier_reach_min_rate: 1.0
+rate_severity: warn
+# Prompt handoff deadline at or above this fraction of max_time_minutes is a WARN.
+handoff_fraction: 0.6
+allow_paths: []
+print_allowed_globs: []

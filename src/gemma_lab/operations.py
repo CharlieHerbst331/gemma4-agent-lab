@@ -172,6 +172,41 @@ def wait_for_run(kernel, output, timeout_minutes=45, interval_seconds=45):
     raise RuntimeError(f"Run still pending after {timeout_minutes} minutes: {kernel}")
 
 
+# Mean per-task wall time, projected across the planning set of 120 tasks, must
+# stay at or under 11 hours (one hour under the 12 hour competition cap).
+PROJECTED_HIDDEN_TASKS = 120
+PROJECTED_RUNTIME_LIMIT_SECONDS = 11 * 60 * 60
+
+
+def projected_runtime_seconds(rows):
+    if not rows:
+        raise ValueError(
+            "Refusing upload: evaluation has no task rows, so projected runtime cannot be checked"
+        )
+    missing = [row.get("instance_id", "?") for row in rows if "duration_seconds" not in row]
+    if missing:
+        raise ValueError(
+            "Refusing upload: evaluation is missing duration_seconds for "
+            + ", ".join(str(item) for item in missing)
+            + ", so the projected total runtime cannot be checked"
+        )
+    mean = sum(float(row["duration_seconds"]) for row in rows) / len(rows)
+    return mean * PROJECTED_HIDDEN_TASKS, mean
+
+
+def check_projected_runtime(rows):
+    projected, mean = projected_runtime_seconds(rows)
+    if projected > PROJECTED_RUNTIME_LIMIT_SECONDS:
+        raise ValueError(
+            "Refusing upload: projected total runtime is "
+            f"{projected / 3600:.2f} h "
+            f"(mean {mean:.1f} s/task × {PROJECTED_HIDDEN_TASKS} tasks), "
+            "which exceeds the 11 hour limit "
+            "(1 hour margin under the 12 hour competition cap)"
+        )
+    return {"projected_seconds": projected, "mean_seconds": mean}
+
+
 def check_evaluation(archive, evaluation):
     from gemma_lab.metrics import load_results, summary
 
@@ -214,6 +249,7 @@ def check_evaluation(archive, evaluation):
                 raise ValueError(
                     "Resolve official verification httpbin fixture errors before uploading"
                 )
+    check_projected_runtime(rows)
     return summary(rows)
 
 

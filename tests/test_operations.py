@@ -28,6 +28,7 @@ def evidence(tmp_path, archive):
                 "instance_id": "task",
                 "resolved": True,
                 "patch_chars": 10,
+                "duration_seconds": 30,
             }
         )
         + "\n"
@@ -127,6 +128,71 @@ def test_older_turn_budget_classification_is_not_an_infrastructure_error(tmp_pat
     assert metrics["agent_budget_failures"] == 1
     assert metrics["infrastructure_failures"] == 0
     assert rows.read_text() == raw
+
+
+def test_projected_runtime_boundary(tmp_path):
+    archive = tmp_path / "submission.zip"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    rows = evaluation / "task_results.jsonl"
+    limit = operations.PROJECTED_RUNTIME_LIMIT_SECONDS / operations.PROJECTED_HIDDEN_TASKS
+    row = json.loads(rows.read_text())
+    row["duration_seconds"] = limit
+    rows.write_text(json.dumps(row) + "\n")
+    assert check_evaluation(archive, evaluation)["resolved"] == 1
+    row["duration_seconds"] = limit + 1
+    rows.write_text(json.dumps(row) + "\n")
+    with pytest.raises(ValueError, match="11 hour limit") as raised:
+        check_evaluation(archive, evaluation)
+    message = str(raised.value)
+    assert "120 tasks" in message
+    assert "Refusing upload" in message
+
+
+def test_projected_runtime_uses_the_mean_of_every_task(tmp_path):
+    archive = tmp_path / "submission.zip"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    manifest = json.loads((evaluation / "run_manifest.json").read_text())
+    manifest["task_ids"] = ["fast", "slow"]
+    (evaluation / "run_manifest.json").write_text(json.dumps(manifest))
+    # 300 and 360 average to the 330s ceiling (330 * 120 = 11h). 362 pushes the mean over.
+    rows = [
+        {"instance_id": "fast", "resolved": True, "patch_chars": 10, "duration_seconds": 300},
+        {"instance_id": "slow", "resolved": False, "patch_chars": 10, "duration_seconds": 360},
+    ]
+    path = evaluation / "task_results.jsonl"
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    assert check_evaluation(archive, evaluation)["tasks"] == 2
+    rows[1]["duration_seconds"] = 362
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    with pytest.raises(ValueError, match="projected total runtime"):
+        check_evaluation(archive, evaluation)
+
+
+def test_projected_runtime_refuses_a_missing_duration(tmp_path):
+    archive = tmp_path / "submission.zip"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    row = json.loads((evaluation / "task_results.jsonl").read_text())
+    row.pop("duration_seconds")
+    (evaluation / "task_results.jsonl").write_text(json.dumps(row) + "\n")
+    with pytest.raises(ValueError, match="duration_seconds"):
+        check_evaluation(archive, evaluation)
+
+
+def test_execute_refuses_over_budget_before_any_upload(tmp_path, monkeypatch):
+    archive = tmp_path / "submission.zip"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    row = json.loads((evaluation / "task_results.jsonl").read_text())
+    row["duration_seconds"] = 400
+    (evaluation / "task_results.jsonl").write_text(json.dumps(row) + "\n")
+    monkeypatch.setattr(
+        operations, "kaggle", lambda *args, **kwargs: pytest.fail("upload attempted")
+    )
+    with pytest.raises(ValueError, match="exceeds the 11 hour limit"):
+        operations.submit(archive, "too slow", tmp_path / "ledger.jsonl", True, evaluation)
 
 
 def test_agent_timeout_does_not_hide_a_reported_grading_error(tmp_path):

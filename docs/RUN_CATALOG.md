@@ -12,8 +12,8 @@ must not be compared as paired rates. Recorded error labels have known omissions
 | baseline-dev3 | First frozen dev ID per represented repo | 0/3 | Three timeouts; Requests grading had recursive httpbin fixture errors |
 | simple-v1-dev3 | Same dev3 | 1/3 | FastAPI win; two timeouts; workspace scratch/debug leakage |
 | simple-v1-r1-dev3 | Same dev3 | 0/3 | Shortened prompts did not invoke investigator |
-| simple-v1-r1-clean | Same-archive unaffected dev2 | No task results | Worker failed before model setup:wheelhouse not at hard-coded mount |
-| simple-v1-r1-dev14 | Full frozen dev14 | 3/14 | FastAPI3/6,Rich0/7,Requests0/1; ten budget failures; test-patch application issue after agent test edits |
+| simple-v1-r1-clean | Unaffected dev2 preflight; archive hash not recorded | No task results | Worker failed before model setup:wheelhouse not at hard-coded mount |
+| simple-v1-r1-dev14 | Full frozen dev14 | 3/14 | FastAPI3/6,Rich0/7,Requests0/1; 9 recorded budget failures and 2 recorded infrastructure failures (rich_3472, rich_3454); test-patch application issue after agent test edits |
 | simple-v2-clean | FastAPI/Rich diagnostic dev2 | 1/2 | Three-role sequence executes; smoke only |
 | simple-v2-dev13 | All dev except Requests, prospectively environment-screened | 3/13 | Two FastAPI/one Rich; nine timeouts; locator created workspace repro files |
 | simple-v3-dev13 | Same dev13 | 3/13 | Same resolved IDs; locator shell removal eliminates observed scratch leakage; ten budget failures |

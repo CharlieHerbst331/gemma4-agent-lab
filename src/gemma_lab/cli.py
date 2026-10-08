@@ -6,7 +6,7 @@ from gemma_lab import bundle, metrics, operations, tasks
 from gemma_lab.common import COMPETITION, kaggle, write_json
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Gemma 4 agent development kit")
     sub = parser.add_subparsers(dest="command", required=True)
     doctor = sub.add_parser("doctor", help="Check environment and optional account access")
@@ -78,7 +78,26 @@ def main():
     submit.add_argument(
         "--evaluation", type=Path, help="Completed GPU output folder for this archive"
     )
-    args = parser.parse_args()
+    hygiene = sub.add_parser("hygiene", help="Offline patch hygiene and finalization checks")
+    hygiene_commands = hygiene.add_subparsers(dest="hygiene_command", required=True)
+    for name in ("candidate", "run", "patch"):
+        command = hygiene_commands.add_parser(name)
+        command.add_argument("--policy", type=Path, default=Path("configs/hygiene/default.yaml"))
+        command.add_argument("--fail-on", choices=["block", "warn"], default="block")
+        command.add_argument("--output", type=Path)
+        if name == "candidate":
+            command.add_argument("source", type=Path)
+        elif name == "run":
+            command.add_argument("directory", type=Path)
+            command.add_argument("--task-ids", type=Path)
+            command.add_argument("--workspace-root", type=Path)
+            command.add_argument("--require-trace", action="store_true")
+        else:
+            command.add_argument("patch_file", type=Path)
+            command.add_argument("--trace", type=Path)
+            command.add_argument("--require-trace", action="store_true")
+    args = parser.parse_args(argv)
+    exit_code = 0
     try:
         match args.command:
             case "doctor":
@@ -149,7 +168,21 @@ def main():
                 result = operations.submit(
                     args.archive, args.message, execute=args.execute, evaluation=args.evaluation
                 )
-        print(json.dumps(result, indent=2) if not isinstance(result, str) else result)
+            case "hygiene":
+                from gemma_lab.hygiene import HygieneInputError, run_cli
+
+                try:
+                    result, exit_code = run_cli(args)
+                except HygieneInputError as exc:
+                    parser.exit(2, f"Error: {exc}\n")
+        rendered = (
+            result
+            if isinstance(result, str)
+            else json.dumps(result, indent=2, sort_keys=args.command == "hygiene")
+        )
+        print(rendered)
+        if exit_code:
+            parser.exit(exit_code)
     except (ValueError, RuntimeError, OSError) as exc:
         parser.exit(1, f"Error: {exc}\n")
 
