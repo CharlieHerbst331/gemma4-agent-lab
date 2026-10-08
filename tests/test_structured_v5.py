@@ -153,10 +153,13 @@ def test_prompts_state_import_scratch_and_final_submit_rules():
     assert "{repair_report}" not in verify.replace("{repair_report?}", "")
     assert "at most 3" in triage
     assert "You do not have submit_patch" in repair
-    assert "12 counted calls" in repair
+    assert repair.count("12 counted calls") == 1
+    assert "first pass to about 12" not in repair
     assert "95 seconds" in repair
-    assert "about 75 or less" in repair
-    assert "restate a short checkpoint in plain text" in repair
+    assert "about 90 or less" in repair
+    assert "same response as your next tool call" in repair
+    assert "A reply with no tool call ends your turn" in repair
+    assert "Call get_status again before phase verify" in verify
     assert "under 40" not in verify
     assert "fewer than 60 seconds remain" in verify
     assert "exactly one short sentence" in verify

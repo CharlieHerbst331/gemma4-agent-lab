@@ -27,8 +27,9 @@ Root is a SequentialAgent: triage, then a LoopAgent of repair and verify.
 There is no `exit_loop` tool. When the loop finishes without a submission, the
 harness nudge starts the root again, which reruns triage. Verify's prompt therefore
 calls `submit_patch` on iteration 3, and whenever fewer than 60 seconds remain,
-whether or not the check passed. Repair hands off when about 75 seconds remain
-so that margin is still available.
+whether or not the check passed. Before starting that check, verify reads
+`get_status` again and submits immediately if fewer than 60 seconds remain.
+Repair hands off when about 90 seconds remain so that margin is still available.
 
 ## Token arithmetic
 
@@ -68,16 +69,18 @@ otherwise.
 it. The file sets `include_thoughts: false` and does not set `thinking_budget`.
 On both adk-submission 0.2.11 and 0.2.12 that turns thinking off and sends no
 `thinking_token_budget`. A budget of 0 compiles only on 0.2.12 (`ge=0`); 0.2.11
-rejects it (`ge=1`). The ablation is still this one file: set `include_thoughts`
-true and add `thinking_budget` 256. Temperature stays 0.5 and top_p stays 0.95.
-Temperature 0.2 is not used.
+rejects it (`ge=1`). The ablation needs adk-submission 0.2.12. In this same
+file, set `include_thoughts` true and add `thinking_budget` 256. On 0.2.12 that
+turns thinking on and forwards the numeric budget. On 0.2.11 the same change
+compiles, but the budget is dropped and only `enable_thinking` is sent.
+Temperature stays 0.5 and top_p stays 0.95. Temperature 0.2 is not used.
 
 ## What changed from structured-v4-10m, and why
 
 | Item | v4-10m | v5 | Why |
 | --- | --- | --- | --- |
 | Shape | Sequential triage, repair, verify | Sequential triage, Loop(3) of repair then verify | A failed verify can send one concrete failure back. The cap is small because exhausting it reruns triage. |
-| Time / calls / turns | 10 min, 80 calls, 60 turns | 4.5 min (270s), 48 calls, 64 turns | Coordinator cap is 270s and 40-60 calls. 48 calls stay the binding call cap. 64 turns is looser because get_status, submit_patch, skill loads, and text replies cost turns but not counted calls, and get_status never reports turns used. Command ceiling stays 300s and is still lowered by remaining task time. |
+| Time / calls / turns | 10 min, 80 calls, 60 turns | 4.5 min (270s), 48 calls, 64 turns | Coordinator cap is 270s and 40-60 calls. Skill script runs count as tool calls, so turns and counted calls are roughly co-binding, and the 270s clock usually binds first. 64 turns keeps the turn cap from being clearly tighter than the call cap. Command ceiling stays 300s and is still lowered by remaining task time. |
 | Thinking | 256 / 1024 / 1024, thoughts on | `include_thoughts: false`, no budget, one file | Thinking off on 0.2.11 and 0.2.12, with no budget sent. A budget of 0 fails to compile on 0.2.11. One file is the ablation knob. |
 | Output cap | 1024 / 4096 / 4096 | 1024 / 2048 / 1536 | Keeps prompt + completion under 32768. Overflow discards a submitted patch. |
 | Triage contents | `default` | `none`, plus `{problem_description}` and `{hints?}` | A nudge must not replay the whole tool history. The issue still has to be in the instruction. |
@@ -120,8 +123,10 @@ repair to submit and still transfer.
 v5 therefore leaves `submit_patch` off repair. Overflow is handled by the output
 caps, `include_contents: none`, and bounded tool output above. The guaranteed
 final submit is verify's, including on the last iteration and when fewer than
-60 seconds remain. Repair is told to hand off at about 75 seconds remaining so
-verify still has that margin. The submitted patch is copied after the loop
+60 seconds remain. Repair is told to hand off at about 90 seconds remaining, and
+verify reads `get_status` again before starting its check, so a clock that has
+already fallen under 60 seconds does not begin a full repro. The submitted patch
+is copied after the loop
 (about line 758) only when `patch_submitted` is set; the fallback diff runs only
 when it is not (about 760-776). Other exceptions (about 799) skip both.
 
@@ -166,9 +171,11 @@ imported a host copy.
   that needs a different structure than an uncapped LlmAgent.
 - `max_iterations` is 3, not 4. Three repair/verify passes already fill a 270s
   clock. Four would make the nudge-restart of triage more likely.
-- Turn limit is 64, inside a 270s clock, with 48 counted calls as the binding
-  call cap. `get_status` and `submit_patch` do not count as tool calls but do
-  count as turns. `get_status` reports `max_turns` and does not report turns used.
+- Turn limit is 64, with 48 counted calls, inside a 270s clock. Skill script
+  runs count as tool calls, so turns and counted calls are roughly co-binding,
+  and the 270s clock usually binds before either. `get_status` and
+  `submit_patch` do not count as tool calls but do count as turns.
+  `get_status` reports `max_turns` and does not report turns used.
 - The protected-path audit matches grading's
   `_is_protected_test_or_config_path` (`swegemma/harness/verification.py`
   60-83, applied at 389-414): `conftest.py`, `pytest.ini`, `pyproject.toml`,
@@ -188,8 +195,11 @@ imported a host copy.
   `event_retention_size=5`). The summarizer sees text parts only, so tool calls
   drop out. A compaction event is authored as a user event, and with
   `include_contents: none` the next request can hold only that summary. Repair
-  therefore keeps the first pass to about 12 calls and restates target files,
-  edits, and the last check result in plain text every few calls. Whether the
+  makes the provisional edit by about 12 counted calls. Every few calls it puts
+  the checkpoint (target files, edits, and the last check result) in the same
+  response as the next tool call. A reply with no tool call is the final
+  response and ends the turn, so that text is sent alone only in the final
+  report. Whether the
   scorer enables the same compaction is unconfirmed. `notebook.py` keeps the
   starter EvalConfig cell and does not rewrite that setting.
 - Graph tools remain on repair. Dropping them would be a separate confound.
@@ -206,7 +216,7 @@ passed. `make check` passed: ruff, format, and 112 tests. The new tests load
 replace `tests/test_agent_skills.py`, which still loads `agents/structured-v4`.
 
 Archive SHA256:
-`d63893ff567a8a379bc53a93708f8e33b10620a7faff2f3b43f4c0f6eeca79e2`.
+`6202ab26252df59061547e0fd7dbcc1e8ef62b5cb12c61c14c2b2e953865bbb5`.
 Repacked evaluated archives were unchanged: structured-v4-10m
 `0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`,
 structured-v4

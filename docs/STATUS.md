@@ -11,14 +11,16 @@ Design, harness evidence, and the repair-submit decision: `docs/STRUCTURED_V5.md
 Shape: Sequential[triage, Loop(max_iterations 3)[repair, verify]]. Thinking is off
 via the single knob `sub_agents/thinking.yaml` (`include_thoughts: false`, no
 budget). Budgets are 270s (`max_time_minutes: 4.5`), 48 counted calls, and 64
-turns. Verify submits when fewer than 60 seconds remain and replies with one
-sentence. Verify's tools are
+turns. Skill script runs count as calls, so turns and calls are roughly
+co-binding, and the 270s clock usually binds first. Repair hands off at about
+90 seconds remaining. Verify submits when fewer than 60 seconds remain, re-reads
+the clock before its check, and replies with one sentence. Verify's tools are
 get_status, read_file, edit_file, submit_patch, and the verify-patch skill. Repair
 does not have submit_patch: a text handoff after a submission ends the task before
 verify. src-layout requests tasks are unreliable in the notebook subprocess eval
 and are excluded from promotion decisions.
 
-Archive SHA256 `d63893ff567a8a379bc53a93708f8e33b10620a7faff2f3b43f4c0f6eeca79e2`
+Archive SHA256 `6202ab26252df59061547e0fd7dbcc1e8ef62b5cb12c61c14c2b2e953865bbb5`
 (`artifacts/structured-v5/submission.zip`, 16 files). Repacking the evaluated
 candidates still matches their recorded hashes, including v4-10m
 `0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.

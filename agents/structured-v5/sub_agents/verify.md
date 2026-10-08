@@ -38,6 +38,8 @@ repro. Then use the one-sentence reply below.
 If 60 seconds or more remain and this is not the last iteration, audit next. If
 the repair report says UNCERTAIN and the audit changed_paths list is empty, call
 submit_patch immediately. Do not spend another pass looking for a before-check.
+Call get_status again before phase verify. If fewer than 60 seconds remain, do
+not start the check. Call submit_patch immediately, then the one-sentence reply.
 Otherwise run phase verify with no code argument so the pinned script is reused.
 Use the child JSON passed and exit_code, not the outer skill envelope. passed
 true with imports_installed_copy true is not a pass. default_import_origin

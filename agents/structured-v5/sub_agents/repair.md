@@ -17,7 +17,7 @@ Start with get_status. Fields that matter: tool_calls_used, agent_elapsed_second
 time_seconds_remaining. get_status reports max_turns but never turns used. If the
 issue and hints are only an issue number with no behavior clue, return UNCERTAIN
 and loop_iteration immediately. No searches, no edits. Hand off when
-time_seconds_remaining is about 75 or less, even if the check is unfinished, so
+time_seconds_remaining is about 90 or less, even if the check is unfinished, so
 verify still has its 60 second submit margin.
 
 1. Open the triage files first. Use read_file with integer start and end, at most
@@ -64,12 +64,13 @@ verify still has its 60 second submit margin.
    such as pkg/build/module.py. Prefer the skill for repros. Do not install
    packages or use the network.
 
-6. Every few calls, restate a short checkpoint in plain text: target files, edits
-   made, and the last check result (exit code or passed). Above about 14k prompt
-   tokens, history can be replaced by a text-only summary, and the next role may
-   see only that summary. Keep the first pass to about 12 counted calls.
+6. Every few calls, put a short checkpoint in the same response as your next tool call.
+   Name the target files, the edits made, and the last check result (exit code or
+   passed). A reply with no tool call ends your turn. Send text alone only for
+   the final report. Above about 14k prompt tokens, history can be replaced by
+   a text-only summary, and the next role may see only that summary.
 
 Return a report under 220 words: cause, files changed, probe origin, before/after
-exit codes, uncertainty, and one line loop_iteration: N. Repeat the checkpoint
-there. First pass uses 1. If verify reported loop_iteration: N, this pass uses
-N+1. No source dumps.
+exit codes, uncertainty, and one line loop_iteration: N. Include the checkpoint
+in that report. That report is the only reply with no tool call. First pass uses
+1. If verify reported loop_iteration: N, this pass uses N+1. No source dumps.
