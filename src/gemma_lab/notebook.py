@@ -493,9 +493,9 @@ def generate_pair(
                 f"Adapted from the [official starter](https://www.kaggle.com/code/{STARTER}).\n",
                 "Two hash-pinned arms share one vLLM server. Grading is the official evaluator. "
                 "This private notebook does not submit to the leaderboard.\n",
-                "Restart will not signal the notebook's own process group. "
-                "Each nvidia-smi poll is capped by the time left in the 60 s "
-                "release deadline; a hung query is logged as unknown and GPU waiting stops.\n",
+                "Restart refuses to signal process groups None, 0, -1, 1, and its own group. "
+                "Each nvidia-smi poll is capped at 10 s and by the time left in the "
+                "60 s release deadline. Only a full 10 s expiry is logged as unknown.\n",
             ],
         },
         code_cell(codes[0]),
@@ -819,8 +819,11 @@ def restart_model_server():
     server_instance.stop()
     _release = release_server_after_stop(_pgid, server_instance.base_url)
     print('server restart waited on', _release)
-    append_jsonl(WORKING_DIR / 'events.jsonl',
-                 {{'event': 'server_restart_release', 'release': _release}})
+    _row = {{'event': 'server_restart_release', 'release': _release}}
+    if _release.get('kill_refused_reason'):
+        _row['kill_refused_pgid'] = _release['kill_refused_pgid']
+        _row['kill_refused_reason'] = _release['kill_refused_reason']
+    append_jsonl(WORKING_DIR / 'events.jsonl', _row)
     start_model_server(server_instance)
     return time.perf_counter() - _t0
 
