@@ -55,3 +55,5 @@ Rich patch also modifies repository tests; those changes did not establish its s
 which comes from fresh official verification. Locator cannot execute shell commands,
 but soft exploration caps are still ignored. Submission56905832 was accepted October7
 at08:41UTC; leaderboard status PENDING. No competitive-performance claim is justified.
+
+Publication-time update:submission56905832 now reports ERROR,no leaderboard score. Previous PENDING notes describe earlier observations, not current success. See HANDOFF/STATUS.

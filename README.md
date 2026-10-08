@@ -1,97 +1,143 @@
 # Gemma 4 Agent Lab
 
-A reproducible development kit for the [Gemma 4 Developer Agent competition](https://www.kaggle.com/competitions/gemma-4-developer-agent). The working objective is a competitive offline coding agent backed by credible experiments, useful tooling, and a clear technical portfolio.
+Public source and handoff notes for an offline coding-agent prototype in the
+[Google – The Gemma4 Developer Agent competition](https://www.kaggle.com/competitions/gemma-4-developer-agent).
+This repository contains our agent/toolkit code and redacted experiment observations.
+It does not contain competition tasks, repository snapshots, grading patches, raw
+traces/logs, generated patches, credentials or model weights.
 
-The kit is operational infrastructure, not a claim of competitive performance. The baseline is a single Gemma agent with repository, editing, testing, and graph tools. GPU evaluation uses the official Kaggle starter and harness.
+**For Grok or another coding agent: start with [docs/HANDOFF.md](docs/HANDOFF.md).**
+The latest10minute candidate resolved3/3 selected diagnostic tasks; two resulting
+patches still contain scratch files. This is not evidence of broad generalization or
+submission readiness. The one uploaded competition submission is currently ERROR,
+without a leaderboard score.
+
+## Read in this order
+
+| Document | Purpose |
+| --- | --- |
+| [AGENTS.md](AGENTS.md) | Development contract, data boundaries, testing and submission rules |
+| [HANDOFF](docs/HANDOFF.md) | Current state, immediate work, reproducible commands, copyable bot prompt |
+| [STATUS](docs/STATUS.md) | Actual candidates, hashes, results and blockers |
+| [HARNESS_SPEC](docs/HARNESS_SPEC.md) | Agent/compiler/sandbox/grading/controller layers and budgets |
+| [RUN_CATALOG](docs/RUN_CATALOG.md) | All14 run/preflight summaries, cohorts and interpretation caveats |
+| [Structured v4](docs/STRUCTURED_V4.md) | Current architecture, scoped skills and known limitations |
+| [10minute diagnostic](docs/STRUCTURED_V4_10M_DIAGNOSTIC.md) | Latest paired results, stage timing, skill behavior and hygiene |
+| [Harness review](docs/HARNESS_REVIEW.md) | Evidence-based priorities and experiment roadmap |
+| [RUNBOOK](docs/RUNBOOK.md) | Environment, official GPU evaluation, collection and checked uploads |
+| [COMPETITION](docs/COMPETITION.md) | Contract summary; official rules remain authoritative |
+
+Earlier designs/results: [SIMPLE_V1](docs/SIMPLE_V1.md),
+[EXPERIMENT_RESULTS](docs/EXPERIMENT_RESULTS.md),
+[v4 five-minute diagnostic](docs/STRUCTURED_V4_DIAGNOSTIC.md).
+Research/training plans: [RESEARCH](docs/RESEARCH.md), [PORTFOLIO](docs/PORTFOLIO.md).
+
+## Current candidates
+
+| Source | State | Measured outcome |
+| --- | --- | --- |
+| agents/simple-v3 | Uploaded as ref56905832; current server status ERROR, no score | Official public-dev3/13; not a leaderboard score |
+| agents/structured-v4 | Five-minute evaluated development candidate | Diagnostic1/3, zero skill calls, two timeouts |
+| agents/structured-v4-10m | Latest development candidate; not submitted | Same diagnostic3/3, two paired wins; scratch/fallback issues remain |
+
+Latest archive SHA256:
+`0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.
+Candidate source commit: `b00526833928c5ce9f1e181b77ad982e5bf12e84`.
+
+Budget is shared across all roles:10minutes,80 counted tool calls,60 model turns,
+300seconds per command capped by remaining task time. The competition-wide12hour
+patch-generation limit still requires measured full-run averages/setup before promotion.
+
+## Architecture and scoped skills
 
 ```mermaid
 flowchart LR
-    Research[Research snapshot] --> Candidate[Versioned agent candidate]
-    Candidate --> Package[Validated archive and hash]
-    Split[Frozen public task cohort] --> Eval[Private offline Kaggle evaluation]
-    Package --> Eval
-    Eval --> Evidence[Results, patches, traces, comparisons]
-    Evidence --> Candidate
-    Evidence --> Submit[Daily-slot-checked submission]
-    Evidence --> Portfolio[Technical report and case studies]
+    Issue[Issue, supplied hints and layout] --> Triage[Tool-free triage]
+    Triage --> Repair[Repair: source evidence and minimal edit]
+    Repair --> Verify[Isolated verification and patch audit]
+    Verify --> Submit[submit_patch]
+    Repair <--> Memory[Bounded task ledger in scratch]
+    Verify <--> Memory
 ```
 
-## Quick start
+The agent is declarative ADK with three Gemma LlmAgent roles, one base model
+`gemma-4-31b-it-qat-w4a16-ct`, no custom tool imports or trained adapters. Repair and
+verifier use explicit state handoffs and isolated conversation history.
+
+| Skill | Scoped repeated workflow |
+| --- | --- |
+| [task-memory](agents/structured-v4-10m/skills/task-memory/SKILL.md) | Locked/atomic task-bound ledger of facts, rejected hypotheses and checks; no transcripts |
+| [source-lookup](agents/structured-v4-10m/skills/source-lookup/SKILL.md) | Bounded read-only literal search and line windows |
+| [verify-patch](agents/structured-v4-10m/skills/verify-patch/SKILL.md) | Scratch-only repros, same-test contracts, real exit statuses, fingerprints and read-only syntax/hygiene audits |
+
+Official SDK preflight confirms tool exposure and script execution. Gemma often
+bypasses skills through raw tools. Skill availability is not skill adoption, and
+sequential order is not a hard guarantee that verifier gets time to execute.
+
+## Findings worth carrying forward
+
+- Removing locator shell access stopped observed locator-created scratch leakage.
+- Tool-free triage completed in roughly16–25seconds in diagnostics.
+- Increasing5→10minutes enabled two formerly failing diagnostic cases to make fixes
+  after the old cutoff. These are selected small-cohort observations, not a general score.
+- One verifier used the skill audit to remove test edits and then reverified the
+  current fingerprint before explicit submission. Two other passes used fallback
+  capture and retained scratch. Independent fresh grading proves those patches passed,
+  but does not prove compliance with the intended workflow.
+- Prompt limits and skill selection remain soft. Next priority is fewer bypasses and
+  dependable clean finalization, followed by matched controls and broader dev tests.
+- Error reporting has blind spots: timeouts can coexist with missing grading
+  dependencies/fixtures. Preserve raw outcomes and separate concurrent failure axes.
+- Holdout never evaluated; no model training or paid hardware; no recurring jobs.
+
+## Local toolkit checks
 
 ```bash
+git clone https://github.com/CharlieHerbst331/gemma4-agent-lab.git
+cd gemma4-agent-lab
 uv sync --locked
 make check
-uv run gemma-lab doctor --online
-uv run gemma-lab validate agents/baseline
-uv run gemma-lab pack agents/baseline
+uv run gemma-lab validate agents/structured-v4-10m
+uv run gemma-lab pack agents/structured-v4-10m \
+  --output artifacts/structured-v4-10m/submission.zip
 ```
 
-Python 3.12, dependencies, and the local CLI are locked in `uv.lock`. Kaggle credentials belong in `~/.kaggle/access_token` or an environment variable. Never add them to this repository. Git uses the existing macOS credential helper.
+Python3.12 is locked via uv.lock. Tests execute trusted synthetic fixtures, not
+competition repositories on a personal Mac. GPU/official benchmark execution uses
+a disposable offline Kaggle worker; see HANDOFF/RUNBOOK for exact commands.
+Credentials are supplied separately through your authorized account. Do not commit
+access tokens or use a public clone as evidence that private outputs are accessible.
 
-## Run a real experiment
+## Public evidence and reproducibility
+
+[evidence/run-results.json](evidence/run-results.json) exports allowlisted observations
+from14 runs/preflights: IDs, outcome counts, timings, tool counts, archive/revision/task
+checksums, package versions and hardware when recorded. It excludes raw inputs,
+patches, traces, logs and sensitive paths. [RUN_CATALOG](docs/RUN_CATALOG.md) documents
+historical error-label omissions and cohort differences.
+
+Original evidence is retained privately by its owner, with hash bindings in the
+public summary. A fresh clone can recreate candidates and generate its own official
+runs after obtaining authorized competition inputs; it does not contain our raw
+private evidence. Regenerate public observations with:
 
 ```bash
-# Small downloads, not the full dataset/model.
-uv run gemma-lab fetch-starter
-uv run gemma-lab fetch HARNESS_README.md tasks.jsonl
-
-# The frozen split in configs/splits/public-v1.json groups identical repo snapshots.
-uv run gemma-lab export-tasks data/competition/tasks.jsonl \
-  --splits configs/splits/public-v1.json --partition dev --output data/dev.agent.jsonl
-
-# Generate a private offline L4 notebook, embedding the exact validated candidate.
-uv run gemma-lab notebook agents/baseline --owner charlesaherbst \
-  --slug gemma-4-agent-lab-evaluation
-uv run gemma-lab push-notebook notebooks/generated/baseline --execute
-uv run gemma-lab status --kernel charlesaherbst/gemma-4-agent-lab-evaluation
-uv run gemma-lab pull-output charlesaherbst/gemma-4-agent-lab-evaluation \
-  --output runs/kaggle/baseline
-uv run gemma-lab report runs/kaggle/baseline/task_results.jsonl
+uv run python scripts/export_public_findings.py --source runs/kaggle \
+  --output evidence/run-results.json
 ```
 
-By default this evaluates two public smoke tasks. Use `--task-ids path/to/ids.json` with a JSON array to evaluate a fixed dev cohort. Generated notebooks preserve the official offline wheel installation, model registry, vLLM parsers, context compaction, and evaluator. They add archive hash verification, incremental results, patches, diagnostics, and provenance. They do not upload a competition submission automatically.
+Public cohort manifests are in configs/cohorts; grouped train/dev/holdout identifiers
+and source checksum are in configs/splits. They contain identifiers, not task text or
+reference/grading patches. Never train on dev/holdout outcomes or feed grading
+metadata into the agent. The optional training recipe has not been GPU-validated.
 
-The submitted three-role candidate is `agents/simple-v3` (earlier pilots remain in `agents/simple-v1` and `agents/simple-v2`); its design review and known limits are in [SIMPLE_V1](docs/SIMPLE_V1.md). It uses declarative sequential localization, repair, and independent verification. GPU evidence is tracked in [STATUS](docs/STATUS.md).
+## Publishing and license
 
-The evaluated development candidate is `agents/structured-v4`: tool-free triage, isolated repair/verification contexts, and scoped task-memory, source-lookup, and verify-patch skills. See [STRUCTURED_V4](docs/STRUCTURED_V4.md). Its official three-task diagnostic resolved 1/3 with zero skill invocations; it is not promoted. See [diagnostic results](docs/STRUCTURED_V4_DIAGNOSTIC.md).
+Own source is Apache2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). Official competition
+packages, data, notebooks and models retain their licenses/terms and are fetched
+separately. No official harness or model is bundled.
 
-The current longer-budget development variant is `agents/structured-v4-10m`: 10 minutes per task, 80 counted tool calls, 60 model turns, and a 300-second command timeout. Its official three-task diagnostic resolved 3/3 versus the five-minute version’s 1/3, but two patches contain scratch files and use fallback finalization. It is not submitted. See [10-minute diagnostic](docs/STRUCTURED_V4_10M_DIAGNOSTIC.md).
-
-## Develop and compare
-
-Copy `agents/baseline` to a candidate directory, change one hypothesis, evaluate the same task IDs, and compare:
-
-```bash
-uv run gemma-lab report runs/candidate/task_results.jsonl \
-  --baseline runs/baseline/task_results.jsonl --output runs/comparison.json
-uv run gemma-lab research --query 'Gemma coding agent' --output runs/research/latest.json
-```
-
-Reports include resolution rate, Wilson intervals, per-repository counts, tool usage, elapsed time, paired wins, and regressions. Research snapshots collect current public GitHub repositories, competition notebooks, and leaderboard entries. Review primary sources and licenses before incorporating any code or data.
-
-## Submit a checked archive
-
-```bash
-uv run gemma-lab pack agents/candidate --output artifacts/candidate/submission.zip
-uv run gemma-lab submit artifacts/candidate/submission.zip --message 'experiment ID and hypothesis'
-# After examining the plan and completed evaluation:
-uv run gemma-lab submit artifacts/candidate/submission.zip \
-  --message 'experiment ID and hypothesis' --evaluation runs/candidate --execute
-uv run gemma-lab status
-```
-
-The uploader requires completed evaluation outputs matching the exact archive hash and task cohort, checks Kaggle history, enforces the one-per-UTC-day slot, prevents identical resubmissions, and reserves the slot locally before a network upload. An interrupted upload needs history reconciliation before retrying. Portable checks are supplemented by the official harness checks inside the GPU notebook.
-
-## What lives where
-
-| Path | Purpose |
-| --- | --- |
-| `agents/` | Declarative competition agents, prompts, generation and budget configs |
-| `src/gemma_lab/` | Environment checks, research, data splits, packaging, notebook and submission operations |
-| `configs/splits/` | Frozen task IDs and source checksum; no reference solutions |
-| `tests/` | Archive security, answer redaction, paired metrics, submission reservations, SFT filtering |
-| `training/` | GPU-only LoRA SFT recipe and verified trajectory filtering |
-| `docs/` | Competition contract, runbook, research plan, portfolio evidence requirements |
-| `data/`, `vendor/`, `runs/`, `artifacts/` | Ignored local data, official source, results, models and archives |
-
-See [RUNBOOK](docs/RUNBOOK.md), [COMPETITION](docs/COMPETITION.md), [RESEARCH](docs/RESEARCH.md), and [PORTFOLIO](docs/PORTFOLIO.md). The repository stays private during development. A public release needs a data/license review and sharing on the competition forum or notebooks as the rules require.
+The owner authorized public GitHub release for this handoff. The competition-associated
+Kaggle code-sharing notebook/post is **pending owner action**; the owner asked to add
+it later. No public Kaggle notebook was created by this release. See
+[PUBLICATION](docs/PUBLICATION.md) and the official competition rules.

@@ -8,3 +8,7 @@ Official competition data, models, harness packages, and downloaded notebooks
 are not bundled in the repository. They retain their respective licenses and
 terms. The competition data page identifies its license as Apache 2.0 and also
 imposes competition access/sharing rules. Gemma model terms apply separately.
+
+Own redacted evaluation observations are published in evidence/run-results.json.
+Original competition data, reference/test patches, generated patches, raw traces/logs
+and model weights are not redistributed.

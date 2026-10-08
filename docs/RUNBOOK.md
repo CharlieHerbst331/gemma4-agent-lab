@@ -52,4 +52,4 @@ The quantized competition checkpoint is an inference target, not a presumed trai
 
 ## Handoff state
 
-Update STATUS.md with the last tested commit, current Kaggle URL/status, latest results, best archive hash, and next experiment. Keep the repo private until a deliberate portfolio release. Future sessions can execute this loop using the established authentication; no recurring automation is configured.
+Update STATUS.md with the last tested commit, current Kaggle URL/status, latest results, best archive hash, and next experiment. The owner authorized this public handoff release; publish only reviewed own code and redacted findings. The associated Kaggle code-sharing step remains pending owner action. Future sessions can execute this loop using the established authentication; no recurring automation is configured.

@@ -1,0 +1,11 @@
+{
+  "checked_at_utc": "2026-10-08T08:11:29.811099+00:00",
+  "submission_reference": "56905832",
+  "candidate": "agents/simple-v3",
+  "archive_sha256": "50d7b69dd4d0f6a5b4925bda919f69e57196b72337190bd6073be95591ff2646",
+  "server_status": "ERROR",
+  "public_score": null,
+  "private_score": null,
+  "cause": "Not available from CLI submission history; requires owner investigation.",
+  "note": "Upload receipt was successful. Public-dev evaluation is separate from leaderboard status."
+}

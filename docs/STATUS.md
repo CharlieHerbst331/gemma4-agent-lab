@@ -41,7 +41,7 @@ competition-wide generation limit still applies; longer caps require runtime evi
 - Design/use/limits: `docs/STRUCTURED_V4.md`. All64 tests plus lint/format pass; skill
   manifests validated. Official diagnostic:1/3, two timeouts, zero skill-tool invocations; see below.
 - Submitted v3 and its archive are unchanged. No new competition submission.
-  Its last checked server history reported PENDING.
+  Its publication-time server history reports ERROR, without a score.
 - Official SDK CPU preflight confirms compiled skill tools are exposed and all three
   helper scripts execute successfully; it is synthetic validation, not model performance.
 - Diagnostic report: `docs/STRUCTURED_V4_DIAGNOSTIC.md`. V4 regressed on rich_3454;
@@ -55,8 +55,10 @@ competition-wide generation limit still applies; longer caps require runtime evi
 User requested review, implementation, official evaluation, and Kaggle submission of
 a simple three-role Gemma agent. Implementation/evaluation are authorized; actual
 submission must use the checked uploader and respect one per UTC day. Submission **56905832** was accepted at 01:41 AM Pacific on October 7, 2026
-(08:41 UTC). Account history confirms `SubmissionStatus.PENDING`; no score yet.
-Kaggle reports zero submissions remaining for this UTC day. Do not retry/upload again today.
+(08:41 UTC). Publication-time account history now reports `SubmissionStatus.ERROR`, with no
+leaderboard score. The CLI summary does not expose the cause. The earlier zero-slot
+message applied to the upload's UTC day; use the checked uploader for current history
+and quota, never assume a cached slot count.
 
 - Active source: `agents/simple-v3`.
 - Archive: `artifacts/simple-v3/submission.zip`.
@@ -144,3 +146,12 @@ A newly inspected grading output for fastapi14356 cannot import dirty_equals; th
 summary recorded only its simultaneous timeout. Therefore zero recorded infrastructure
 failures was incomplete. Preserve raw3/13 and diagnose this as concurrent execution
 and verification-environment failures before future promotion/submission decisions.
+
+## Public handoff release
+
+Owner requested public GitHub release for their Grok bot and asked to add the Kaggle
+sharing notebook later. HANDOFF.md/HARNESS_SPEC.md/RUN_CATALOG.md/README describe the
+current implementation, all14 runs/preflights, evidence caveats and next priorities.
+evidence/run-results.json contains allowlisted own observations only; raw competition
+material, logs/traces/patches, credentials and weights remain excluded. Kaggle public
+code-sharing step is pending owner action. No new submission/run or collaborator invite.

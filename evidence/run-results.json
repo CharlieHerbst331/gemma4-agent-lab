@@ -1,0 +1,1090 @@
+{
+  "schema_version": 1,
+  "scope": "Own evaluation observations and provenance only. No dataset, issue text, repository snapshot, reference/test patch, generated patch, trace, log, credential, weight or archive contents.",
+  "metric_caveat": "Recorded error classes are historical collector labels; see RUN_CATALOG.md for diagnosed omissions and misclassifications. These small dev cohorts are not leaderboard scores.",
+  "runs": [
+    {
+      "run_id": "baseline-dev3",
+      "kind": "official-task-evaluation",
+      "collection_state": "COMPLETE",
+      "archive_sha256": "2df8bc24ea9a2ee298da6487e95a0c891879349325692ab0a0821d453c9117fe",
+      "source_git_revision": "e06e1da399781637c2de29fd64497842f36e3060",
+      "task_source_sha256": "e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6",
+      "task_results": [
+        {
+          "instance_id": "requests_7502",
+          "repo": "psf/requests",
+          "resolved": false,
+          "tool_calls": 38,
+          "duration_seconds": 436.08893835699996,
+          "patch_chars": 2819,
+          "test_exit_code": 1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_11194",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 61,
+          "duration_seconds": 367.14974880299997,
+          "patch_chars": 3828,
+          "test_exit_code": 1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3105",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 16,
+          "duration_seconds": 362.212348474,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        }
+      ],
+      "kaggle_notebook_url": "https://www.kaggle.com/code/charlesaherbst/gemma4-baseline-dev3",
+      "summary": {
+        "tasks": 3,
+        "resolved": 0,
+        "duration_seconds": 1165.451035634,
+        "counted_tool_calls": 115,
+        "recorded_agent_budget_failures": 3,
+        "recorded_infrastructure_failures": 0
+      },
+      "packages": {
+        "swegemma": "0.2.7",
+        "adk-submission": "0.2.12",
+        "adk-eval-core": "0.1.0",
+        "vllm": "0.19.1",
+        "google-adk": "1.36.1"
+      },
+      "hardware": {
+        "gpu_count": 4,
+        "gpu_names": [
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4"
+        ],
+        "tensor_parallel_size": 4
+      },
+      "private_evidence_hashes": {
+        "task_results.jsonl": "b35454c985e056474eed563065128b16435b133fce78fd5e7cc40c2863ab203e",
+        "run_manifest.json": "365f40594404e5764a1d8911d329809092fefb7ee088263d02ddeb35b952e83d"
+      }
+    },
+    {
+      "run_id": "simple-v1-dev3",
+      "kind": "official-task-evaluation",
+      "collection_state": "COMPLETE",
+      "archive_sha256": "510b45f2a24e61aa1b17b6341366c4425223efb092541ea5ab09f3403675b8ce",
+      "source_git_revision": "e06e1da399781637c2de29fd64497842f36e3060",
+      "task_source_sha256": "e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6",
+      "task_results": [
+        {
+          "instance_id": "requests_7502",
+          "repo": "psf/requests",
+          "resolved": false,
+          "tool_calls": 37,
+          "duration_seconds": 364.550912058,
+          "patch_chars": 1203,
+          "test_exit_code": 124,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_11194",
+          "repo": "fastapi/fastapi",
+          "resolved": true,
+          "tool_calls": 33,
+          "duration_seconds": 319.3541838910005,
+          "patch_chars": 993,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "rich_3105",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 33,
+          "duration_seconds": 308.79879645000074,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        }
+      ],
+      "kaggle_notebook_url": "https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v1-dev3",
+      "summary": {
+        "tasks": 3,
+        "resolved": 1,
+        "duration_seconds": 992.7038923990012,
+        "counted_tool_calls": 103,
+        "recorded_agent_budget_failures": 2,
+        "recorded_infrastructure_failures": 0
+      },
+      "packages": {
+        "swegemma": "0.2.7",
+        "adk-submission": "0.2.12",
+        "adk-eval-core": "0.1.0",
+        "vllm": "0.19.1",
+        "google-adk": "1.36.1"
+      },
+      "hardware": {
+        "gpu_count": 4,
+        "gpu_names": [
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4"
+        ],
+        "tensor_parallel_size": 4
+      },
+      "private_evidence_hashes": {
+        "task_results.jsonl": "882c5ddac9bc5aa740fc26ee602291a8fccb0f4a9bae6aab464b1bfa74f56fcc",
+        "run_manifest.json": "6a8c3b95edd16e82bafcbdb8c518effbb5691aaedd1e95a343133fbc814ffef3"
+      }
+    },
+    {
+      "run_id": "simple-v1-r1-clean",
+      "kind": "infrastructure-preflight",
+      "collection_state": "ERROR",
+      "archive_sha256": null,
+      "source_git_revision": null,
+      "task_source_sha256": null,
+      "task_results": [],
+      "kaggle_notebook_url": "https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v1-r1-clean",
+      "packages": {},
+      "private_evidence_hashes": {}
+    },
+    {
+      "run_id": "simple-v1-r1-dev14",
+      "kind": "official-task-evaluation",
+      "collection_state": "COMPLETE",
+      "archive_sha256": "fb9ebb8f452dc78fba7fb5bdcf80b74190496b1e31a72cd206be803bd855db7d",
+      "source_git_revision": "22cd4ab8675063f8361df8a6183c7ad8f67d9761",
+      "task_source_sha256": "e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6",
+      "task_results": [
+        {
+          "instance_id": "requests_7502",
+          "repo": "psf/requests",
+          "resolved": false,
+          "tool_calls": 38,
+          "duration_seconds": 378.04769132899946,
+          "patch_chars": 1410,
+          "test_exit_code": 1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_4070",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 33,
+          "duration_seconds": 310.395904299,
+          "patch_chars": 1756,
+          "test_exit_code": 1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_14794",
+          "repo": "fastapi/fastapi",
+          "resolved": true,
+          "tool_calls": 21,
+          "duration_seconds": 319.29831596199983,
+          "patch_chars": 3456,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "fastapi_14786",
+          "repo": "fastapi/fastapi",
+          "resolved": true,
+          "tool_calls": 16,
+          "duration_seconds": 136.7266515350002,
+          "patch_chars": 1427,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "fastapi_14356",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 21,
+          "duration_seconds": 315.7825272230002,
+          "patch_chars": 712,
+          "test_exit_code": 2,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_14262",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 44,
+          "duration_seconds": 311.9794608279999,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_14246",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 31,
+          "duration_seconds": 310.93510902900016,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3934",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 16,
+          "duration_seconds": 305.34266628800015,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3944",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 21,
+          "duration_seconds": 308.3630420970003,
+          "patch_chars": 539,
+          "test_exit_code": 1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3938",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 27,
+          "duration_seconds": 306.3735598410003,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_11194",
+          "repo": "fastapi/fastapi",
+          "resolved": true,
+          "tool_calls": 24,
+          "duration_seconds": 314.6287162340004,
+          "patch_chars": 993,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "rich_3472",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 56,
+          "duration_seconds": 293.02006311600053,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "infrastructure_or_harness",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3454",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 22,
+          "duration_seconds": 216.8270328059998,
+          "patch_chars": 1208,
+          "test_exit_code": -1,
+          "recorded_failure_class": "infrastructure_or_harness",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3105",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 41,
+          "duration_seconds": 304.55357935699976,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        }
+      ],
+      "kaggle_notebook_url": "https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v1-r1-dev14",
+      "summary": {
+        "tasks": 14,
+        "resolved": 3,
+        "duration_seconds": 4132.274319944001,
+        "counted_tool_calls": 411,
+        "recorded_agent_budget_failures": 9,
+        "recorded_infrastructure_failures": 2
+      },
+      "packages": {
+        "swegemma": "0.2.7",
+        "adk-submission": "0.2.12",
+        "adk-eval-core": "0.1.0",
+        "vllm": "0.19.1",
+        "google-adk": "1.36.1"
+      },
+      "hardware": {
+        "gpu_count": 4,
+        "gpu_names": [
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4"
+        ],
+        "tensor_parallel_size": 4
+      },
+      "private_evidence_hashes": {
+        "task_results.jsonl": "c25f2b9226d9b8bb651978ebd2f42ff0c5adc2dced3579afbd1e860cb6eea8d1",
+        "run_manifest.json": "f34784396c964d2c2f6d34123170f46152019312acab4bf7ba7ee4c7210b6b55"
+      }
+    },
+    {
+      "run_id": "simple-v1-r1-dev3",
+      "kind": "official-task-evaluation",
+      "collection_state": "COMPLETE",
+      "archive_sha256": "fb9ebb8f452dc78fba7fb5bdcf80b74190496b1e31a72cd206be803bd855db7d",
+      "source_git_revision": "22cd4ab8675063f8361df8a6183c7ad8f67d9761",
+      "task_source_sha256": "e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6",
+      "task_results": [
+        {
+          "instance_id": "requests_7502",
+          "repo": "psf/requests",
+          "resolved": false,
+          "tool_calls": 34,
+          "duration_seconds": 376.2903333400002,
+          "patch_chars": 1410,
+          "test_exit_code": 1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_11194",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 24,
+          "duration_seconds": 304.1418147149998,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3105",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 33,
+          "duration_seconds": 302.1156902590001,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        }
+      ],
+      "kaggle_notebook_url": "https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v1-r1-dev3",
+      "summary": {
+        "tasks": 3,
+        "resolved": 0,
+        "duration_seconds": 982.547838314,
+        "counted_tool_calls": 91,
+        "recorded_agent_budget_failures": 3,
+        "recorded_infrastructure_failures": 0
+      },
+      "packages": {
+        "swegemma": "0.2.7",
+        "adk-submission": "0.2.12",
+        "adk-eval-core": "0.1.0",
+        "vllm": "0.19.1",
+        "google-adk": "1.36.1"
+      },
+      "hardware": {
+        "gpu_count": 4,
+        "gpu_names": [
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4"
+        ],
+        "tensor_parallel_size": 4
+      },
+      "private_evidence_hashes": {
+        "task_results.jsonl": "c3dd7690738982eb9e6e96d117d01b44265220f67267bf7f26d3300944121e7f",
+        "run_manifest.json": "6be9271a10c3186137e38723d534bfa0519f1633e033340d16456a795ea24a6e"
+      }
+    },
+    {
+      "run_id": "simple-v2-clean",
+      "kind": "official-task-evaluation",
+      "collection_state": "COMPLETE",
+      "archive_sha256": "712b212760088d121c217fbe73d4b8563e03ce4ffa619f50f4b09ab0773f5b55",
+      "source_git_revision": "9546e3a541c02ef32541f27814d0d259ff14934f",
+      "task_source_sha256": "e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6",
+      "task_results": [
+        {
+          "instance_id": "fastapi_11194",
+          "repo": "fastapi/fastapi",
+          "resolved": true,
+          "tool_calls": 29,
+          "duration_seconds": 308.27863508800056,
+          "patch_chars": 993,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "rich_3105",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 19,
+          "duration_seconds": 176.22676778300047,
+          "patch_chars": 0,
+          "test_exit_code": 1,
+          "runner_error_recorded": false
+        }
+      ],
+      "kaggle_notebook_url": "https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v2-clean",
+      "summary": {
+        "tasks": 2,
+        "resolved": 1,
+        "duration_seconds": 484.505402871001,
+        "counted_tool_calls": 48,
+        "recorded_agent_budget_failures": 0,
+        "recorded_infrastructure_failures": 0
+      },
+      "packages": {
+        "swegemma": "0.2.7",
+        "adk-submission": "0.2.12",
+        "adk-eval-core": "0.1.0",
+        "vllm": "0.19.1",
+        "google-adk": "1.36.1"
+      },
+      "hardware": {
+        "gpu_count": 4,
+        "gpu_names": [
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4"
+        ],
+        "tensor_parallel_size": 4
+      },
+      "private_evidence_hashes": {
+        "task_results.jsonl": "5987d5dfff31a8dd534b9f84381fa117f071ef6f0bce6730e45a474f9316e65e",
+        "run_manifest.json": "f25ec7fa3a714abdcbac6517ab16222d483f641a8418098263aa70590848b1d3"
+      }
+    },
+    {
+      "run_id": "simple-v2-dev13",
+      "kind": "official-task-evaluation",
+      "collection_state": "COMPLETE",
+      "archive_sha256": "712b212760088d121c217fbe73d4b8563e03ce4ffa619f50f4b09ab0773f5b55",
+      "source_git_revision": "4880e58ffceb40dd3cea6466d4463a765c5b787c",
+      "task_source_sha256": "e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6",
+      "task_results": [
+        {
+          "instance_id": "rich_4070",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 25,
+          "duration_seconds": 304.4178886439995,
+          "patch_chars": 3261,
+          "test_exit_code": 1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_14794",
+          "repo": "fastapi/fastapi",
+          "resolved": true,
+          "tool_calls": 13,
+          "duration_seconds": 307.53497995,
+          "patch_chars": 791,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "fastapi_14786",
+          "repo": "fastapi/fastapi",
+          "resolved": true,
+          "tool_calls": 12,
+          "duration_seconds": 116.52262971500022,
+          "patch_chars": 404,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "fastapi_14356",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 31,
+          "duration_seconds": 307.04457313700004,
+          "patch_chars": 2015,
+          "test_exit_code": 2,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_14262",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 45,
+          "duration_seconds": 306.9243154620008,
+          "patch_chars": 832,
+          "test_exit_code": 2,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_14246",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 47,
+          "duration_seconds": 303.69322336000005,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3934",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 25,
+          "duration_seconds": 306.44990605400017,
+          "patch_chars": 399,
+          "test_exit_code": 1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3944",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 32,
+          "duration_seconds": 304.59766963400034,
+          "patch_chars": 1873,
+          "test_exit_code": 1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3938",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 48,
+          "duration_seconds": 302.03944676300034,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_11194",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 23,
+          "duration_seconds": 303.9506226699996,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3472",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 30,
+          "duration_seconds": 304.9052293859995,
+          "patch_chars": 2202,
+          "test_exit_code": 1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3454",
+          "repo": "Textualize/rich",
+          "resolved": true,
+          "tool_calls": 16,
+          "duration_seconds": 208.06987430499976,
+          "patch_chars": 1327,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "rich_3105",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 17,
+          "duration_seconds": 200.91701300500063,
+          "patch_chars": 0,
+          "test_exit_code": 1,
+          "runner_error_recorded": false
+        }
+      ],
+      "kaggle_notebook_url": "https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v2-dev13",
+      "summary": {
+        "tasks": 13,
+        "resolved": 3,
+        "duration_seconds": 3577.067372085001,
+        "counted_tool_calls": 364,
+        "recorded_agent_budget_failures": 9,
+        "recorded_infrastructure_failures": 0
+      },
+      "packages": {
+        "swegemma": "0.2.7",
+        "adk-submission": "0.2.12",
+        "adk-eval-core": "0.1.0",
+        "vllm": "0.19.1",
+        "google-adk": "1.36.1"
+      },
+      "hardware": {
+        "gpu_count": 4,
+        "gpu_names": [
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4"
+        ],
+        "tensor_parallel_size": 4
+      },
+      "private_evidence_hashes": {
+        "task_results.jsonl": "cb5f285012a295f844eb13ef6b81a6c783e14b4aac509b323b39e12d64b01f35",
+        "run_manifest.json": "cca89a8b8c54f8624409b2e71885a6b357f41f5b74559ee448835cc9dbe88d31"
+      }
+    },
+    {
+      "run_id": "simple-v3-dev13",
+      "kind": "official-task-evaluation",
+      "collection_state": "COMPLETE",
+      "archive_sha256": "50d7b69dd4d0f6a5b4925bda919f69e57196b72337190bd6073be95591ff2646",
+      "source_git_revision": "2575bfacde1bc530527cbc0cd9d5cd37a7a041f1",
+      "task_source_sha256": "e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6",
+      "task_results": [
+        {
+          "instance_id": "rich_4070",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 22,
+          "duration_seconds": 314.198317286,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_14794",
+          "repo": "fastapi/fastapi",
+          "resolved": true,
+          "tool_calls": 28,
+          "duration_seconds": 333.2468828710007,
+          "patch_chars": 791,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "fastapi_14786",
+          "repo": "fastapi/fastapi",
+          "resolved": true,
+          "tool_calls": 15,
+          "duration_seconds": 169.6609227099998,
+          "patch_chars": 404,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "fastapi_14356",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 23,
+          "duration_seconds": 327.1005907769995,
+          "patch_chars": 712,
+          "test_exit_code": 2,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_14262",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 48,
+          "duration_seconds": 321.4401790789998,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_14246",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 25,
+          "duration_seconds": 323.49710867700014,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3934",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 23,
+          "duration_seconds": 313.59532159099945,
+          "patch_chars": 729,
+          "test_exit_code": 1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3944",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 16,
+          "duration_seconds": 310.4345809860006,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3938",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 29,
+          "duration_seconds": 309.82424622600047,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "fastapi_11194",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 42,
+          "duration_seconds": 322.74306077800065,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3472",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 24,
+          "duration_seconds": 309.43082764000064,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3454",
+          "repo": "Textualize/rich",
+          "resolved": true,
+          "tool_calls": 17,
+          "duration_seconds": 210.4310598259999,
+          "patch_chars": 1327,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "rich_3105",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 31,
+          "duration_seconds": 308.0772484520003,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        }
+      ],
+      "kaggle_notebook_url": "https://www.kaggle.com/code/charlesaherbst/gemma4-simple-v3-dev13",
+      "summary": {
+        "tasks": 13,
+        "resolved": 3,
+        "duration_seconds": 3873.680346899002,
+        "counted_tool_calls": 343,
+        "recorded_agent_budget_failures": 10,
+        "recorded_infrastructure_failures": 0
+      },
+      "packages": {
+        "swegemma": "0.2.7",
+        "adk-submission": "0.2.12",
+        "adk-eval-core": "0.1.0",
+        "vllm": "0.19.1",
+        "google-adk": "1.36.1"
+      },
+      "hardware": {
+        "gpu_count": 4,
+        "gpu_names": [
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4"
+        ],
+        "tensor_parallel_size": 4
+      },
+      "private_evidence_hashes": {
+        "task_results.jsonl": "ac4a29b30c4e4748e054539243e19dc10cb85980ed6a54ae6445dbe62617b8b8",
+        "run_manifest.json": "e63f99da734cb7c7c815f83fa1d30ec10dc714509c006e7942ff04e9bfaee003"
+      }
+    },
+    {
+      "run_id": "smoke-v1",
+      "kind": "official-task-evaluation",
+      "collection_state": "COMPLETE",
+      "archive_sha256": "2df8bc24ea9a2ee298da6487e95a0c891879349325692ab0a0821d453c9117fe",
+      "source_git_revision": null,
+      "task_source_sha256": "e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6",
+      "task_results": [
+        {
+          "instance_id": "fastapi_15661",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 9,
+          "duration_seconds": 59.4845322000001,
+          "patch_chars": 0,
+          "test_exit_code": -1,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "fastapi_15588",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 36,
+          "duration_seconds": 368.5527616469999,
+          "patch_chars": 2385,
+          "test_exit_code": 2,
+          "runner_error_recorded": false
+        }
+      ],
+      "kaggle_notebook_url": "https://www.kaggle.com/code/charlesaherbst/gemma-4-agent-lab-evaluation",
+      "summary": {
+        "tasks": 2,
+        "resolved": 0,
+        "duration_seconds": 428.037293847,
+        "counted_tool_calls": 45,
+        "recorded_agent_budget_failures": 0,
+        "recorded_infrastructure_failures": 0
+      },
+      "packages": {},
+      "private_evidence_hashes": {
+        "task_results.jsonl": "daa107bf3ec6c188136ecc85ef70faf0af2a29d4b7826aa837b21298ea5c7b43",
+        "run_manifest.json": "3f16a11d9c5ba33c099f334559555e1c1e5c0a5a708c9793b3fbc45d5b6310ff"
+      }
+    },
+    {
+      "run_id": "structured-v4-10m-diagnostic-v1",
+      "kind": "official-task-evaluation",
+      "collection_state": "COMPLETE",
+      "archive_sha256": "0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab",
+      "source_git_revision": "b00526833928c5ce9f1e181b77ad982e5bf12e84",
+      "task_source_sha256": "e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6",
+      "task_results": [
+        {
+          "instance_id": "fastapi_14786",
+          "repo": "fastapi/fastapi",
+          "resolved": true,
+          "tool_calls": 19,
+          "duration_seconds": 251.34279816800006,
+          "patch_chars": 404,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "fastapi_11194",
+          "repo": "fastapi/fastapi",
+          "resolved": true,
+          "tool_calls": 50,
+          "duration_seconds": 611.0467740029999,
+          "patch_chars": 5570,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "rich_3454",
+          "repo": "Textualize/rich",
+          "resolved": true,
+          "tool_calls": 35,
+          "duration_seconds": 606.1494996909998,
+          "patch_chars": 4551,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        }
+      ],
+      "kaggle_notebook_url": "https://www.kaggle.com/code/charlesaherbst/gemma4-structured-v4-10m-diagnostic",
+      "summary": {
+        "tasks": 3,
+        "resolved": 3,
+        "duration_seconds": 1468.5390718619997,
+        "counted_tool_calls": 104,
+        "recorded_agent_budget_failures": 0,
+        "recorded_infrastructure_failures": 0
+      },
+      "packages": {
+        "swegemma": "0.2.7",
+        "adk-submission": "0.2.12",
+        "adk-eval-core": "0.1.0",
+        "vllm": "0.19.1",
+        "google-adk": "1.36.1"
+      },
+      "hardware": {
+        "gpu_count": 4,
+        "gpu_names": [
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4"
+        ],
+        "tensor_parallel_size": 4
+      },
+      "private_evidence_hashes": {
+        "task_results.jsonl": "088b994d3da18d752684ddf2018756f74a2db1c5674f837241a21fdd2d0f5c2a",
+        "run_manifest.json": "e7f3e801644ebfda668506fa30f03ee6070146415bff6ca72f84c9ea2a5c81a6"
+      }
+    },
+    {
+      "run_id": "structured-v4-diagnostic-v1",
+      "kind": "official-task-evaluation",
+      "collection_state": "COMPLETE",
+      "archive_sha256": "01568061ee105be99a51af1bca592dd59756db9184dfada735c0e3074ae7e77e",
+      "source_git_revision": "62f8bab9b6048e61c7b91736e80ca57489a7594a",
+      "task_source_sha256": "e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6",
+      "task_results": [
+        {
+          "instance_id": "fastapi_14786",
+          "repo": "fastapi/fastapi",
+          "resolved": true,
+          "tool_calls": 26,
+          "duration_seconds": 221.3996686349999,
+          "patch_chars": 1652,
+          "test_exit_code": 0,
+          "runner_error_recorded": false
+        },
+        {
+          "instance_id": "fastapi_11194",
+          "repo": "fastapi/fastapi",
+          "resolved": false,
+          "tool_calls": 33,
+          "duration_seconds": 312.60815617699996,
+          "patch_chars": 1053,
+          "test_exit_code": 1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        },
+        {
+          "instance_id": "rich_3454",
+          "repo": "Textualize/rich",
+          "resolved": false,
+          "tool_calls": 22,
+          "duration_seconds": 305.8845168959999,
+          "patch_chars": 3295,
+          "test_exit_code": 1,
+          "recorded_failure_class": "agent_budget",
+          "runner_error_recorded": true
+        }
+      ],
+      "kaggle_notebook_url": "https://www.kaggle.com/code/charlesaherbst/gemma4-structured-v4-diagnostic",
+      "summary": {
+        "tasks": 3,
+        "resolved": 1,
+        "duration_seconds": 839.8923417079998,
+        "counted_tool_calls": 81,
+        "recorded_agent_budget_failures": 2,
+        "recorded_infrastructure_failures": 0
+      },
+      "packages": {
+        "swegemma": "0.2.7",
+        "adk-submission": "0.2.12",
+        "adk-eval-core": "0.1.0",
+        "vllm": "0.19.1",
+        "google-adk": "1.36.1"
+      },
+      "hardware": {
+        "gpu_count": 4,
+        "gpu_names": [
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4",
+          "NVIDIA L4"
+        ],
+        "tensor_parallel_size": 4
+      },
+      "private_evidence_hashes": {
+        "task_results.jsonl": "beaa92e3ebde5a4dd02a1693cc5dcc20abac666d02f8a487cdc25965211a6ce4",
+        "run_manifest.json": "9e3f354b064816aa2ad605d2655bad9e9e9169c132ba2822afe53a5aa1532eb4"
+      }
+    },
+    {
+      "run_id": "structured-v4-sdk-preflight-v1",
+      "kind": "infrastructure-preflight",
+      "collection_state": "ERROR",
+      "archive_sha256": null,
+      "source_git_revision": null,
+      "task_source_sha256": null,
+      "task_results": [],
+      "kaggle_notebook_url": "https://www.kaggle.com/code/charlesaherbst/gemma4-structured-v4-sdk-preflight",
+      "packages": {},
+      "sdk_preflight": {
+        "compile_ok": true,
+        "model_inference": false,
+        "competition_tasks": false
+      },
+      "private_evidence_hashes": {
+        "sdk_preflight.json": "199498fbcb3f020a1c9972e49580baadee18410dc74b33ebf64f511dc9b683b2"
+      }
+    },
+    {
+      "run_id": "structured-v4-sdk-preflight-v2",
+      "kind": "infrastructure-preflight",
+      "collection_state": "UNKNOWN",
+      "archive_sha256": null,
+      "source_git_revision": null,
+      "task_source_sha256": null,
+      "task_results": [],
+      "packages": {},
+      "sdk_preflight": {
+        "compile_ok": true,
+        "model_inference": false,
+        "competition_tasks": false
+      },
+      "private_evidence_hashes": {
+        "sdk_preflight.json": "6ddfe2ecc8ff415fb94dca08143784d6f7f81b7f62f43792e4a5392cffc2d0ca"
+      }
+    },
+    {
+      "run_id": "structured-v4-sdk-preflight-v3",
+      "kind": "infrastructure-preflight",
+      "collection_state": "COMPLETE",
+      "archive_sha256": null,
+      "source_git_revision": null,
+      "task_source_sha256": null,
+      "task_results": [],
+      "kaggle_notebook_url": "https://www.kaggle.com/code/charlesaherbst/gemma4-structured-v4-sdk-preflight",
+      "packages": {},
+      "sdk_preflight": {
+        "compile_ok": true,
+        "model_inference": false,
+        "competition_tasks": false,
+        "all_checks_passed": true
+      },
+      "private_evidence_hashes": {
+        "sdk_preflight.json": "a6054a33c84e0df039f3de66c59496e046427b94cead6aa8320f6df9020fee24"
+      }
+    }
+  ]
+}
