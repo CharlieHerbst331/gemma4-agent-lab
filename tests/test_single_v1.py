@@ -1,7 +1,7 @@
 """single-v1 loads its own skills and locks the structured-v5 control knobs."""
 
+import hashlib
 import importlib.util
-import json
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +12,17 @@ from gemma_lab.bundle import load_yaml, validate
 
 CANDIDATE = Path("agents/single-v1").resolve()
 FORK = Path("agents/structured-v4-10m")
+# Byte copies of structured-v5 at origin/cursor/structured-v5-3d40 (cc080df).
+V5_SHA256 = {
+    "skills/verify-patch/scripts/check.py": (
+        "ddb9e3bd7f3a7f94165f091c3ab8ef8c2be68b954679b43ee514502bdd386b98"
+    ),
+    "skills/verify-patch/SKILL.md": (
+        "cb5c9106fcad0f5a323465a293548226a6f78c829deb4b929dd1f3dfe37ada84"
+    ),
+    "thinking.yaml": "caa6ab7d581e681bf5a933c27250c73ba68df2de368a20647c88aa124e7a0f2c",
+    "eval_config.yaml": "88c2a5f1f9ebd441a5c4070b42d270428c03ac1523939a7f181df3d5d4e5b740",
+}
 
 
 def module(skill, filename):
@@ -24,6 +35,7 @@ def module(skill, filename):
         spec.loader.exec_module(result)
     finally:
         sys.dont_write_bytecode = prior
+    assert Path(result.__file__).resolve().is_relative_to(CANDIDATE)
     return result
 
 
@@ -56,7 +68,7 @@ def workspace(tmp_path):
     return root, scratch
 
 
-def test_skills_load_from_single_v1_not_the_fork():
+def test_skills_load_from_single_v1_and_match_v5_bytes():
     for loaded in (memory, lookup, check):
         assert "agents/single-v1/" in Path(loaded.__file__).as_posix()
     for rel in [
@@ -66,10 +78,12 @@ def test_skills_load_from_single_v1_not_the_fork():
         "skills/source-lookup/scripts/lookup.py",
     ]:
         assert (CANDIDATE / rel).read_bytes() == (FORK / rel).read_bytes()
-    own = CANDIDATE / "skills/verify-patch/scripts/check.py"
-    forked = FORK / "skills/verify-patch/scripts/check.py"
-    assert own.read_bytes() != forked.read_bytes()
-    assert '"-I"' not in own.read_text() and '"-E"' not in own.read_text()
+    for rel, digest in V5_SHA256.items():
+        data = (CANDIDATE / rel).read_bytes()
+        assert hashlib.sha256(data).hexdigest() == digest
+    own = (CANDIDATE / "skills/verify-patch/scripts/check.py").read_bytes()
+    forked = (FORK / "skills/verify-patch/scripts/check.py").read_bytes()
+    assert own != forked
 
 
 def test_single_agent_matches_v5_control_knobs():
@@ -81,11 +95,12 @@ def test_single_agent_matches_v5_control_knobs():
     sampling = root["generate_content_config"]
     assert sampling["temperature"] == 0.5
     assert sampling["top_p"] == 0.95
+    assert sampling["temperature"] != 0.2
     assert sampling["max_output_tokens"] == 2048
     assert sampling["thinking_config"]["thinking_budget"] == 0
     assert sampling["thinking_config"]["include_thoughts"] is True
     assert root["include_contents"] == "default"
-    assert set(root["tools"]) == {
+    assert root["tools"] == [
         "get_status",
         "read_file",
         "edit_file",
@@ -94,7 +109,7 @@ def test_single_agent_matches_v5_control_knobs():
         "get_code_neighbors",
         "get_code_subgraph",
         "submit_patch",
-    }
+    ]
     assert "write_file" not in root["tools"]
     assert root["skills"] == [
         "skills/task-memory",
@@ -102,160 +117,135 @@ def test_single_agent_matches_v5_control_knobs():
         "skills/verify-patch",
     ]
     source = (CANDIDATE / "agent.yaml").read_text()
-    assert source.count("thinking_budget:") == 1
+    assert "!include thinking.yaml" in source
+    assert "thinking_budget" not in source
     assert "temperature: 0.2" not in source
-    assert sampling["temperature"] != 0.2
     assert "SequentialAgent" not in source and "LoopAgent" not in source
+    knob = (CANDIDATE / "thinking.yaml").read_text()
+    assert knob.count("thinking_budget:") == 1
+    assert "thinking_budget: 0" in knob
     budgets = load_yaml(CANDIDATE / "eval_config.yaml", CANDIDATE)["evaluation"]
     assert budgets["max_time_minutes"] * 60 == 270
-    assert budgets["max_tool_calls"] == 50
-    assert budgets["max_turns"] == 50
+    assert budgets["max_tool_calls"] == 48
+    assert budgets["max_turns"] == 48
     assert 40 <= budgets["max_tool_calls"] <= 60
     assert 40 <= budgets["max_turns"] <= 60
     assert budgets["timeout_seconds"] == 300
     prompt = " ".join(root["instruction"].split())
     for phrase in [
-        "top 3 candidate files",
-        "12 counted calls",
-        "18 counted calls",
-        "35% of the 50-call cap",
+        "{problem_description}",
+        "{hints?}",
+        "Name at most 3 candidate files",
+        "end - start < 80",
+        "head -n 40",
+        "head -c 4000",
+        "Do not cat whole files.",
+        "Never repeat an identical call",
+        "Before the first repro, run the import-origin probe once.",
         "cd /workspace && python3 -c",
         "os.path.realpath(m.__file__)",
         "INSTALLED-COPY: edits not imported",
         "PYTHONPATH=/workspace/src:/workspace",
-        "Never use python -I or python -E.",
+        "Never use python -I, python -E, python3 -I, or python3 -E.",
+        "12 counted calls",
+        "95 seconds",
+        "35 percent of the 270 second cap",
         "top-level /workspace/build/ or /tmp",
-        "Never create real source files under a nested build/ or dist/",
-        "Resubmit after every edit.",
-        "submit_patch is the final action.",
-        "Do not repeat an identical call.",
-        'skill_name="verify-patch"',
-        'file_path="scripts/check.py"',
+        "nested build/ or dist/",
+        ".adk_exec_*.py",
+        "pkg/build/module.py",
+        "submit_patch must be your last tool call.",
+        "time_seconds_remaining under 40",
+        "call submit_patch as your last tool even when the check failed",
+        'skill_name "verify-patch"',
+        'file_path "scripts/check.py"',
         '{"mode":"audit"}',
-        'skill_name="source-lookup"',
-        'file_path="scripts/lookup.py"',
-        'skill_name="task-memory"',
-        'file_path="scripts/ledger.py"',
-        "{problem_description}",
+        'skill_name "source-lookup"',
+        'file_path "scripts/lookup.py"',
     ]:
         assert phrase in prompt
-    assert "0.2" not in prompt
-    assert len(validate(CANDIDATE)) == 9
+    assert "temperature: 0.2" not in prompt
+    assert len(validate(CANDIDATE)) == 10
 
 
 @pytest.mark.parametrize(
-    ("path", "protected"),
+    ("path", "flagged"),
     [
-        ("conftest.py", True),
-        ("pkg/conftest.py", True),
-        ("pkg/test_unit.py", True),
-        ("pkg/test/helper.py", True),
-        ("tests/helper.txt", True),
-        ("test/helper.py", True),
-        ("pytest.ini", True),
-        ("nested/pytest.ini", True),
-        ("pyproject.toml", True),
-        ("setup.cfg", True),
-        ("pkg/__init__.py", False),
+        ("pkg/app.py", False),
+        ("pkg/test.py", False),
+        ("testing/helper.py", False),
         ("pkg/widget_test.py", False),
         ("tox.ini", False),
-        ("testing/helper.py", False),
         ("pkg/build/mod.py", False),
+        ("pytest.ini", True),
+        ("pkg/pytest.ini", True),
+        ("pyproject.toml", True),
+        ("src/setup.cfg", True),
+        ("conftest.py", True),
+        ("pkg/conftest.py", True),
+        ("test_foo.py", True),
+        ("pkg/test_extra.py", True),
+        ("tests/helper.py", True),
+        ("src/test/util.py", True),
+        ("tests/test_pkg.py", True),
     ],
 )
-def test_protected_predicate_matches_the_v5_set(path, protected):
-    assert check.is_protected(path) is protected
+def test_protected_path_matches_the_v5_set(path, flagged):
+    assert check.protected_path(path) is flagged
 
 
-def test_audit_flags_protected_paths_and_ignores_source(workspace):
+def test_audit_flags_nested_protected_paths_and_not_implementation(workspace):
     root, _ = workspace
-    (root / "pkg/__init__.py").write_text("VALUE = 2\n")
-    assert check.audit(root)["passed"]
+    (root / "pkg/impl.py").write_text("VALUE = 2\n")
     (root / "pytest.ini").write_text("[pytest]\naddopts = -q\n")
-    (root / "tests/test_pkg.py").write_text("assert True\n")
+    (root / "tests/test_pkg.py").write_text("def test_value():\n    assert False\n")
+    (root / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    (root / "setup.cfg").write_text("[metadata]\nname = x\n")
     (root / "pkg/conftest.py").write_text("# nested\n")
-    (root / "pkg/test_unit.py").write_text("def test_x():\n    assert True\n")
-    (root / "pkg/test").mkdir()
-    (root / "pkg/test/helper.py").write_text("x = 1\n")
-    (root / "pyproject.toml").write_text("[project]\nname='x'\n")
-    (root / "setup.cfg").write_text("[metadata]\nname=x\n")
-    (root / "nested").mkdir()
-    (root / "nested/pytest.ini").write_text("[pytest]\n")
-    (root / "pkg/widget_test.py").write_text("x = 1\n")
-    (root / "tox.ini").write_text("[tox]\n")
+    (root / "test_root.py").write_text("def test_root():\n    assert True\n")
+    (root / "src/test").mkdir(parents=True)
+    (root / "src/test/util.py").write_text("VALUE = 1\n")
+    (root / "pkg/pytest.ini").write_text("[pytest]\n")
     result = check.audit(root)
     assert not result["passed"]
-    forbidden = set(result["forbidden"])
-    for path in [
+    assert "pkg/impl.py" in result["untracked"]
+    assert "pkg/impl.py" not in result["forbidden"]
+    assert {
         "pytest.ini",
         "tests/test_pkg.py",
-        "pkg/conftest.py",
-        "pkg/test_unit.py",
-        "pkg/test/helper.py",
         "pyproject.toml",
         "setup.cfg",
-        "nested/pytest.ini",
-    ]:
-        assert path in forbidden
-    assert "pkg/__init__.py" not in forbidden
-    assert "pkg/widget_test.py" not in forbidden
-    assert "tox.ini" not in forbidden
-    assert "pkg/widget_test.py" in result["untracked"]
+        "pkg/conftest.py",
+        "test_root.py",
+        "src/test/util.py",
+        "pkg/pytest.ini",
+    } <= set(result["forbidden"])
 
 
-def test_classify_origin_and_installed_copy_fails_closed(tmp_path):
-    root = tmp_path / "workspace"
-    (root / "pkg").mkdir(parents=True)
-    inside = root / "pkg/__init__.py"
-    inside.write_text("VALUE = 1\n")
-    outside = tmp_path / "site/pkg/__init__.py"
-    outside.parent.mkdir(parents=True)
-    outside.write_text("VALUE = 1\n")
-    assert check.classify_origin(str(inside), root) == "WORKSPACE"
-    assert check.classify_origin(str(outside), root) == "INSTALLED-COPY"
-    assert check.classify_origin("", root) == "UNKNOWN"
-    result = {"passed": True}
-    check.apply_import_origin(
-        result,
-        [
-            {
-                "module": "requests",
-                "file": "/usr/lib/requests/__init__.py",
-                "verdict": "INSTALLED-COPY",
-            }
-        ],
-    )
-    assert result["passed"] is False
-    assert result["imports_outside_workspace"] is True
-
-
-def test_repro_reports_workspace_import_origin(workspace):
+def test_repro_reports_workspace_and_default_import_origin(workspace):
     root, scratch = workspace
-    result = check.repro(root, scratch, "before", "import pkg\nassert pkg.VALUE == 1\n")
-    assert result["passed"]
-    assert result["imports_outside_workspace"] is False
-    origin = result["import_origin"][0]
-    assert origin["module"] == "pkg"
-    assert origin["verdict"] == "WORKSPACE"
-    assert origin["file"].startswith(str(root) + "/")
-    assert '"-I"' not in check._origin_script() and '"-E"' not in check._origin_script()
-
-
-def test_repro_import_origin_prefers_src_layout(workspace):
-    root, scratch = workspace
-    package = root / "src/requests"
+    package = root / "src" / "requests"
     package.mkdir(parents=True)
-    (package / "__init__.py").write_text("ORIGIN = 'workspace'\n")
-    result = check.repro(
-        root,
-        scratch,
-        "probe",
-        "import requests\nassert requests.ORIGIN == 'workspace'\n",
+    (package / "__init__.py").write_text("MARKER = 'workspace-requests'\n")
+    code = (
+        "import pkg, requests\n"
+        "assert pkg.VALUE == 1\n"
+        "assert requests.MARKER == 'workspace-requests'\n"
     )
+    result = check.repro(root, scratch, "before", code)
     assert result["passed"]
-    origin = next(row for row in result["import_origin"] if row["module"] == "requests")
-    assert origin["verdict"] == "WORKSPACE"
-    assert "/src/requests/" in origin["file"]
+    assert result["imports_installed_copy"] is False
+    used = {item["module"]: item for item in result["import_origin"]}
+    default = {item["module"]: item for item in result["default_import_origin"]}
+    assert used["pkg"]["origin"] == "WORKSPACE"
+    assert used["requests"]["origin"] == "WORKSPACE"
+    assert "src/requests" in used["requests"]["file"].replace("\\", "/")
+    assert default["pkg"]["origin"] == "WORKSPACE"
+    assert default["requests"]["origin"] == "INSTALLED-COPY"
+    assert "site-packages" in default["requests"]["file"]
+    host = check.repro(root, scratch, "probe", "import pytest\nassert pytest.__file__\n")
+    assert host["imports_installed_copy"] is True
+    assert host["import_origin"][0]["origin"] == "INSTALLED-COPY"
 
 
 def test_copied_memory_and_lookup_execute(workspace):
@@ -265,4 +255,3 @@ def test_copied_memory_and_lookup_execute(workspace):
     assert memory.update(root, scratch, "read")["evidence"] == ["pkg:1"]
     hits = lookup.lookup(root, ["VALUE"], ["pkg"])
     assert hits["hits"][0]["path"] == "pkg/__init__.py"
-    assert len(json.dumps(hits)) <= 4000

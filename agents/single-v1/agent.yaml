@@ -6,14 +6,11 @@ instruction: !include prompts/system.md
 generate_content_config:
   temperature: 0.5
   top_p: 0.95
-  # Modest ceiling. vLLM rejects prompt + max_output_tokens above 32768.
+  # 2048 completion tokens leaves a 30720-token prompt ceiling inside 32768.
+  # This is repair's cap, the largest of v5's 1024/2048/1536 role caps.
   max_output_tokens: 2048
-  thinking_config:
-    # Single knob. 0 turns thinking off on adk-submission 0.2.12.
-    # Change only this integer (for example to 256) to ablate a small budget.
-    thinking_budget: 0
-    include_thoughts: true
-# default keeps this agent's own tool history. none is a multi-agent handoff control.
+  thinking_config: !include thinking.yaml
+# default keeps this agent's own tool history. v5 sets none on each LlmAgent.
 include_contents: default
 tools:
 - get_status

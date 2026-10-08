@@ -5,12 +5,12 @@ Last updated: October 8, 2026 (Pacific).
 ## Matched single-agent control
 
 `agents/single-v1` is a new unevaluated control forked from `agents/structured-v4-10m`
-and matched to the structured-v5 spec except the multi-agent structure. One LlmAgent,
-`thinking_budget` 0, 270s / 50 calls / 50 turns. Archive SHA256
-`6b359d83dc78f90feb0027c40e38a026ad7c1201ee1d0b623fa486fcef8914dd`.
-Design and unmatched items: `docs/SINGLE_V1.md`. Src-layout (requests) tasks are
-excluded from promotion decisions. No GPU run and no submission. Re-packed
-structured-v4, structured-v4-10m, and simple-v3 archives match their documented hashes.
+and aligned to structured-v5 (`cursor/structured-v5-3d40`) except the multi-agent
+structure. One LlmAgent, `thinking_budget` 0, 270s / 48 calls / 48 turns. Archive
+SHA256 `2f92b83be8e90e75df4cccf565965c91e33129c06d109346a8b6c90aba1adf56`.
+Remaining differences: `docs/SINGLE_V1.md`. Src-layout (requests) tasks are excluded
+from promotion decisions. No GPU run and no submission. Re-packed structured-v4,
+structured-v4-10m, and simple-v3 archives match their documented hashes.
 
 ## Current development budget variant
 

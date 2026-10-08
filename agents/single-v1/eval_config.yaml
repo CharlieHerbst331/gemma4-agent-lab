@@ -1,9 +1,10 @@
 evaluation:
-  # Per-command cap. Remaining task time bounds each command further.
+  # 4.5 minutes = 270 seconds. The harness reads max_time_minutes.
+  # 48 counted calls is inside the 40-60 band. 48 turns matches that cap so
+  # neither limit is far tighter than the other. The 270s clock is the intended
+  # bound. timeout_seconds is the per-command ceiling; remaining task time
+  # lowers it further.
   timeout_seconds: 300
-  # Midpoint of the structured-v5 40-60 counted-call range.
-  max_tool_calls: 50
-  # 270 seconds.
+  max_tool_calls: 48
   max_time_minutes: 4.5
-  # Same 40-60 band, equal to the call cap so turns do not bind first.
-  max_turns: 50
+  max_turns: 48

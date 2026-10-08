@@ -13,45 +13,9 @@ import sys
 import tempfile
 from pathlib import Path, PurePosixPath
 
-_PROTECTED_NAMES = {"pytest.ini", "pyproject.toml", "setup.cfg", "conftest.py"}
-_SKIP_MODULES = {"src", "test", "tests", "testing"}
-
 
 def git(root, *args):
     return subprocess.run(["git", *args], cwd=root, capture_output=True, timeout=5)
-
-
-def is_protected(name):
-    """Grading's protected set from the structured-v5 spec.
-
-    Flags nested conftest.py, test_*.py, anything under tests/ or test/, and
-    pytest.ini, pyproject.toml, and setup.cfg at any depth.
-    """
-    path = PurePosixPath(str(name).replace("\\", "/"))
-    if path.name in _PROTECTED_NAMES:
-        return True
-    if path.name.startswith("test_") and path.suffix == ".py":
-        return True
-    return any(part in {"test", "tests"} for part in path.parts[:-1])
-
-
-def classify_origin(file_path, workspace):
-    if not file_path:
-        return "UNKNOWN"
-    real = os.path.realpath(file_path)
-    root = str(Path(workspace).resolve()) + os.sep
-    if real.startswith(root):
-        return "WORKSPACE"
-    return "INSTALLED-COPY"
-
-
-def apply_import_origin(result, origins):
-    outside = any(item.get("verdict") == "INSTALLED-COPY" for item in origins)
-    result["import_origin"] = origins
-    result["imports_outside_workspace"] = outside
-    if outside:
-        result["passed"] = False
-    return result
 
 
 def snapshot(root):
@@ -90,8 +54,76 @@ def snapshot(root):
     return base, extra, digest.hexdigest()
 
 
-def _unique(items):
-    return list(dict.fromkeys(items))
+def protected_path(name):
+    """Paths fresh grading resets, including nested tests and config files."""
+    path = PurePosixPath(str(name).replace("\\", "/"))
+    if any(part in {"test", "tests"} for part in path.parts[:-1]):
+        return True
+    base = path.name
+    if base in {"conftest.py", "pytest.ini", "pyproject.toml", "setup.cfg"}:
+        return True
+    return base.startswith("test_") and base.endswith(".py")
+
+
+def third_party_modules(code):
+    tree = ast.parse(code)
+    stdlib = getattr(sys, "stdlib_module_names", frozenset())
+    found = []
+    for node in ast.walk(tree):
+        names = []
+        if isinstance(node, ast.Import):
+            names = [alias.name.split(".")[0] for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names = [node.module.split(".")[0]]
+        for name in names:
+            if name.isidentifier() and name not in stdlib and name not in found:
+                found.append(name)
+            if len(found) == 3:
+                return found
+    return found
+
+
+def probe_module(root, module, environment):
+    script = (
+        "import importlib, os\n"
+        f"mod = importlib.import_module({module!r})\n"
+        "path = os.path.realpath(getattr(mod, '__file__', '') or '')\n"
+        "root = os.path.realpath(os.getcwd())\n"
+        "inside = bool(path) and (path == root or path.startswith(root + os.sep))\n"
+        "origin = 'WORKSPACE' if inside else ('UNKNOWN' if not path else 'INSTALLED-COPY')\n"
+        "print(origin + '\\t' + path)\n"
+    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+    except subprocess.TimeoutExpired:
+        return {"module": module, "origin": "UNKNOWN", "error": "probe timeout"}
+    line = completed.stdout.splitlines()[-1].strip() if completed.stdout else ""
+    origin, sep, path = line.partition("\t")
+    known = {"WORKSPACE", "INSTALLED-COPY", "UNKNOWN"}
+    if completed.returncode != 0 or not sep or origin not in known:
+        detail = (completed.stderr or completed.stdout or "probe failed").strip()
+        return {"module": module, "origin": "UNKNOWN", "error": detail[-180:]}
+    item = {"module": module, "origin": origin}
+    if path:
+        item["file"] = path[:300]
+    return item
+
+
+def import_report(root, code, environment):
+    modules = third_party_modules(code)
+    used = [probe_module(root, name, environment) for name in modules]
+    default_env = dict(environment)
+    # Sandbox default is the workspace root only. Do not use python -I or -E.
+    default_env["PYTHONPATH"] = str(root)
+    default = [probe_module(root, name, default_env) for name in modules]
+    return used, default
 
 
 def audit(workspace):
@@ -103,7 +135,8 @@ def audit(workspace):
     if names.returncode:
         raise ValueError("Cannot inspect changed paths")
     changed = [n for n in names.stdout.decode().split("\0") if n]
-    forbidden = [n for n in changed + extra if is_protected(n)]
+    forbidden = [n for n in changed if protected_path(n)]
+    forbidden.extend(n for n in extra if protected_path(n) and n not in forbidden)
     syntax = []
     for name in changed + extra:
         path = root / name
@@ -126,7 +159,7 @@ def audit(workspace):
         "patch_sha256": fingerprint,
         "changed_paths": changed[:20],
         "untracked": extra[:20],
-        "forbidden": _unique(forbidden)[:10],
+        "forbidden": forbidden[:10],
         "syntax_errors": syntax[:6],
         "diff_check_exit_code": whitespace.returncode,
         "diff_check_output": whitespace.stdout.decode(errors="replace")[-800:],
@@ -156,118 +189,6 @@ def assertion_code(code):
 
 def child_limits():
     resource.setrlimit(resource.RLIMIT_FSIZE, (1024 * 1024, 1024 * 1024))
-
-
-def _lives_in_workspace(root, name):
-    candidates = [
-        root / name / "__init__.py",
-        root / f"{name}.py",
-        root / "src" / name / "__init__.py",
-        root / "src" / f"{name}.py",
-        root / name,
-        root / "src" / name,
-    ]
-    return any(path.exists() for path in candidates)
-
-
-def _remember(found, name):
-    if len(found) >= 4:
-        return
-    module = name.split(".")[0]
-    if (
-        module.isidentifier()
-        and module not in sys.stdlib_module_names
-        and module not in _SKIP_MODULES
-        and module not in found
-    ):
-        found.append(module)
-
-
-def candidate_modules(root, code, changed):
-    found = []
-    for node in ast.walk(ast.parse(code)):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                _remember(found, alias.name)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            _remember(found, node.module)
-    for rel in changed:
-        path = PurePosixPath(rel)
-        if path.suffix != ".py" or not path.parts:
-            continue
-        parts = path.parts
-        if parts[0] == "src" and len(parts) >= 3:
-            _remember(found, parts[1])
-        elif len(parts) >= 2 and parts[0] not in _SKIP_MODULES:
-            _remember(found, parts[0])
-    return [name for name in found if _lives_in_workspace(root, name)][:4]
-
-
-def changed_names(root):
-    try:
-        base, _, _ = snapshot(root)
-    except (ValueError, OSError, subprocess.SubprocessError):
-        return []
-    listed = git(root, "diff", "--name-only", "-z", base)
-    if listed.returncode:
-        return []
-    return [n for n in listed.stdout.decode().split("\0") if n]
-
-
-def _origin_script():
-    tab = "\t"
-    return (
-        "import importlib, os, sys\n"
-        "for name in sys.argv[1:]:\n"
-        "    try:\n"
-        "        mod = importlib.import_module(name)\n"
-        "        raw = getattr(mod, '__file__', None) or ''\n"
-        "        path = os.path.realpath(raw) if raw else ''\n"
-        f"        print('ORIGIN{tab}' + name + '{tab}' + path + '{tab}OK')\n"
-        "    except Exception:\n"
-        f"        print('ORIGIN{tab}' + name + '{tab}{tab}ERROR')\n"
-    )
-
-
-def _parse_origin_line(line, workspace):
-    if not line.startswith("ORIGIN\t"):
-        return None
-    parts = line.split("\t")
-    if len(parts) < 4:
-        return None
-    name, path, status = parts[1], parts[2], parts[3]
-    if status != "OK":
-        return {"module": name, "file": "", "verdict": "ERROR"}
-    return {"module": name, "file": path[:300], "verdict": classify_origin(path, workspace)}
-
-
-def collect_import_origin(root, code):
-    modules = candidate_modules(root, code, changed_names(root))
-    if not modules:
-        return []
-    env = dict(os.environ)
-    # Spec prefix: src then workspace root. cwd remains on sys.path ahead of this.
-    env["PYTHONPATH"] = os.pathsep.join([str(root / "src"), str(root)])
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-c", _origin_script(), *modules],
-            cwd=root,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=8,
-        )
-    except (subprocess.TimeoutExpired, OSError):
-        return [{"module": name, "file": "", "verdict": "ERROR"} for name in modules]
-    rows = []
-    for line in proc.stdout.splitlines():
-        row = _parse_origin_line(line, root)
-        if row:
-            rows.append(row)
-    if not rows:
-        return [{"module": name, "file": "", "verdict": "ERROR"} for name in modules]
-    return rows[:4]
 
 
 def repro(workspace, scratch, phase, code=None, timeout=20):
@@ -320,8 +241,9 @@ def repro(workspace, scratch, phase, code=None, timeout=20):
         )
     _, _, fingerprint = snapshot(root)
     environment = dict(os.environ)
-    environment["PYTHONPATH"] = os.pathsep.join([str(root / "src"), str(root)])
+    environment["PYTHONPATH"] = os.pathsep.join([str(root), str(root / "src")])
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    origins, default_origins = import_report(root, code, environment)
     output_path = scratch / "gemma-agent-repro.log"
     if output_path.is_symlink():
         raise ValueError("Repro log must not be a symlink")
@@ -354,7 +276,6 @@ def repro(workspace, scratch, phase, code=None, timeout=20):
         output.seek(0, os.SEEK_END)
         output.seek(max(0, output.tell() - 3000))
         tail = output.read().decode("utf-8", errors="replace")
-    origins = collect_import_origin(root, code)
     _, _, after_fingerprint = snapshot(root)
     changed = after_fingerprint != fingerprint
     blocked = process.returncode != 0 and any(
@@ -375,8 +296,10 @@ def repro(workspace, scratch, phase, code=None, timeout=20):
         "patch_sha256": fingerprint,
         "repro_sha256": hashlib.sha256(code.encode()).hexdigest(),
         "output_tail": tail[-2400:],
+        "import_origin": origins,
+        "default_import_origin": default_origins,
+        "imports_installed_copy": any(item.get("origin") == "INSTALLED-COPY" for item in origins),
     }
-    apply_import_origin(result, origins)
     record = scratch / "gemma-agent-checks.json"
     if record.is_symlink():
         raise ValueError("Check history must not be a symlink")
