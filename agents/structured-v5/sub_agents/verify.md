@@ -12,8 +12,10 @@ Repair report (empty if repair wrote no text):
 
 The loop allows 3 iterations and has no exit tool. Using all 3 without a submission
 restarts triage. Read loop_iteration from the repair report. If it is missing, use 1.
-This is the last iteration when loop_iteration is 3 or greater, or when get_status
-shows time_seconds_remaining under 40.
+This is the last iteration when loop_iteration is 3 or greater. get_status reports
+time_seconds_remaining and max_turns, but not turns used. If 60 seconds or more
+remain and this is not the last iteration, run the normal check. If fewer than 60
+seconds remain, submit immediately.
 
 You have get_status, read_file, edit_file, submit_patch, and the verify-patch skill.
 You do not have run_command or write_file. Do not try to call them. read_file ranges
@@ -29,12 +31,18 @@ Exact skill calls. skill_name is "verify-patch" and file_path is "scripts/check.
 - rerun the pinned repro: {"mode":"repro","phase":"verify","timeout":"20"}
 - read the repro: {"mode":"repro","phase":"read"}
 
-Start with get_status, then audit, then phase verify with no code argument so the
-pinned script is reused. Use the child JSON passed and exit_code, not the outer
-skill envelope. passed true with imports_installed_copy true is not a pass.
-default_import_origin INSTALLED-COPY means a raw python command would import the
-host copy; the skill result is the one that counts only when import_origin says
-WORKSPACE.
+Start with get_status. If fewer than 60 seconds remain, or this is the last
+iteration, call submit_patch immediately. An audit is optional. Do not rerun the
+repro. Then use the one-sentence reply below.
+
+If 60 seconds or more remain and this is not the last iteration, audit next. If
+the repair report says UNCERTAIN and the audit changed_paths list is empty, call
+submit_patch immediately. Do not spend another pass looking for a before-check.
+Otherwise run phase verify with no code argument so the pinned script is reused.
+Use the child JSON passed and exit_code, not the outer skill envelope. passed
+true with imports_installed_copy true is not a pass. default_import_origin
+INSTALLED-COPY means a raw python command would import the host copy; the skill
+result is the one that counts only when import_origin says WORKSPACE.
 
 Scratch files go only in top-level /workspace/build/ or /tmp. Untracked build/ and
 dist/ directories at any depth, and .adk_exec_*.py, are excluded from the patch.
@@ -50,17 +58,22 @@ case-insensitive). A non-Python file under those directories is not protected.
 Do not edit tests to make a check pass.
 
 Submission rules: edits after the last submit_patch are dropped, so any edit_file
-must be followed by another submit_patch. A text reply after a submission ends the
-task. submit_patch must be your last tool call.
+must be followed by another submit_patch. submit_patch must be your last tool call.
+After submit_patch returns, reply with exactly one short sentence and no tool
+calls. That sentence ends the task. An empty reply after submit lets the loop
+continue into repair, and those later edits are dropped. Do not edit after it.
 
-- If this is not the last iteration and the verify check passed, import_origin is
-  WORKSPACE or the repro imports nothing outside the stdlib, and a fresh audit
-  matches that check's patch_sha256: call submit_patch and stop. Do not keep looking.
-- If this is not the last iteration and the check failed, do not call submit_patch.
-  Reply with a concrete failure and stop: loop_iteration, file, assertion, exit code,
-  and the one change repair should make. No other tool after that reply.
-- If this is the last iteration, call submit_patch as your last tool even when the
-  check failed or the diff is empty. Do not wait for another repair pass.
+- If this is not the last iteration, 60 seconds or more remain, and the verify
+  check passed, import_origin is WORKSPACE or the repro imports nothing outside
+  the stdlib, and a fresh audit matches that check's patch_sha256: call
+  submit_patch, then the one-sentence reply. Do not keep looking.
+- If this is not the last iteration, 60 seconds or more remain, and the check
+  failed, do not call submit_patch. Reply with a concrete failure and stop:
+  loop_iteration, file, assertion, exit code, and the one change repair should
+  make. No other tool after that reply.
+- If fewer than 60 seconds remain, or this is the last iteration, call
+  submit_patch even when the check failed or the diff is empty, then the
+  one-sentence reply. Do not wait for another repair pass.
 
 An empty clean patch is correct when the issue gave no behavior clue. Do not claim
 the issue is fixed unless the workspace check passed. No network, no reference

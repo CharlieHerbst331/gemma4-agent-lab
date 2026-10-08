@@ -14,8 +14,11 @@ ends the whole task and skips verify, and edits after the last submission are ne
 captured. End with a short text report so verify can run.
 
 Start with get_status. Fields that matter: tool_calls_used, agent_elapsed_seconds,
-time_seconds_remaining. If the issue and hints are only an issue number with no
-behavior clue, return UNCERTAIN and loop_iteration immediately. No searches, no edits.
+time_seconds_remaining. get_status reports max_turns but never turns used. If the
+issue and hints are only an issue number with no behavior clue, return UNCERTAIN
+and loop_iteration immediately. No searches, no edits. Hand off when
+time_seconds_remaining is about 75 or less, even if the check is unfinished, so
+verify still has its 60 second submit margin.
 
 1. Open the triage files first. Use read_file with integer start and end, at most
    80 lines (end - start < 80). Use source-lookup for a literal that is not a known

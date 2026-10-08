@@ -109,7 +109,7 @@ def test_candidate_yaml_is_the_bounded_loop():
     assert budgets["max_time_minutes"] == 4.5
     assert budgets["max_tool_calls"] == 48
     assert 40 <= budgets["max_tool_calls"] <= 60
-    assert budgets["max_turns"] == 48
+    assert budgets["max_turns"] == 64
     assert budgets["timeout_seconds"] == 300
     for path in CANDIDATE.rglob("*"):
         if path.suffix in {".yaml", ".yml", ".md"}:
@@ -153,6 +153,12 @@ def test_prompts_state_import_scratch_and_final_submit_rules():
     assert "You do not have submit_patch" in repair
     assert "12 counted calls" in repair
     assert "95 seconds" in repair
+    assert "about 75 or less" in repair
+    assert "under 40" not in verify
+    assert "fewer than 60 seconds remain" in verify
+    assert "exactly one short sentence" in verify
+    assert "changed_paths list is empty" in verify
+    assert "UNCERTAIN" in verify
     assert "loop_iteration" in repair and "loop_iteration" in verify
     assert 'skill_name "verify-patch"' in verify or 'skill_name is "verify-patch"' in verify
     assert 'file_path is "scripts/check.py"' in verify
