@@ -20,10 +20,13 @@ before script hash and rejects changed assertions. phase probe uses a separate
 scratch file and never replaces the baseline. Code must contain assert and must
 not catch AssertionError, Exception, BaseException, or use a bare except.
 
-The repro child sets PYTHONPATH to the workspace root plus workspace/src and does
-not use python -I or python -E. JSON import_origin is that environment.
-default_import_origin repeats the same imports with PYTHONPATH set to the workspace
-root only, which is the sandbox default (no editable install). WORKSPACE means
+The repro child sets PYTHONPATH to /workspace/src first, then the workspace root
+(/workspace/src:/workspace), and does not use python -I or python -E. That is the
+same order the repair prompt uses after an INSTALLED-COPY probe. JSON import_origin
+is that environment. default_import_origin repeats the same imports with PYTHONPATH
+set to the workspace root only, which is the sandbox default (no editable install),
+not a second ordering. The origin probe uses python -P so the workspace cwd does
+not jump ahead of that PYTHONPATH. -P is not python -I or python -E. WORKSPACE means
 module.__file__ is under the workspace. INSTALLED-COPY means the host copy was
 imported. imports_installed_copy is true when the repro environment itself imported
 a host copy. A passing exit code against INSTALLED-COPY is not evidence about the
@@ -41,8 +44,11 @@ dist/ directory.
 
 Audit args: {"mode":"audit"}. It parses changed Python without importing it, checks
 whitespace, flags untracked files (except the live official executor wrapper), and
-flags grading's protected set: any conftest.py, any test_*.py, anything under tests/
-or test/, and pytest.ini, pyproject.toml, or setup.cfg at any depth. It never
+flags grading's protected set: conftest.py, pytest.ini, pyproject.toml, tox.ini,
+setup.cfg, .pytest.ini, sitecustomize.py, usercustomize.py, _swegemma_stubs.py,
+any .pth file, test_*.py, *_test.py, and any .py file under a tests, test, or
+testing directory (those directory names are case-insensitive). A non-Python file
+under those directories is not protected. It never
 deletes, edits, stages, or submits. Audit passing means hygiene only
 (behavior_verified=false). Before submission, a passing verify check's patch_sha256
 must match the latest audit. Any edit invalidates prior check evidence.

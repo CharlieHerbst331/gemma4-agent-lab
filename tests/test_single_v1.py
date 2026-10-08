@@ -12,16 +12,15 @@ from gemma_lab.bundle import load_yaml, validate
 
 CANDIDATE = Path("agents/single-v1").resolve()
 FORK = Path("agents/structured-v4-10m")
-# Byte copies of structured-v5 at origin/cursor/structured-v5-3d40 (cc080df).
+# Byte copies of structured-v5 at origin/cursor/structured-v5-3d40 (5d03a8b).
 V5_SHA256 = {
     "skills/verify-patch/scripts/check.py": (
-        "ddb9e3bd7f3a7f94165f091c3ab8ef8c2be68b954679b43ee514502bdd386b98"
+        "c544234492a8846e5d4ba1082d20923b036ab0f4789a4748dc747500612baa4f"
     ),
     "skills/verify-patch/SKILL.md": (
-        "cb5c9106fcad0f5a323465a293548226a6f78c829deb4b929dd1f3dfe37ada84"
+        "0ef00d11676ae17f367cd9fbe38194c64dc972972fa18574393a05957969af50"
     ),
-    "thinking.yaml": "caa6ab7d581e681bf5a933c27250c73ba68df2de368a20647c88aa124e7a0f2c",
-    "eval_config.yaml": "88c2a5f1f9ebd441a5c4070b42d270428c03ac1523939a7f181df3d5d4e5b740",
+    "thinking.yaml": "f55a333a6a4f6c3855c532ad8edc5adfd71feff85cee1ad57479aa734e4d6acd",
 }
 
 
@@ -97,8 +96,8 @@ def test_single_agent_matches_v5_control_knobs():
     assert sampling["top_p"] == 0.95
     assert sampling["temperature"] != 0.2
     assert sampling["max_output_tokens"] == 2048
-    assert sampling["thinking_config"]["thinking_budget"] == 0
-    assert sampling["thinking_config"]["include_thoughts"] is True
+    assert "thinking_budget" not in sampling["thinking_config"]
+    assert sampling["thinking_config"]["include_thoughts"] is False
     assert root["include_contents"] == "default"
     assert root["tools"] == [
         "get_status",
@@ -122,15 +121,26 @@ def test_single_agent_matches_v5_control_knobs():
     assert "temperature: 0.2" not in source
     assert "SequentialAgent" not in source and "LoopAgent" not in source
     knob = (CANDIDATE / "thinking.yaml").read_text()
-    assert knob.count("thinking_budget:") == 1
-    assert "thinking_budget: 0" in knob
+    live = "\n".join(
+        line for line in knob.splitlines() if line.strip() and not line.strip().startswith("#")
+    )
+    assert live.strip() == "include_thoughts: false"
+    assert "thinking_budget:" not in live
     budgets = load_yaml(CANDIDATE / "eval_config.yaml", CANDIDATE)["evaluation"]
     assert budgets["max_time_minutes"] * 60 == 270
     assert budgets["max_tool_calls"] == 48
-    assert budgets["max_turns"] == 48
+    assert budgets["max_turns"] == 64
     assert 40 <= budgets["max_tool_calls"] <= 60
-    assert 40 <= budgets["max_turns"] <= 60
     assert budgets["timeout_seconds"] == 300
+    eval_text = " ".join(
+        line.split("#", 1)[-1].strip()
+        for line in (CANDIDATE / "eval_config.yaml").read_text().splitlines()
+    )
+    assert "binding call cap" not in eval_text
+    assert "binding cap" not in eval_text
+    assert "Skill script runs count as tool calls" in eval_text
+    assert "roughly co-binding" in eval_text
+    assert "270s clock usually binds first" in eval_text
     prompt = " ".join(root["instruction"].split())
     for phrase in [
         "{problem_description}",
@@ -155,8 +165,17 @@ def test_single_agent_matches_v5_control_knobs():
         ".adk_exec_*.py",
         "pkg/build/module.py",
         "submit_patch must be your last tool call.",
-        "time_seconds_remaining under 40",
-        "call submit_patch as your last tool even when the check failed",
+        "Never edit after the last submit.",
+        "After each edit_file, rerun the verify-patch check.",
+        "fewer than 60 seconds remain",
+        "exactly one short sentence",
+        "changed_paths list is empty",
+        "UNCERTAIN",
+        "same response as the next tool call",
+        "Never send the checkpoint as a message of its own.",
+        "a response with no function call is the final response and ends the turn.",
+        "That sentence is the only text-only reply",
+        "python -P",
         'skill_name "verify-patch"',
         'file_path "scripts/check.py"',
         '{"mode":"audit"}',
@@ -164,7 +183,11 @@ def test_single_agent_matches_v5_control_knobs():
         'file_path "scripts/lookup.py"',
     ]:
         assert phrase in prompt
+    assert "under 40" not in prompt
     assert "temperature: 0.2" not in prompt
+    script = (CANDIDATE / "skills/verify-patch/scripts/check.py").read_text()
+    assert 'os.pathsep.join([str(root / "src"), str(root)])' in script
+    assert '"-P"' in script
     assert len(validate(CANDIDATE)) == 10
 
 
@@ -173,24 +196,47 @@ def test_single_agent_matches_v5_control_knobs():
     [
         ("pkg/app.py", False),
         ("pkg/test.py", False),
-        ("testing/helper.py", False),
-        ("pkg/widget_test.py", False),
-        ("tox.ini", False),
-        ("pkg/build/mod.py", False),
+        ("testing/helper.py", True),
+        ("Testing/helper.py", True),
+        ("pkg/testing/helper.py", True),
+        ("TESTS/helper.py", True),
+        ("src/TEST/util.py", True),
+        ("deep/TESTING/mod.py", True),
+        ("mytesting/helper.py", False),
+        ("testing/data.txt", False),
+        ("tests/data.json", False),
+        ("tests/notes.md", False),
+        ("tests.py", False),
+        ("test_foo.txt", False),
         ("pytest.ini", True),
         ("pkg/pytest.ini", True),
         ("pyproject.toml", True),
         ("src/setup.cfg", True),
+        ("tox.ini", True),
+        ("pkg/tox.ini", True),
+        (".pytest.ini", True),
+        ("nested/sub/.pytest.ini", True),
         ("conftest.py", True),
         ("pkg/conftest.py", True),
+        ("sitecustomize.py", True),
+        ("a/b/sitecustomize.py", True),
+        ("usercustomize.py", True),
+        ("a/b/usercustomize.py", True),
+        ("_swegemma_stubs.py", True),
+        ("vendor/_swegemma_stubs.py", True),
+        ("src/_extra.pth", True),
+        ("hooks/vendor/extra.pth", True),
         ("test_foo.py", True),
         ("pkg/test_extra.py", True),
+        ("foo_test.py", True),
+        ("pkg/widget_test.py", True),
         ("tests/helper.py", True),
         ("src/test/util.py", True),
         ("tests/test_pkg.py", True),
+        ("pkg/build/mod.py", False),
     ],
 )
-def test_protected_path_matches_the_v5_set(path, flagged):
+def test_protected_path_matches_the_grading_predicate(path, flagged):
     assert check.protected_path(path) is flagged
 
 
@@ -206,10 +252,14 @@ def test_audit_flags_nested_protected_paths_and_not_implementation(workspace):
     (root / "src/test").mkdir(parents=True)
     (root / "src/test/util.py").write_text("VALUE = 1\n")
     (root / "pkg/pytest.ini").write_text("[pytest]\n")
+    (root / "tox.ini").write_text("[tox]\n")
+    (root / "tests/data.json").write_text("{}\n")
     result = check.audit(root)
     assert not result["passed"]
     assert "pkg/impl.py" in result["untracked"]
     assert "pkg/impl.py" not in result["forbidden"]
+    assert "tests/data.json" in result["untracked"]
+    assert "tests/data.json" not in result["forbidden"]
     assert {
         "pytest.ini",
         "tests/test_pkg.py",
@@ -219,7 +269,32 @@ def test_audit_flags_nested_protected_paths_and_not_implementation(workspace):
         "test_root.py",
         "src/test/util.py",
         "pkg/pytest.ini",
+        "tox.ini",
     } <= set(result["forbidden"])
+
+
+def test_audit_flags_import_hooks_and_case_insensitive_test_dirs(workspace):
+    root, _ = workspace
+    files = [
+        "pkg/widget_test.py",
+        "src/testing/helper.py",
+        "TESTS/helper.py",
+        "deep/TESTING/mod.py",
+        "nested/sub/.pytest.ini",
+        "hooks/sitecustomize.py",
+        "hooks/usercustomize.py",
+        "hooks/_swegemma_stubs.py",
+        "hooks/vendor/extra.pth",
+    ]
+    for name in files:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# grading reset\n")
+    (root / "hooks/notes.txt").write_text("not protected\n")
+    result = check.audit(root)
+    assert set(files) <= set(result["forbidden"])
+    assert "hooks/notes.txt" in result["untracked"]
+    assert "hooks/notes.txt" not in result["forbidden"]
 
 
 def test_repro_reports_workspace_and_default_import_origin(workspace):
@@ -246,6 +321,23 @@ def test_repro_reports_workspace_and_default_import_origin(workspace):
     host = check.repro(root, scratch, "probe", "import pytest\nassert pytest.__file__\n")
     assert host["imports_installed_copy"] is True
     assert host["import_origin"][0]["origin"] == "INSTALLED-COPY"
+    dual_root = root / "dualpkg"
+    dual_src = root / "src" / "dualpkg"
+    dual_root.mkdir()
+    dual_src.mkdir()
+    (dual_root / "__init__.py").write_text("MARKER = 'from-root'\n")
+    (dual_src / "__init__.py").write_text("MARKER = 'from-src'\n")
+    preferred = check.repro(
+        root,
+        scratch,
+        "probe",
+        "import dualpkg\nassert dualpkg.MARKER == 'from-src'\n",
+    )
+    assert preferred["passed"]
+    assert preferred["import_origin"][0]["origin"] == "WORKSPACE"
+    assert "src/dualpkg" in preferred["import_origin"][0]["file"].replace("\\", "/")
+    assert preferred["default_import_origin"][0]["origin"] == "WORKSPACE"
+    assert "src/dualpkg" not in preferred["default_import_origin"][0]["file"].replace("\\", "/")
 
 
 def test_copied_memory_and_lookup_execute(workspace):

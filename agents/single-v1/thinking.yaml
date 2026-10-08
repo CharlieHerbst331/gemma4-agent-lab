@@ -1,7 +1,7 @@
 # Single thinking knob for every role.
-# On adk-submission 0.2.12, thinking_budget 0 forces enable_thinking false even
-# when include_thoughts is true, and no thinking_token_budget is sent.
-# To ablate a small budget, change only thinking_budget to 256 and leave
-# include_thoughts true. That turns thinking on and forwards the numeric budget.
-thinking_budget: 0
-include_thoughts: true
+# include_thoughts false turns thinking off on adk-submission 0.2.11 and 0.2.12
+# and sends no thinking_token_budget. A numeric budget of 0 compiles only on
+# 0.2.12 (0.2.11 requires ge=1), so this file does not set a budget.
+# Ablation: set include_thoughts true and add thinking_budget 256 in this file.
+# That turns thinking on and forwards the numeric budget.
+include_thoughts: false
