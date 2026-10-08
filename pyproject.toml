@@ -25,5 +25,13 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]
 
+[tool.ruff.lint.per-file-ignores]
+# The notebook runtime is copied verbatim and keeps its own stdlib imports.
+"src/gemma_lab/paired.py" = ["I001"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not stub_server'"
+markers = [
+  "stub_server: opt-in paired run against a stub model server and swegemma's mock repo",
+]

@@ -49,6 +49,31 @@ def main(argv=None):
     notebook.add_argument("--task-ids", type=Path, help="JSON array of selected public task IDs")
     notebook.add_argument("--bundle-dataset", help="owner/slug for a private large bundle dataset")
     notebook.add_argument("--output", type=Path, default=Path("notebooks/generated/baseline"))
+    notebook_pair = sub.add_parser("notebook-pair", help="Generate a hash-pinned two-arm notebook")
+    notebook_pair.add_argument("--protocol", type=Path, required=True)
+    notebook_pair.add_argument("--owner", required=True)
+    notebook_pair.add_argument("--slug", required=True)
+    notebook_pair.add_argument("--repeats-in-session", default="1")
+    notebook_pair.add_argument("--output", type=Path, required=True)
+    notebook_pair.add_argument("--prior-run", type=Path)
+    notebook_pair.add_argument(
+        "--bundle-dataset",
+        action="append",
+        default=[],
+        help="LABEL=owner/slug for an arm archive larger than 5 MiB",
+    )
+    pair_schedule = sub.add_parser(
+        "pair-schedule", help="Print a frozen paired schedule without packing"
+    )
+    pair_schedule.add_argument("--protocol", type=Path, required=True)
+    pair_schedule.add_argument("--print", dest="do_print", action="store_true")
+    pair_schedule.add_argument("--output", type=Path)
+    pair_report = sub.add_parser(
+        "pair-report", help="Regenerate a paired report from one or more sessions"
+    )
+    pair_report.add_argument("runs", nargs="+", type=Path)
+    pair_report.add_argument("--protocol", type=Path, required=True)
+    pair_report.add_argument("--output", type=Path, required=True)
     push = sub.add_parser("push-notebook", help="Upload and run a prepared private notebook")
     push.add_argument("folder", type=Path)
     push.add_argument("--execute", action="store_true")
@@ -150,6 +175,45 @@ def main(argv=None):
                     args.task_ids,
                     args.bundle_dataset,
                 )
+            case "notebook-pair":
+                from gemma_lab.notebook import generate_pair
+
+                datasets = {}
+                for item in args.bundle_dataset:
+                    if "=" not in item:
+                        raise ValueError("Expected --bundle-dataset LABEL=owner/slug")
+                    label, ref = item.split("=", 1)
+                    datasets[label] = ref
+                result = generate_pair(
+                    args.protocol,
+                    args.owner,
+                    args.slug,
+                    args.output,
+                    args.repeats_in_session,
+                    args.prior_run,
+                    datasets,
+                )
+            case "pair-schedule":
+                from gemma_lab.paired import build_schedule, load_cohort_ids, load_protocol
+
+                protocol = load_protocol(args.protocol)
+                schedule = build_schedule(
+                    load_cohort_ids(protocol["cohort"]["path"]),
+                    repeats=int(protocol["repeats"]),
+                    shuffle_seed=protocol.get("shuffle_seed"),
+                )
+                result = {
+                    "protocol_sha256": protocol["_sha256"],
+                    "schedule_sha256": schedule["sha256"],
+                    "rule": schedule["rule"],
+                    "entries": schedule["entries"],
+                }
+                if args.output:
+                    write_json(args.output, result)
+            case "pair-report":
+                from gemma_lab.paired import report_from_runs
+
+                result = report_from_runs(args.runs, args.protocol, args.output)
             case "upload-bundle":
                 result = operations.upload_bundle(
                     args.archive, args.owner, args.slug, args.output, args.execute, args.version

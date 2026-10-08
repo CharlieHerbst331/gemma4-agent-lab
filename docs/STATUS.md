@@ -186,3 +186,24 @@ Public GitHub visibility and unauthenticated source/document access are verified
 Publication checks:66tests/lint/format;160historical source blobs, no matching secret
 patterns or forbidden tracked data/artifacts. Release handoff documents and evidence
 are committed. Kaggle notebook/post deferred to owner; no public Kaggle action.
+
+## Paired notebook toolkit
+
+`gemma-lab notebook-pair`, `pair-schedule`, and `pair-report` live in the toolkit.
+No paired GPU session has been run. `pins_mode` stays `record` until the six grading
+file hashes are confirmed against the official Kaggle wheelhouse; they currently match
+the public happyc0der copy only. max_tool_calls and max_time_minutes are now set
+explicitly from eval_config; previously inherited from the fetched starter. The paired
+notebook sets each arm's caps from that arm's resolved eval_config. adk-submission
+older than 0.2.11 refuses to run, and a version below 0.2.12 warns that a
+thinking_budget ablation would not be honored. The exact version is recorded on the
+pair manifest. Each arm writes `results/<arm>/r<k>/task_results.jsonl` and `model_load_seconds`
+in that arm's `run_manifest.json`. A harness ATIF file already at
+`results/<arm>/r<k>/traces/trace_<id>.json` is left in place; a missing trace is
+saved with `trace.save()` when that writer exists, and a raw dump otherwise goes
+to `trace_<id>.raw.json`. Task ids with `/` use `__` in that filename. Restart
+starts vLLM in its own session. The process-group id equals the parent pid and
+is recorded before stop(); after stop() that group gets SIGTERM and then
+SIGKILL, and the same id is used for a wait of up to 60 s for the port and any
+leftover GPU memory. Agent trees and the recorded archive
+hashes are unchanged.
