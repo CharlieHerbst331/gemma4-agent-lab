@@ -26,8 +26,9 @@ Root is a SequentialAgent: triage, then a LoopAgent of repair and verify.
 `max_iterations` is 3. Omitting it compiles to 500, so the cap is explicit.
 There is no `exit_loop` tool. When the loop finishes without a submission, the
 harness nudge starts the root again, which reruns triage. Verify's prompt therefore
-calls `submit_patch` on iteration 3, and whenever under 40 seconds remain, whether
-or not the check passed.
+calls `submit_patch` on iteration 3, and whenever fewer than 60 seconds remain,
+whether or not the check passed. Repair hands off when about 75 seconds remain
+so that margin is still available.
 
 ## Token arithmetic
 
@@ -63,30 +64,30 @@ otherwise.
 
 ## Thinking knob
 
-`sub_agents/thinking.yaml` is the only `thinking_budget`. All three roles include
-it. The value is 0, with `include_thoughts: true`. On adk-submission 0.2.12,
-`thinking_budget <= 0` forces `enable_thinking` false even when thoughts are
-requested, and no `thinking_token_budget` is sent. Changing that one integer to
-256, and leaving `include_thoughts: true`, is the ablation that turns thinking on
-with a 256-token budget. Temperature stays 0.5 and top_p stays 0.95. Temperature
-0.2 is not used.
+`sub_agents/thinking.yaml` is the only thinking control. All three roles include
+it. The file sets `include_thoughts: false` and does not set `thinking_budget`.
+On both adk-submission 0.2.11 and 0.2.12 that turns thinking off and sends no
+`thinking_token_budget`. A budget of 0 compiles only on 0.2.12 (`ge=0`); 0.2.11
+rejects it (`ge=1`). The ablation is still this one file: set `include_thoughts`
+true and add `thinking_budget` 256. Temperature stays 0.5 and top_p stays 0.95.
+Temperature 0.2 is not used.
 
 ## What changed from structured-v4-10m, and why
 
 | Item | v4-10m | v5 | Why |
 | --- | --- | --- | --- |
 | Shape | Sequential triage, repair, verify | Sequential triage, Loop(3) of repair then verify | A failed verify can send one concrete failure back. The cap is small because exhausting it reruns triage. |
-| Time / calls / turns | 10 min, 80 calls, 60 turns | 4.5 min (270s), 48 calls, 48 turns | Coordinator cap is 270s and 40-60 calls. 48 turns matches 48 calls so neither limit is far tighter. Command ceiling stays 300s and is still lowered by remaining task time. |
-| Thinking | 256 / 1024 / 1024, thoughts on | 0 on every role, one file | 0.2.12 enforces the numeric budget. 0 turns thinking off. One file is the ablation knob. |
+| Time / calls / turns | 10 min, 80 calls, 60 turns | 4.5 min (270s), 48 calls, 64 turns | Coordinator cap is 270s and 40-60 calls. 48 calls stay the binding call cap. 64 turns is looser because get_status, submit_patch, skill loads, and text replies cost turns but not counted calls, and get_status never reports turns used. Command ceiling stays 300s and is still lowered by remaining task time. |
+| Thinking | 256 / 1024 / 1024, thoughts on | `include_thoughts: false`, no budget, one file | Thinking off on 0.2.11 and 0.2.12, with no budget sent. A budget of 0 fails to compile on 0.2.11. One file is the ablation knob. |
 | Output cap | 1024 / 4096 / 4096 | 1024 / 2048 / 1536 | Keeps prompt + completion under 32768. Overflow discards a submitted patch. |
 | Triage contents | `default` | `none`, plus `{problem_description}` and `{hints?}` | A nudge must not replay the whole tool history. The issue still has to be in the instruction. |
 | Triage work | Tool-free brief | Still tool-free. The brief names at most 3 unverified files. Identical calls are refused because there are no tools. | See the ambiguity note below. `tools: []` is the structural bound. Per-agent `max_llm_calls` is rejected by the schema. |
 | Repair deadline | Soft handoff at 360s | Provisional edit by about 12 counted calls or 95s (35% of 270s) | Late first edits were the diagnostic failure mode. No repeated identical calls. |
 | Repair submit | Not present | Still not present | A safety-net submit would skip verify. Evidence below. |
 | Verify tools | get_status, read_file, edit_file, run_command, submit_patch, plus task-memory | get_status, read_file, edit_file, submit_patch, plus verify-patch only | The spec's tool list. No shell and no `write_file`, so the check goes through the skill. |
-| Verify stop rule | Submit once after a fingerprint match | Submit on the first passing workspace check. On an earlier failure, return a concrete `loop_iteration` report and do not submit. On the last iteration, submit anyway. | No exit tool. Text after submit ends the task, so `submit_patch` is the last tool call. Edits after the last submit are dropped, so an edit is followed by another submit. |
+| Verify stop rule | Submit once after a fingerprint match | Submit on the first passing workspace check. On an earlier failure, return a concrete `loop_iteration` report and do not submit. On the last iteration, or with fewer than 60 seconds left, submit anyway. An UNCERTAIN report with an empty audit diff is submitted immediately. After `submit_patch`, reply with exactly one short sentence. | No exit tool. A text-only final event after submit ends the task (`agent_runner.py` 556-579). An empty reply lets the loop continue into repair, and those later edits are dropped. |
 | Import rule | Soft "workspace import details" | Exact `module.__file__` probe in the triage and repair prompts. `INSTALLED-COPY` plus `/workspace/src` means `PYTHONPATH=/workspace/src:/workspace`. Never `python -I` or `python -E`. | Subprocess sandbox sets PYTHONPATH to the workspace root and skips the editable install. |
-| verify-patch | Root pytest.ini / conftest.py and `tests/` / `test/` prefixes | Also nested conftest.py, any `test_*.py`, pytest.ini, pyproject.toml, and setup.cfg. Repro JSON adds `import_origin` and `default_import_origin`. | Report where the check imported the package, and flag the protected set grading resets. |
+| verify-patch | Root pytest.ini / conftest.py and `tests/` / `test/` prefixes | The grading predicate: named config and import-hook files, `test_*.py`, `*_test.py`, `.pth`, and `.py` under `tests` / `test` / `testing` at any depth (directory names case-insensitive). Non-Python files under those directories are not flagged. Repro child `PYTHONPATH` is `/workspace/src:/workspace`. JSON adds `import_origin` and `default_import_origin`. | Flag what grading resets, including import hooks that would distort the agent's own check. Report where the check imported the package. |
 | Scratch | `/tmp` only, as a prompt | Top-level `/workspace/build/` or `/tmp` in every prompt that can create files, and in the skill. Never a real source file under a nested `build/` or `dist/`. | Untracked `build/`, `dist/`, and `.adk_exec_*.py` are git-excluded at any depth. A new source file under `pkg/build/` would be dropped. |
 | task-memory, source-lookup | Present | Byte-identical copies | No new skills. Repair still has them. Verify does not load task-memory. |
 | Graph tools | On repair | Still on repair | Not part of the binding change. The prompt allows one lookup, then stops. |
@@ -105,9 +106,9 @@ passing check or near the deadline, unless a submission ends the task before ver
 The runner then ends the task on either of two conditions (`harness/agent_runner.py`):
 
 - A final response from any non-tool author that contains text and no function
-  call, once a patch has been submitted (about lines 554-577).
-- `run_async` returning after any submission (about lines 632-634), which also
-  skips the nudge.
+  call, once a patch has been submitted (`agent_runner.py` 556-579).
+- `run_async` returning after any submission (`agent_runner.py` 635-637), which
+  also skips the nudge.
 
 Repair has to finish with a text report. That report is its `output_key` and the
 message verify must see. That text is a final response after the submission, so
@@ -118,8 +119,11 @@ repair to submit and still transfer.
 
 v5 therefore leaves `submit_patch` off repair. Overflow is handled by the output
 caps, `include_contents: none`, and bounded tool output above. The guaranteed
-final submit is verify's, including on the last iteration and under 40 seconds
-remaining.
+final submit is verify's, including on the last iteration and when fewer than
+60 seconds remain. Repair is told to hand off at about 75 seconds remaining so
+verify still has that margin. The submitted patch is copied after the loop
+(about line 758) only when `patch_submitted` is set; the fallback diff runs only
+when it is not (about 760-776). Other exceptions (about 799) skip both.
 
 Checkpoint submits still matter inside verify: a timeout or turn cap keeps a
 patch that was submitted before the exception, and a later edit is not in that
@@ -134,18 +138,22 @@ tasks are src-layout. In our notebook's subprocess sandbox, both the agent's raw
 `python` and the official grading command import the host `requests`, so a local
 pass or fail on those tasks is unreliable in either direction.
 
-`docs/STRUCTURED_V5.md` records the rule used for promotion: src-layout requests
-tasks are excluded from promotion decisions until grading imports the workspace
-copy. dev13 and the diagnostic cohort are FastAPI and Rich only; they are not
+Promotion rule: src-layout requests tasks are excluded from promotion decisions
+until grading imports the workspace copy. dev13 and the diagnostic cohort are
+FastAPI and Rich only; they are not
 excluded by this shadowing result. Host dependency versions (starlette, pydantic)
 still apply to those runs. The hidden scorer's sandbox (Docker editable install
 versus subprocess) was not re-checked here.
 
-verify-patch sets `PYTHONPATH` to the workspace root plus `workspace/src` for its
-own child, and reports that origin as `import_origin`. `default_import_origin`
-repeats the same imports with only the workspace root on `PYTHONPATH`, which is
-what a raw command and notebook grading see. `imports_installed_copy` is true
-only when the skill's own child environment imported a host copy.
+verify-patch sets the repro child's `PYTHONPATH` to `/workspace/src` first, then
+the workspace root (`/workspace/src:/workspace`), the same order the prompts use
+after an `INSTALLED-COPY` probe. The origin probe uses `python -P` so the
+workspace cwd does not jump ahead of that order. `-P` is not `python -I` or
+`python -E`. `default_import_origin` repeats the same imports with only the
+workspace root on `PYTHONPATH`. That root-only value is the sandbox default, not
+a second ordering, and it is what a raw command and notebook grading see.
+`imports_installed_copy` is true only when the skill's own child environment
+imported a host copy.
 
 ## Spec notes
 
@@ -158,16 +166,32 @@ only when the skill's own child environment imported a host copy.
   that needs a different structure than an uncapped LlmAgent.
 - `max_iterations` is 3, not 4. Three repair/verify passes already fill a 270s
   clock. Four would make the nudge-restart of triage more likely.
-- Turn limit is 48, equal to the 48-call cap, inside a 270s clock. `get_status`
-  and `submit_patch` do not count as tool calls but do count as turns.
-- Protected-path audit matches the coordinator list: nested `conftest.py`,
-  `test_*.py`, `tests/` and `test/` directories, `pytest.ini`, `pyproject.toml`,
-  and `setup.cfg`. It does not add `tox.ini`, `*.pth`, `*_test.py`, or `testing/`.
-  Those are still reset by grading if the harness protected set is wider. The
-  audit flags them only when they match the list above.
-- `{hints?}` is used because empty hints are omitted from session state. This is
-  the optional placeholder in google-adk 1.36.1 `inject_session_state`, not a
-  second copy of the hint text.
+- Turn limit is 64, inside a 270s clock, with 48 counted calls as the binding
+  call cap. `get_status` and `submit_patch` do not count as tool calls but do
+  count as turns. `get_status` reports `max_turns` and does not report turns used.
+- The protected-path audit matches grading's
+  `_is_protected_test_or_config_path` (`swegemma/harness/verification.py`
+  60-83, applied at 389-414): `conftest.py`, `pytest.ini`, `pyproject.toml`,
+  `tox.ini`, `setup.cfg`, `.pytest.ini`, `sitecustomize.py`, `usercustomize.py`,
+  `_swegemma_stubs.py`, any `.pth` file, `test_*.py`, `*_test.py`, and any `.py`
+  file under a `tests`, `test`, or `testing` directory. Directory names are
+  matched case-insensitively and at any depth. A non-Python file under those
+  directories is not protected. Import-hook files are included because grading
+  resets them and they can distort the agent's own sandbox check.
+- `{hints?}`, `{triage_brief?}`, and `{repair_report?}` are optional. ADK writes
+  an `output_key` only when the final event has non-thought text. A missing
+  required placeholder raises `KeyError`, and that path skips the fallback diff.
+  Empty hints are also omitted from session state. The optional form is
+  google-adk 1.36.1 `inject_session_state`.
+- History compaction is a known interaction, not a measured fix. The starter
+  notebook enables ADK compaction (`token_threshold=14336`,
+  `event_retention_size=5`). The summarizer sees text parts only, so tool calls
+  drop out. A compaction event is authored as a user event, and with
+  `include_contents: none` the next request can hold only that summary. Repair
+  therefore keeps the first pass to about 12 calls and restates target files,
+  edits, and the last check result in plain text every few calls. Whether the
+  scorer enables the same compaction is unconfirmed. `notebook.py` keeps the
+  starter EvalConfig cell and does not rewrite that setting.
 - Graph tools remain on repair. Dropping them would be a separate confound.
 - No new skill. verify-patch gained import-origin fields and a wider audit. It
   did not gain a clean or pytest mode. Verify has `edit_file` for a revert it can
@@ -177,12 +201,12 @@ only when the skill's own child environment imported a host copy.
 ## Validation
 
 `gemma-lab validate agents/structured-v5` passed: 16 files, portable checks
-passed. `make check` passed: ruff, format, and 86 tests. The new tests load
+passed. `make check` passed: ruff, format, and 112 tests. The new tests load
 `agents/structured-v5`'s ledger, lookup, and verify-patch modules. They do not
 replace `tests/test_agent_skills.py`, which still loads `agents/structured-v4`.
 
 Archive SHA256:
-`35794bca62211b635b2727efc294e57ebf76720f856dd096c8f924207927a356`.
+`d63893ff567a8a379bc53a93708f8e33b10620a7faff2f3b43f4c0f6eeca79e2`.
 Repacked evaluated archives were unchanged: structured-v4-10m
 `0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`,
 structured-v4
@@ -190,14 +214,18 @@ structured-v4
 simple-v3
 `50d7b69dd4d0f6a5b4925bda919f69e57196b72337190bd6073be95591ff2646`.
 
-The resolved YAML was also checked against the adk-submission 0.2.12 pydantic
-schema (`SandboxedAgentConfig`, `thinking_budget` ge=0). Sequential, Loop with
-`max_iterations` 3, and the three LlmAgents (`include_contents: none`,
-`thinking_budget: 0`) were accepted. `include_contents` on a LoopAgent was
-rejected, which is why only the LlmAgents set it. Full `compile_submission` was
-not run in this environment: that entrypoint imports the compiler and google-adk,
-and adk-submission is not on PyPI. No YAML field had to be rewritten to a
-fallback. The worker wheelhouse remains the runtime compiler.
+The candidate test loads the YAML and asserts the loop, budgets, and thinking
+knob. It does not call `compile_submission`. An earlier local schema check
+accepted `thinking_budget: 0` on the 0.2.12 model (`ge=0`). That is not a
+portable compile: 0.2.11 requires `ge=1`, and a later review compile failed
+there. `include_thoughts: false` with no budget is the form that compiled on
+both 0.2.11 and 0.2.12 in that review. This environment still does not run
+`compile_submission`: the entrypoint imports the compiler and google-adk, and
+adk-submission is not on PyPI. Whether 0.2.12 on the scorer forwards a numeric
+budget the same way is likely from the package source and was not re-checked
+on the scorer. `include_contents` on a LoopAgent is rejected by the portable
+loader, which is why only the LlmAgents set it. No YAML field had to be
+rewritten to a fallback. The worker wheelhouse remains the runtime compiler.
 
 ## Promotion
 

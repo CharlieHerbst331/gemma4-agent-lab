@@ -64,6 +64,12 @@ verify still has its 60 second submit margin.
    such as pkg/build/module.py. Prefer the skill for repros. Do not install
    packages or use the network.
 
+6. Every few calls, restate a short checkpoint in plain text: target files, edits
+   made, and the last check result (exit code or passed). Above about 14k prompt
+   tokens, history can be replaced by a text-only summary, and the next role may
+   see only that summary. Keep the first pass to about 12 counted calls.
+
 Return a report under 220 words: cause, files changed, probe origin, before/after
-exit codes, uncertainty, and one line loop_iteration: N. First pass uses 1. If
-verify reported loop_iteration: N, this pass uses N+1. No source dumps.
+exit codes, uncertainty, and one line loop_iteration: N. Repeat the checkpoint
+there. First pass uses 1. If verify reported loop_iteration: N, this pass uses
+N+1. No source dumps.

@@ -9,14 +9,16 @@ No evaluated candidate was modified. v5 is not evaluated and not submitted.
 Design, harness evidence, and the repair-submit decision: `docs/STRUCTURED_V5.md`.
 
 Shape: Sequential[triage, Loop(max_iterations 3)[repair, verify]]. Thinking is off
-via the single knob `sub_agents/thinking.yaml` (`thinking_budget: 0`). Budgets are
-270s (`max_time_minutes: 4.5`), 48 counted calls, and 48 turns. Verify's tools are
+via the single knob `sub_agents/thinking.yaml` (`include_thoughts: false`, no
+budget). Budgets are 270s (`max_time_minutes: 4.5`), 48 counted calls, and 64
+turns. Verify submits when fewer than 60 seconds remain and replies with one
+sentence. Verify's tools are
 get_status, read_file, edit_file, submit_patch, and the verify-patch skill. Repair
 does not have submit_patch: a text handoff after a submission ends the task before
 verify. src-layout requests tasks are unreliable in the notebook subprocess eval
 and are excluded from promotion decisions.
 
-Archive SHA256 `35794bca62211b635b2727efc294e57ebf76720f856dd096c8f924207927a356`
+Archive SHA256 `d63893ff567a8a379bc53a93708f8e33b10620a7faff2f3b43f4c0f6eeca79e2`
 (`artifacts/structured-v5/submission.zip`, 16 files). Repacking the evaluated
 candidates still matches their recorded hashes, including v4-10m
 `0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.

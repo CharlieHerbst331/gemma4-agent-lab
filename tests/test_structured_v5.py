@@ -122,7 +122,9 @@ def test_candidate_yaml_is_the_bounded_loop():
         assert "!include thinking.yaml" in raw
         assert "thinking_budget" not in raw
     knob = (CANDIDATE / "sub_agents/thinking.yaml").read_text()
-    live = "\n".join(line for line in knob.splitlines() if line.strip() and not line.strip().startswith("#"))
+    live = "\n".join(
+        line for line in knob.splitlines() if line.strip() and not line.strip().startswith("#")
+    )
     assert live.strip() == "include_thoughts: false"
     assert "thinking_budget:" not in live
     assert len(validate(CANDIDATE)) == 16
@@ -154,6 +156,7 @@ def test_prompts_state_import_scratch_and_final_submit_rules():
     assert "12 counted calls" in repair
     assert "95 seconds" in repair
     assert "about 75 or less" in repair
+    assert "restate a short checkpoint in plain text" in repair
     assert "under 40" not in verify
     assert "fewer than 60 seconds remain" in verify
     assert "exactly one short sentence" in verify
