@@ -2,7 +2,17 @@
 
 Last updated: October 7, 2026 (Pacific).
 
-## Current development candidate
+## Current development budget variant
+
+User requested10–15minutes after the five-minute pilot. New active development
+source `agents/structured-v4-10m`:10min per task,80 counted tool calls,60 model turns,
+300s command cap. Repair's soft handoff target scales180→360s. No other agent/skill
+changes. This is locally validated/packaged, not measured or submitted. Original
+five-minute candidate, archive and results remain unchanged. The two diagnostic
+failures explicitly report session timeout, not single-command timeout. The12hour
+competition-wide generation limit still applies; longer caps require runtime evidence.
+
+## Evaluated five-minute development candidate
 
 - `agents/structured-v4` implements bounded tool-free triage, isolated repair/verifier
   histories with explicit state handoffs, and three scoped sandboxed skills.

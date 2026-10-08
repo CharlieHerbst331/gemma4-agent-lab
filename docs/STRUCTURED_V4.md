@@ -94,3 +94,19 @@ completed, but repair bypassed helpers and introduced scratch/test edits. A sepa
 CPU official SDK preflight exposes the tools and executes all three helpers correctly.
 The model's discretionary tool selection remains the bottleneck. Candidate is not
 promoted or submitted; no improved efficacy claim is justified from this pilot.
+
+## Ten-minute development variant
+
+User requested more per-task time after both failed diagnostic cases exhausted the
+five-minute session allowance (not the single-command cap). New source:
+`agents/structured-v4-10m`. max_time_minutes is10; max_tool_calls80,max_turns60,
+timeout_seconds300 remain unchanged. The soft repair handoff target scales from180
+to360 elapsed seconds, retaining verification headroom. Skills, model, sampling,
+architecture and helpers are otherwise identical. Original five-minute source/archive
+and measured outputs are preserved. No new score or performance improvement is claimed.
+
+This is a development budget. The competition retains12hours total patch-generation
+runtime including sandbox setup, excluding grading. A10minute cap does not guarantee
+an acceptable full-run average; measure actual generation/setup before a future upload.
+Prepared same-cohort diagnostic notebook is generated separately; no GPU run launched
+by this configuration change. Raising time does not make optional skills mandatory.

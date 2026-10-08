@@ -53,7 +53,9 @@ By default this evaluates two public smoke tasks. Use `--task-ids path/to/ids.js
 
 The submitted three-role candidate is `agents/simple-v3` (earlier pilots remain in `agents/simple-v1` and `agents/simple-v2`); its design review and known limits are in [SIMPLE_V1](docs/SIMPLE_V1.md). It uses declarative sequential localization, repair, and independent verification. GPU evidence is tracked in [STATUS](docs/STATUS.md).
 
-The new development candidate is `agents/structured-v4`: tool-free triage, isolated repair/verification contexts, and scoped task-memory, source-lookup, and verify-patch skills. See [STRUCTURED_V4](docs/STRUCTURED_V4.md). Its official three-task diagnostic resolved 1/3 with zero skill invocations; it is not promoted. See [diagnostic results](docs/STRUCTURED_V4_DIAGNOSTIC.md).
+The evaluated development candidate is `agents/structured-v4`: tool-free triage, isolated repair/verification contexts, and scoped task-memory, source-lookup, and verify-patch skills. See [STRUCTURED_V4](docs/STRUCTURED_V4.md). Its official three-task diagnostic resolved 1/3 with zero skill invocations; it is not promoted. See [diagnostic results](docs/STRUCTURED_V4_DIAGNOSTIC.md).
+
+The current longer-budget development variant is `agents/structured-v4-10m`: 10 minutes per task, 80 counted tool calls, 60 model turns, and a 300-second command timeout. It has not been evaluated or submitted.
 
 ## Develop and compare
 

@@ -1,0 +1,15 @@
+agent_class: LlmAgent
+name: triage
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Extract issue clues and proposed checks in a single response.
+instruction: !include triage.md
+generate_content_config:
+  temperature: 0.5
+  top_p: 0.95
+  max_output_tokens: 1024
+  thinking_config:
+    thinking_budget: 256
+    include_thoughts: true
+include_contents: default
+tools: []
+output_key: triage_brief
