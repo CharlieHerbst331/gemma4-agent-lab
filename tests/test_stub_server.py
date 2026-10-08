@@ -76,6 +76,11 @@ def test_repair_turn_fixes_mock_repo(tmp_path):
     assert not is_synthetic_mock({"repo": "psf/requests", "base_commit": MOCK_BASE_COMMIT})
     turn = repair_turns()[0]
     assert apply_tool_calls(root, turn) == ["mockpkg/calc.py"]
+    assert (root / ".git").is_dir()
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True
+    )
+    assert len(head.stdout.strip()) == 40
     completed = subprocess.run(
         [sys.executable, "-c", "from mockpkg.calc import add; assert add(1, 2) == 3"],
         cwd=root,

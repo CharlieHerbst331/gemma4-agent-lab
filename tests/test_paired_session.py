@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -15,13 +16,18 @@ from gemma_lab.paired import (
     collect_live_sandbox_names,
     early_stop_loser,
     execute_session,
+    kill_process_group,
     projection_for_arm,
+    release_server_after_stop,
     repeat_is_valid,
     round2_scenario_seconds,
+    start_model_server,
     summarize_pair_run,
     timing_from_context,
     timing_from_trace,
     token_fields,
+    trace_artifact_stem,
+    write_trace_artifact,
 )
 
 
@@ -351,9 +357,10 @@ def test_single_arm_schema_and_check_evaluation(tmp_path):
     other = json.loads(other_path.read_text())
     assert manifest["model_load_seconds"] == 12.5
     assert other["model_load_seconds"] == 12.5
-    trace = json.loads((folder / "traces" / "trace_t1.json").read_text())
+    trace = json.loads((folder / "traces" / "trace_t1.raw.json").read_text())
     assert trace["kind"] == "atif"
     assert trace["self_ref"] == "<cycle>"
+    assert not (folder / "traces" / "trace_t1.json").exists()
     assert (folder / "task_results.jsonl").is_file()
     manifest["sha256"] = digest
     (folder / "run_manifest.json").write_text(json.dumps(manifest))
@@ -498,3 +505,177 @@ def test_session_sweeps_unregistered_sandboxes_between_arms(tmp_path):
     assert not (root / "swegemma_sandbox_A_1").exists()
     assert (root / "swegemma_sandbox_A_2").is_dir()
     assert (root / "swegemma_sandbox_B_1").is_dir()
+
+
+def test_harness_trace_file_is_left_unchanged(tmp_path):
+    payload = b'{"schema":"atif","events":[{"type":"agent"}]}\n'
+
+    def run_evaluate(evaluator, task, dashboard, position, total):
+        trace_dir = tmp_path / "run" / "results" / evaluator / "r1" / "traces"
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        (trace_dir / "trace_t1.json").write_bytes(payload)
+        return Result(resolved=True, patch="ok\n", trace=Trace())
+
+    run_session(tmp_path, ["t1"], run_evaluate)
+    for label in ("A", "B"):
+        path = tmp_path / "run" / "results" / label / "r1" / "traces" / "trace_t1.json"
+        assert path.read_bytes() == payload
+        assert not (path.parent / "trace_t1.raw.json").exists()
+
+
+def test_trace_filename_turns_slashes_into_double_underscores(tmp_path):
+    assert trace_artifact_stem("org/repo") == "trace_org__repo"
+
+    class Saver:
+        def save(self, path):
+            Path(path).write_text('{"format":"atif"}\n')
+
+    written = write_trace_artifact(tmp_path, "org/repo", Saver())
+    assert written.name == "trace_org__repo.json"
+    assert written.read_text() == '{"format":"atif"}\n'
+    raw = write_trace_artifact(tmp_path, "org/other", Trace())
+    assert raw.name == "trace_org__other.raw.json"
+    assert not (tmp_path / "traces" / "trace_org__other.json").exists()
+    original = (tmp_path / "traces" / "trace_org__repo.json").read_bytes()
+    write_trace_artifact(tmp_path, "org/repo", Trace())
+    assert (tmp_path / "traces" / "trace_org__repo.json").read_bytes() == original
+
+
+def test_start_model_server_uses_a_new_session(monkeypatch):
+    import subprocess
+    import sys
+    import types
+
+    calls = []
+    original = subprocess.Popen
+
+    class FakePopen:
+        def __init__(self, *args, **kwargs):
+            calls.append(kwargs)
+            self.pid = 4321
+
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+    module = types.ModuleType("fake_server_mod")
+    module.Popen = FakePopen
+    monkeypatch.setitem(sys.modules, "fake_server_mod", module)
+
+    class Server:
+        def start(self):
+            module.Popen(["vllm"])
+            subprocess.Popen(["vllm"])
+
+    start_model_server(Server())
+    assert calls[0]["start_new_session"] is True
+    assert calls[1]["start_new_session"] is True
+    assert module.Popen is FakePopen
+    assert subprocess.Popen is FakePopen
+    assert original is not FakePopen
+
+
+def test_restart_kills_the_group_and_waits_before_start():
+    from gemma_lab.paired import server_process_pid, wait_for_server_release
+
+    signals = []
+
+    def killpg(pgid, sig):
+        signals.append((pgid, sig))
+
+    killed = kill_process_group(50, killpg=killpg, getpgid=lambda pid: 50)
+    assert killed == 50
+    assert [item[0] for item in signals] == [50, 50]
+    assert kill_process_group(None) is None
+
+    class Process:
+        pid = 50
+
+    class Server:
+        def __init__(self):
+            self.process = Process()
+            self.base_url = "http://127.0.0.1:8000"
+            self.events = []
+
+        def stop(self):
+            self.events.append("stop")
+
+        def start(self):
+            self.events.append("start")
+
+    server = Server()
+    assert server_process_pid(server) == 50
+    now = {"t": 0.0}
+
+    def sleep(seconds):
+        now["t"] += seconds
+
+    def port_open(port):
+        assert port == 8000
+        return now["t"] < 0.5
+
+    server.stop()
+    log = release_server_after_stop(
+        None,
+        server.base_url,
+        timeout=60,
+        sleep=sleep,
+        clock=lambda: now["t"],
+        port_open=port_open,
+        gpu_pids=lambda: [50],
+        group_pids=lambda pgid: [50],
+        nvidia_smi_present=True,
+    )
+    server.start()
+    assert server.events == ["stop", "start"]
+    assert log["waited_on"] == ["port"]
+    assert log["port"] == 8000
+    assert log["timed_out"] is False
+    assert log["nvidia_smi"] is True
+    gpu_now = {"t": 0.0}
+    held = {"busy": True}
+
+    def gpu_pids():
+        if held["busy"]:
+            held["busy"] = False
+            return [50]
+        return []
+
+    waited = wait_for_server_release(
+        8000,
+        50,
+        timeout=60,
+        sleep=lambda seconds: gpu_now.__setitem__("t", gpu_now["t"] + 30),
+        clock=lambda: gpu_now["t"],
+        port_open=lambda port: False,
+        gpu_pids=gpu_pids,
+        group_pids=lambda pgid: [50],
+        nvidia_smi_present=True,
+    )
+    assert waited["waited_on"] == ["gpu"]
+    assert waited["gpu_pids"] == [50]
+    assert waited["timed_out"] is False
+    gpu_now["t"] = 0.0
+    timed = wait_for_server_release(
+        8000,
+        50,
+        timeout=60,
+        sleep=lambda seconds: gpu_now.__setitem__("t", gpu_now["t"] + seconds),
+        clock=lambda: gpu_now["t"],
+        port_open=lambda port: True,
+        gpu_pids=lambda: [50],
+        group_pids=lambda pgid: [50],
+        nvidia_smi_present=True,
+    )
+    assert timed["timed_out"] is True
+    assert timed["waited_on"] == ["port", "gpu"]
+    assert timed["seconds"] >= 60
+    absent = wait_for_server_release(
+        None,
+        None,
+        timeout=60,
+        clock=lambda: 0,
+        port_open=lambda port: True,
+        gpu_pids=lambda: [1],
+        group_pids=lambda pgid: [1],
+        nvidia_smi_present=False,
+    )
+    assert absent["waited_on"] == []
+    assert absent["nvidia_smi"] is False

@@ -688,7 +688,7 @@ def _pair_server_cell(source, protocol, pins):
         source,
         ["server_instance.start()\n"],
         pin_block
-        + "_LOAD_T0 = time.perf_counter()\nserver_instance.start()\n"
+        + "_LOAD_T0 = time.perf_counter()\nstart_model_server(server_instance)\n"
         + "MODEL_LOAD_SECONDS = time.perf_counter() - _LOAD_T0\n"
         + "MODEL_READY_SECONDS = MODEL_LOAD_SECONDS\n",
         "server start",
@@ -776,8 +776,13 @@ def server_health():
 
 def restart_model_server():
     _t0 = time.perf_counter()
+    _pid = server_process_pid(server_instance)
     server_instance.stop()
-    server_instance.start()
+    _release = release_server_after_stop(_pid, server_instance.base_url)
+    print('server restart waited on', _release)
+    append_jsonl(WORKING_DIR / 'events.jsonl',
+                 {{'event': 'server_restart_release', 'release': _release}})
+    start_model_server(server_instance)
     return time.perf_counter() - _t0
 
 def read_prefix_cache():

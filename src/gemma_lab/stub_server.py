@@ -8,12 +8,15 @@ use the same server. The official harness treats a task as synthetic when
 from __future__ import annotations
 
 import json
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 MOCK_REPO = "test/mock_repo"
 MOCK_BASE_COMMIT = "123456"
+MOCK_GIT_NAME = "gemma-lab"
+MOCK_GIT_EMAIL = "gemma-lab@example.com"
 MOCK_SOURCE = "mockpkg/calc.py"
 BUGGY_LINE = "return a - b"
 FIXED_LINE = "return a + b"
@@ -34,7 +37,29 @@ def write_mock_repo(dest):
         "from mockpkg.calc import add\n\ndef test_add():\n    assert add(1, 2) == 3\n"
     )
     (dest / "README.md").write_text("Synthetic mock repo for CPU smoke tests.\n")
+    _baseline_git_commit(dest)
     return dest
+
+
+def _baseline_git_commit(dest):
+    """git init plus one commit. swegemma does not init the snapshot itself."""
+    git = [
+        "git",
+        "-c",
+        f"user.name={MOCK_GIT_NAME}",
+        "-c",
+        f"user.email={MOCK_GIT_EMAIL}",
+        "-c",
+        "commit.gpgsign=false",
+    ]
+    subprocess.run([*git, "init", "-b", "main"], cwd=dest, check=True, capture_output=True)
+    subprocess.run([*git, "add", "-A"], cwd=dest, check=True, capture_output=True)
+    subprocess.run(
+        [*git, "commit", "-m", "baseline"],
+        cwd=dest,
+        check=True,
+        capture_output=True,
+    )
 
 
 def mock_task(instance_id="mock-calc-001"):

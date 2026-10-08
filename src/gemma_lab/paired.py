@@ -26,6 +26,7 @@ import inspect  # noqa: F401  # embedded notebook cell uses inspect.getsource
 import io as _io
 import json as _json
 import os as _os
+import signal as _signal
 import tarfile as _tarfile
 import time as _time
 import warnings as _warnings
@@ -700,6 +701,61 @@ def _jsonable(value, seen=None):
         seen.add(identity)
         return _jsonable(data, seen)
     return str(value)
+
+
+def trace_artifact_stem(instance_id):
+    """Match the harness: '/' in a task id becomes '__'."""
+    return "trace_" + str(instance_id).replace("/", "__")
+
+
+def _invoke_trace_save(save, path):
+    try:
+        signature = inspect.signature(save)
+    except (TypeError, ValueError):
+        save(path)
+        return
+    positional = False
+    keyword_only = []
+    for param in signature.parameters.values():
+        if param.kind in {
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.VAR_POSITIONAL,
+        }:
+            positional = True
+        elif param.kind == inspect.Parameter.KEYWORD_ONLY:
+            keyword_only.append(param.name)
+    if positional:
+        save(path)
+        return
+    if keyword_only:
+        save(**{keyword_only[0]: str(path)})
+        return
+    save()
+
+
+def write_trace_artifact(folder, instance_id, trace_obj):
+    """Keep a harness ATIF trace. Never replace that file with a raw dump.
+
+    A missing file is written with ``trace.save()`` when the object has one.
+    Otherwise the raw dump goes to ``trace_<id>.raw.json``.
+    """
+    if trace_obj is None:
+        return None
+    trace_dir = _Path(folder) / "traces"
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    stem = trace_artifact_stem(instance_id)
+    harness_path = trace_dir / f"{stem}.json"
+    if harness_path.is_file():
+        return harness_path
+    save = getattr(trace_obj, "save", None)
+    if callable(save):
+        _invoke_trace_save(save, harness_path)
+        if harness_path.is_file():
+            return harness_path
+    raw_path = trace_dir / f"{stem}.raw.json"
+    raw_path.write_text(_json.dumps(_jsonable(trace_obj), indent=2, sort_keys=True) + "\n")
+    return raw_path
 
 
 def _record_digest(field):
@@ -1452,13 +1508,7 @@ def execute_session(
                 (folder / f"{task.instance_id}.json").write_text(
                     _json.dumps(details, default=str, indent=2, sort_keys=True) + "\n"
                 )
-                trace_obj = getattr(result, "trace", None)
-                if trace_obj is not None:
-                    trace_path = folder / "traces" / f"trace_{task.instance_id}.json"
-                    trace_path.parent.mkdir(parents=True, exist_ok=True)
-                    trace_path.write_text(
-                        _json.dumps(_jsonable(trace_obj), indent=2, sort_keys=True) + "\n"
-                    )
+                write_trace_artifact(folder, task.instance_id, getattr(result, "trace", None))
                 (folder / "patches" / f"{task.instance_id}.patch").write_text(patch)
                 walls.append(wall)
             except (KeyboardInterrupt, SystemExit):
@@ -1712,6 +1762,202 @@ def _attach_import_origins(arms, origins):
     for meta in arms.values():
         meta["import_origin"] = origins
     return arms
+
+
+SERVER_RELEASE_TIMEOUT_SECONDS = 60.0
+
+
+def server_process_pid(server):
+    for name in ("process", "_process", "proc", "_proc", "_server_process"):
+        proc = getattr(server, name, None)
+        pid = getattr(proc, "pid", None)
+        if isinstance(pid, int) and pid > 0:
+            return pid
+    pid = getattr(server, "pid", None)
+    if isinstance(pid, int) and pid > 0:
+        return pid
+    return None
+
+
+def start_model_server(server):
+    """Call ``server.start()`` with subprocesses in their own session."""
+    import subprocess
+    import sys
+
+    original = subprocess.Popen
+
+    def patched(*args, **kwargs):
+        kwargs["start_new_session"] = True
+        return original(*args, **kwargs)
+
+    restored = []
+    subprocess.Popen = patched
+    for module in list(sys.modules.values()):
+        if module is None:
+            continue
+        if getattr(module, "Popen", None) is original:
+            module.Popen = patched
+            restored.append(module)
+        nested = getattr(module, "subprocess", None)
+        if nested is not None and getattr(nested, "Popen", None) is original:
+            nested.Popen = patched
+            restored.append(nested)
+    try:
+        return server.start()
+    finally:
+        subprocess.Popen = original
+        for module in restored:
+            module.Popen = original
+
+
+def kill_process_group(pid, killpg=None, getpgid=None):
+    """Signal the whole process group. Returns the group id, or None."""
+    if not isinstance(pid, int) or pid <= 0:
+        return None
+    if killpg is None:
+        killpg = _os.killpg
+    if getpgid is None:
+        getpgid = _os.getpgid
+    try:
+        pgid = getpgid(pid)
+    except OSError:
+        return None
+    for sig in (_signal.SIGTERM, _signal.SIGKILL):
+        try:
+            killpg(pgid, sig)
+        except OSError:
+            continue
+    return pgid
+
+
+def port_from_base_url(url):
+    from urllib.parse import urlparse
+
+    return urlparse(str(url or "")).port
+
+
+def port_is_open(port, host="127.0.0.1"):
+    import socket
+
+    if not port:
+        return False
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(0.2)
+    try:
+        return sock.connect_ex((host, int(port))) == 0
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def process_group_pids(pgid, proc_root="/proc"):
+    if pgid is None:
+        return []
+    found = []
+    root = _Path(proc_root)
+    if not root.is_dir():
+        return found
+    for entry in root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            if _os.getpgid(int(entry.name)) == int(pgid):
+                found.append(int(entry.name))
+        except OSError:
+            continue
+    return found
+
+
+def nvidia_smi_gpu_pids():
+    """Pids holding GPU compute memory, or None when nvidia-smi is absent."""
+    import shutil
+    import subprocess
+
+    if shutil.which("nvidia-smi") is None:
+        return None
+    completed = subprocess.run(
+        ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    pids = []
+    for line in completed.stdout.splitlines():
+        piece = line.strip().split(",")[0].strip()
+        if piece.isdigit():
+            pids.append(int(piece))
+    return pids
+
+
+def wait_for_server_release(
+    port,
+    pgid,
+    timeout=SERVER_RELEASE_TIMEOUT_SECONDS,
+    sleep=None,
+    clock=None,
+    port_open=None,
+    gpu_pids=None,
+    group_pids=None,
+    nvidia_smi_present=None,
+):
+    """Wait until the port is free and this group holds no GPU memory.
+
+    The wait is bounded by ``timeout`` seconds. The returned mapping is the
+    log of what was waited on.
+    """
+    if sleep is None:
+        sleep = _time.sleep
+    if clock is None:
+        clock = _time.monotonic
+    if port_open is None:
+        port_open = port_is_open
+    if group_pids is None:
+        group_pids = process_group_pids
+    if nvidia_smi_present is None:
+        import shutil
+
+        nvidia_smi_present = shutil.which("nvidia-smi") is not None
+    if gpu_pids is None:
+        gpu_pids = nvidia_smi_gpu_pids
+    started = clock()
+    waited_on = []
+    seen_gpu = []
+    timed_out = False
+    while True:
+        busy_port = bool(port) and bool(port_open(port))
+        holders = []
+        if nvidia_smi_present and pgid is not None:
+            members = set(group_pids(pgid))
+            current = gpu_pids() or []
+            holders = [item for item in current if item in members]
+        if not busy_port and not holders:
+            break
+        if busy_port and "port" not in waited_on:
+            waited_on.append("port")
+        for item in holders:
+            if item not in seen_gpu:
+                seen_gpu.append(item)
+        if holders and "gpu" not in waited_on:
+            waited_on.append("gpu")
+        if clock() - started >= timeout:
+            timed_out = True
+            break
+        sleep(0.25)
+    return {
+        "waited_on": waited_on,
+        "port": port,
+        "pgid": pgid,
+        "nvidia_smi": bool(nvidia_smi_present),
+        "gpu_pids": seen_gpu,
+        "timed_out": timed_out,
+        "seconds": clock() - started,
+    }
+
+
+def release_server_after_stop(pid, base_url, **kwargs):
+    pgid = kill_process_group(pid)
+    return wait_for_server_release(port_from_base_url(base_url), pgid, **kwargs)
 
 
 # <<<END_NOTEBOOK_RUNTIME>>>
