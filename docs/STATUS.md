@@ -16,8 +16,10 @@ does not have submit_patch: a text handoff after a submission ends the task befo
 verify. src-layout requests tasks are unreliable in the notebook subprocess eval
 and are excluded from promotion decisions.
 
-Archive SHA256 is recorded below after packaging. The evaluated v4-10m archive
-remains `0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.
+Archive SHA256 `35794bca62211b635b2727efc294e57ebf76720f856dd096c8f924207927a356`
+(`artifacts/structured-v5/submission.zip`, 16 files). Repacking the evaluated
+candidates still matches their recorded hashes, including v4-10m
+`0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.
 
 ## Current development budget variant
 

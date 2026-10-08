@@ -236,6 +236,8 @@ def test_repro_reports_workspace_and_default_import_origin(workspace):
     assert default["pkg"]["origin"] == "WORKSPACE"
     assert default["requests"]["origin"] == "INSTALLED-COPY"
     assert "site-packages" in default["requests"]["file"]
-    host = check.repro(root, scratch, "probe", "import requests\nassert requests.__file__\n")
+    # pytest is installed for the test run and is not in this fixture, so the
+    # skill's own PYTHONPATH still resolves the host copy.
+    host = check.repro(root, scratch, "probe", "import pytest\nassert pytest.__file__\n")
     assert host["imports_installed_copy"] is True
     assert host["import_origin"][0]["origin"] == "INSTALLED-COPY"

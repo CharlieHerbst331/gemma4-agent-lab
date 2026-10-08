@@ -176,21 +176,28 @@ only when the skill's own child environment imported a host copy.
 
 ## Validation
 
-Portable checks are `gemma-lab validate` and `gemma-lab pack`. They are not the
-official compiler. The YAML uses only schema fields that adk-submission 0.2.12
-accepts: SequentialAgent, LoopAgent with `max_iterations >= 1`, LlmAgent
-`include_contents: none`, `thinking_budget: 0`, and the official tool names.
-`instruction` is required on LlmAgent and is included. LoopAgent does not get
-`include_contents`. Official `compile_submission` still needs the worker
-wheelhouse; see the PR for whether that compile was run here.
+`gemma-lab validate agents/structured-v5` passed: 16 files, portable checks
+passed. `make check` passed: ruff, format, and 86 tests. The new tests load
+`agents/structured-v5`'s ledger, lookup, and verify-patch modules. They do not
+replace `tests/test_agent_skills.py`, which still loads `agents/structured-v4`.
 
-Tests in `tests/test_structured_v5.py` load `agents/structured-v5`'s ledger,
-lookup, and verify-patch modules. They do not replace `tests/test_agent_skills.py`,
-which still loads `agents/structured-v4`.
+Archive SHA256:
+`35794bca62211b635b2727efc294e57ebf76720f856dd096c8f924207927a356`.
+Repacked evaluated archives were unchanged: structured-v4-10m
+`0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`,
+structured-v4
+`01568061ee105be99a51af1bca592dd59756db9184dfada735c0e3074ae7e77e`,
+simple-v3
+`50d7b69dd4d0f6a5b4925bda919f69e57196b72337190bd6073be95591ff2646`.
 
-Archive hash is recorded in `docs/STATUS.md` after `gemma-lab pack`. Existing
-candidate sources are unchanged, so their archive hashes stay the same when
-repacked.
+The resolved YAML was also checked against the adk-submission 0.2.12 pydantic
+schema (`SandboxedAgentConfig`, `thinking_budget` ge=0). Sequential, Loop with
+`max_iterations` 3, and the three LlmAgents (`include_contents: none`,
+`thinking_budget: 0`) were accepted. `include_contents` on a LoopAgent was
+rejected, which is why only the LlmAgents set it. Full `compile_submission` was
+not run in this environment: that entrypoint imports the compiler and google-adk,
+and adk-submission is not on PyPI. No YAML field had to be rewritten to a
+fallback. The worker wheelhouse remains the runtime compiler.
 
 ## Promotion
 
