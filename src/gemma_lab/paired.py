@@ -1810,23 +1810,47 @@ def start_model_server(server):
             module.Popen = original
 
 
-def kill_process_group(pid, killpg=None, getpgid=None):
-    """Signal the whole process group. Returns the group id, or None."""
+def session_pgid(pid):
+    """Group id of a ``start_new_session`` leader. Equals ``pid``.
+
+    Call this before ``stop()``. Once that call reaps the leader, ``getpgid``
+    fails, but the id still names the group and ``killpg`` reaches children
+    that remain in it.
+    """
     if not isinstance(pid, int) or pid <= 0:
+        return None
+    try:
+        return _os.getpgid(pid)
+    except OSError:
+        return pid
+
+
+def kill_process_group(pgid, grace=0.2, sleep=None, killpg=None):
+    """SIGTERM ``pgid``, then SIGKILL after ``grace`` seconds.
+
+    ``pgid`` is the id recorded before ``stop()``. This does not call
+    ``getpgid``. ``killpg(0)`` is rejected so a missing id cannot signal the
+    notebook's own group. A group that is already gone raises
+    ``ProcessLookupError`` and is ignored.
+    """
+    if not isinstance(pgid, int) or pgid <= 0:
         return None
     if killpg is None:
         killpg = _os.killpg
-    if getpgid is None:
-        getpgid = _os.getpgid
+    if sleep is None:
+        sleep = _time.sleep
     try:
-        pgid = getpgid(pid)
+        killpg(pgid, _signal.SIGTERM)
+    except ProcessLookupError:
+        return pgid
     except OSError:
-        return None
-    for sig in (_signal.SIGTERM, _signal.SIGKILL):
-        try:
-            killpg(pgid, sig)
-        except OSError:
-            continue
+        pass
+    if grace:
+        sleep(grace)
+    try:
+        killpg(pgid, _signal.SIGKILL)
+    except (ProcessLookupError, OSError):
+        pass
     return pgid
 
 
@@ -1955,9 +1979,11 @@ def wait_for_server_release(
     }
 
 
-def release_server_after_stop(pid, base_url, **kwargs):
-    pgid = kill_process_group(pid)
-    return wait_for_server_release(port_from_base_url(base_url), pgid, **kwargs)
+def release_server_after_stop(pgid, base_url, **kwargs):
+    """Kill the group recorded before ``stop()``, then wait for port and GPU."""
+    grace = kwargs.pop("grace", 0.2)
+    killed = kill_process_group(pgid, grace=grace, sleep=kwargs.get("sleep"))
+    return wait_for_server_release(port_from_base_url(base_url), killed, **kwargs)
 
 
 # <<<END_NOTEBOOK_RUNTIME>>>

@@ -777,8 +777,9 @@ def server_health():
 def restart_model_server():
     _t0 = time.perf_counter()
     _pid = server_process_pid(server_instance)
+    _pgid = session_pgid(_pid)
     server_instance.stop()
-    _release = release_server_after_stop(_pid, server_instance.base_url)
+    _release = release_server_after_stop(_pgid, server_instance.base_url)
     print('server restart waited on', _release)
     append_jsonl(WORKING_DIR / 'events.jsonl',
                  {{'event': 'server_restart_release', 'release': _release}})

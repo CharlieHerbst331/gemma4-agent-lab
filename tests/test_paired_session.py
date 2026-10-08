@@ -572,18 +572,104 @@ def test_start_model_server_uses_a_new_session(monkeypatch):
     assert original is not FakePopen
 
 
-def test_restart_kills_the_group_and_waits_before_start():
-    from gemma_lab.paired import server_process_pid, wait_for_server_release
+def test_release_kills_the_session_child_after_stop_reaps_the_parent():
+    import selectors
+    import signal
+    import subprocess
+    import sys
+
+    from gemma_lab.paired import session_pgid
+
+    script = (
+        "import os, time\n"
+        "child = os.fork()\n"
+        "if child == 0:\n"
+        "    time.sleep(300)\n"
+        "    raise SystemExit(0)\n"
+        "print(child, flush=True)\n"
+        "time.sleep(300)\n"
+    )
+    proc = subprocess.Popen(
+        [sys.executable, "-c", script],
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        selector = selectors.DefaultSelector()
+        selector.register(proc.stdout, selectors.EVENT_READ)
+        assert selector.select(5), "fake server did not report its child"
+        child = int(proc.stdout.readline().strip())
+        parent = proc.pid
+        assert os.getpgid(parent) == parent
+        assert os.getpgid(child) == parent
+        pgid = session_pgid(parent)
+        assert pgid == parent
+        os.kill(parent, signal.SIGKILL)
+        proc.wait(timeout=5)
+        with pytest.raises(ProcessLookupError):
+            os.getpgid(parent)
+        os.kill(child, 0)
+        assert session_pgid(parent) == parent
+        started = time.perf_counter()
+        log = release_server_after_stop(
+            pgid,
+            "http://127.0.0.1:9",
+            nvidia_smi_present=False,
+            port_open=lambda port: False,
+        )
+        elapsed = time.perf_counter() - started
+        deadline = time.perf_counter() + 5
+        while True:
+            try:
+                os.kill(child, 0)
+            except ProcessLookupError:
+                break
+            if time.perf_counter() >= deadline:
+                raise AssertionError(f"child {child} still alive after release")
+            time.sleep(0.05)
+        assert log["pgid"] == parent
+        assert log["timed_out"] is False
+        assert elapsed >= 0.15
+    finally:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        proc.wait(timeout=5)
+
+
+def test_kill_process_group_terms_then_kills_a_recorded_pgid():
+    import signal
 
     signals = []
 
     def killpg(pgid, sig):
         signals.append((pgid, sig))
 
-    killed = kill_process_group(50, killpg=killpg, getpgid=lambda pid: 50)
+    killed = kill_process_group(
+        50,
+        grace=0.2,
+        sleep=lambda seconds: signals.append(("sleep", seconds)),
+        killpg=killpg,
+    )
     assert killed == 50
-    assert [item[0] for item in signals] == [50, 50]
+    assert signals == [(50, signal.SIGTERM), ("sleep", 0.2), (50, signal.SIGKILL)]
+
+    def missing(_pgid, _sig):
+        raise ProcessLookupError
+
+    def fail_sleep(seconds):
+        raise AssertionError(seconds)
+
+    assert kill_process_group(50, grace=5, sleep=fail_sleep, killpg=missing) == 50
+
+
+def test_server_release_waits_for_port_and_gpu():
+    from gemma_lab.paired import server_process_pid, wait_for_server_release
+
     assert kill_process_group(None) is None
+    assert kill_process_group(0) is None
 
     class Process:
         pid = 50

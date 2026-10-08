@@ -339,9 +339,9 @@ def test_pair_notebook_sets_configured_budgets_and_adk_floor(tmp_path, monkeypat
     assert "max_time_minutes = 5.0" not in code
     assert "assert_adk_submission_version(_ADK_SUBMISSION_VERSION)" in code
     assert "'adk_submission_version': _ADK_SUBMISSION_VERSION" in code
-    assert (
-        "server_instance.stop()" in code.split("def restart_model_server", 1)[1].split("def ", 1)[0]
-    )
+    restart = code.split("def restart_model_server", 1)[1].split("def ", 1)[0]
+    assert restart.index("session_pgid") < restart.index("server_instance.stop()")
+    assert restart.index("server_instance.stop()") < restart.index("release_server_after_stop")
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         assert_adk_submission_version("0.2.12")

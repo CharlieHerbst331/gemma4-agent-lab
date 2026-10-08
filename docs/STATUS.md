@@ -176,6 +176,8 @@ in that arm's `run_manifest.json`. A harness ATIF file already at
 `results/<arm>/r<k>/traces/trace_<id>.json` is left in place; a missing trace is
 saved with `trace.save()` when that writer exists, and a raw dump otherwise goes
 to `trace_<id>.raw.json`. Task ids with `/` use `__` in that filename. Restart
-starts vLLM in its own session and kills the process group, then waits up to 60 s
-for the port and any leftover GPU memory. Agent trees and the recorded archive
+starts vLLM in its own session. The process-group id equals the parent pid and
+is recorded before stop(); after stop() that group gets SIGTERM and then
+SIGKILL, and the same id is used for a wait of up to 60 s for the port and any
+leftover GPU memory. Agent trees and the recorded archive
 hashes are unchanged.

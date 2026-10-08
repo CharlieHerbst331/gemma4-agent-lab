@@ -65,7 +65,7 @@ def test_evaluator_repairs_mock_repo(tmp_path):
     repo = write_mock_repo(tmp_path / "repo")
     _snapshot(repo, tmp_path / "snapshots" / f"{instance_id}.tgz")
     task_row = mock_task(instance_id)
-    task_row["FAIL_TO_PASS"] = ["tests/test_calc.py"]
+    task_row["FAIL_TO_PASS"] = ["tests/test_calc.py::test_add"]
     task_row["PASS_TO_PASS"] = []
     task_row["test_patch"] = ""
     tasks_path = tmp_path / "tasks.jsonl"
