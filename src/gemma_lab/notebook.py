@@ -179,6 +179,7 @@ for idx, task in enumerate(SAMPLE_TASKS, start=1):
 """
         + codes[4][end:]
     )
+    codes[3] = _install_declared_model_shim(codes[3])
     codes[3] = (
         "import time as _gemma_lab_time\n"
         "_gemma_lab_model_load_started = _gemma_lab_time.perf_counter()\n" + codes[3]
@@ -212,9 +213,12 @@ for idx, task in enumerate(SAMPLE_TASKS, start=1):
         *[code_cell(code) for code in codes],
         code_cell("server_instance.stop()\n"),
     ]
-    for cell in notebook["cells"]:
-        if cell["cell_type"] == "code":
-            compile("".join(cell["source"]), "generated_notebook", "exec")
+    for index, cell in enumerate(notebook["cells"]):
+        if cell["cell_type"] != "code":
+            continue
+        source = "".join(cell["source"])
+        _assert_model_imports_safe(source, f"notebook cell {index}")
+        compile(source, "generated_notebook", "exec")
     write_json(output / "evaluation.ipynb", notebook)
     meta = json.loads(metadata.read_text())
     meta.update(
@@ -361,8 +365,45 @@ def _strip_paired_budget_prelude(source):
 
 
 WHEELHOUSE_DATASET = "metric/gemma-4-developer-agent-wheelhouse"
-# Wheelhouse v29, the Kaggle crash environment: swegemma 0.2.10, adk-submission 0.2.13.
-HARNESS_PINS = {"swegemma": "0.2.10", "adk-submission": "0.2.13"}
+# Verified on swegemma 0.2.10 and 0.2.11 with adk-submission 0.2.13.
+# swegemma 0.2.11 removed swegemma.models.discovery, swegemma.models.registry,
+# and the re-exports discover_declared_models, normalize_model_name,
+# resolve_local_model_path, resolve_swegemma_adapter, setup_gemma_model_registry,
+# and validate_single_declared_model. Kaggle ignores the wheelhouse /N pin.
+HARNESS_VERIFIED = (
+    ("0.2.10", "0.2.13"),
+    ("0.2.11", "0.2.13"),
+)
+_REMOVED_MODEL_NAMES = (
+    "discover_declared_models",
+    "normalize_model_name",
+    "resolve_local_model_path",
+    "resolve_swegemma_adapter",
+    "setup_gemma_model_registry",
+    "validate_single_declared_model",
+)
+_DECLARED_MODEL_IMPORT = "from swegemma.models.discovery import validate_single_declared_model\n"
+_DECLARED_MODEL_SHIM = (
+    "try:\n"
+    "    from swegemma.models.discovery import validate_single_declared_model\n"
+    "except (ImportError, ModuleNotFoundError):\n"
+    "    from adk_submission.discovery import discover_declared_models\n"
+    "    def _norm(name):\n"
+    "        v = name.strip().lower()\n"
+    "        for p in ('openai/', 'google/', 'hosted_vllm/', 'custom/'):\n"
+    "            if v.startswith(p):\n"
+    "                v = v[len(p):]\n"
+    "        return v\n"
+    "    def validate_single_declared_model(agent_dir):\n"
+    "        models = discover_declared_models(agent_dir, normalize_fn=_norm)\n"
+    "        if not models:\n"
+    '            raise ValueError("No model declared in agent configuration.")\n'
+    "        if len(models) > 1:\n"
+    "            raise ValueError(\n"
+    '                f"Ambiguous model declaration: {sorted(models)}"\n'
+    "            )\n"
+    "        return next(iter(models))\n"
+)
 
 _WHEEL_ANCHOR = "# Remove broken cutlass .pth hooks if present"
 _WHEEL_INSERT = """if not any(WHEELHOUSE_DIR.glob('*.whl')):
@@ -397,27 +438,88 @@ def _pin_dataset_sources(sources, version):
     return [pinned, *kept]
 
 
-def _harness_pin_block(pins):
+def harness_pins_record():
+    """Allow-list written to pair_manifest.json. Not a single equality pin."""
+    return {
+        "packages": ["swegemma", "adk-submission"],
+        "verified": [list(pair) for pair in HARNESS_VERIFIED],
+    }
+
+
+def _harness_pin_block():
+    verified = "{" + ", ".join(repr(pair) for pair in HARNESS_VERIFIED) + "}"
     return (
         "import importlib.metadata as _pkg_metadata\n"
-        f"_HARNESS_PINS = {pins!r}\n"
-        "for _pkg, _expected in _HARNESS_PINS.items():\n"
+        "import json as _harness_json\n"
+        "from pathlib import Path as _HarnessPath\n"
+        f"_VERIFIED = {verified}\n"
+        "def _harness_version(name):\n"
         "    try:\n"
-        "        _installed = _pkg_metadata.version(_pkg)\n"
+        "        return _pkg_metadata.version(name)\n"
         "    except _pkg_metadata.PackageNotFoundError:\n"
         "        raise RuntimeError(\n"
-        "            'Wheelhouse pin failed before model load: '\n"
-        "            f'{_pkg} is not installed; expected {_expected}. '\n"
-        "            'Refusing to start the model server.'\n"
+        "            f'{name} is not installed. Refusing to start the model server.'\n"
         "        ) from None\n"
-        "    if _installed != _expected:\n"
-        "        raise RuntimeError(\n"
-        "            'Wheelhouse pin failed before model load: '\n"
-        "            f'{_pkg} {_installed} != {_expected}. '\n"
-        "            'Refusing to start the model server.'\n"
-        "        )\n"
-        "print('Harness pins', _HARNESS_PINS)\n"
+        "installed = (_harness_version('swegemma'), _harness_version('adk-submission'))\n"
+        "if installed not in _VERIFIED:\n"
+        "    raise RuntimeError(\n"
+        "        f'unverified harness {installed}; verified: {sorted(_VERIFIED)}'\n"
+        "    )\n"
+        "print('Harness verified', installed)\n"
+        "RUN_PROVENANCE = {\n"
+        "    'harness_verified': installed in _VERIFIED,\n"
+        "    'swegemma': installed[0],\n"
+        "    'adk-submission': installed[1],\n"
+        "}\n"
+        "_manifest_path = _HarnessPath('/kaggle/working/run_manifest.json')\n"
+        "try:\n"
+        "    _saved = {}\n"
+        "    if _manifest_path.is_file():\n"
+        "        _loaded = _harness_json.loads(_manifest_path.read_text())\n"
+        "        if isinstance(_loaded, dict):\n"
+        "            _saved = _loaded\n"
+        "    _saved['harness_verified'] = RUN_PROVENANCE['harness_verified']\n"
+        "    _saved['swegemma'] = installed[0]\n"
+        "    _saved['adk-submission'] = installed[1]\n"
+        "    _packages = _saved.get('packages')\n"
+        "    if not isinstance(_packages, dict):\n"
+        "        _packages = {}\n"
+        "    _packages['swegemma'] = installed[0]\n"
+        "    _packages['adk-submission'] = installed[1]\n"
+        "    _saved['packages'] = _packages\n"
+        "    RUN_PROVENANCE = _saved\n"
+        "    _manifest_path.parent.mkdir(parents=True, exist_ok=True)\n"
+        "    _manifest_path.write_text(_harness_json.dumps(_saved, indent=2) + '\\n')\n"
+        "except (OSError, ValueError):\n"
+        "    pass\n"
     )
+
+
+def _install_declared_model_shim(source):
+    """Keep the 0.2.10 import, and define the same function when it is gone."""
+    if _DECLARED_MODEL_IMPORT not in source:
+        return source
+    if source.count(_DECLARED_MODEL_IMPORT) != 1:
+        raise ValueError("Official starter structure changed; discovery import")
+    return source.replace(_DECLARED_MODEL_IMPORT, _DECLARED_MODEL_SHIM, 1)
+
+
+def _assert_model_imports_safe(source, label):
+    """Refuse a generated cell that still needs a swegemma.models name 0.2.11 removed."""
+    for lineno, line in enumerate(source.splitlines(), start=1):
+        stripped = line.strip()
+        if "swegemma.models.registry" in stripped:
+            raise ValueError(f"{label}:{lineno} imports removed swegemma.models.registry")
+        if "swegemma.models.discovery" in stripped:
+            if stripped != _DECLARED_MODEL_IMPORT.strip():
+                raise ValueError(f"{label}:{lineno} imports removed swegemma.models.discovery")
+            continue
+        if not stripped.startswith("from swegemma.models import"):
+            continue
+        imported = stripped.split("import", 1)[1]
+        for name in _REMOVED_MODEL_NAMES:
+            if re.search(rf"\b{name}\b", imported):
+                raise ValueError(f"{label}:{lineno} imports removed swegemma.models.{name}")
 
 
 def generate_pair(
@@ -524,7 +626,7 @@ def generate_pair(
     codes[0] = (
         "import time\nSESSION_WALL_T0 = time.time()\nSESSION_PERF_T0 = time.perf_counter()\n"
         + wheel_cell
-        + _harness_pin_block(HARNESS_PINS)
+        + _harness_pin_block()
     )
     codes[1] = _pair_payload_cell(protocol, packed, cohort_ids, schedule, session_repeats, pins)
     codes[3] = _pair_server_cell(codes[3], protocol, pins)
@@ -574,9 +676,12 @@ def generate_pair(
         code_cell(codes[5]),
         code_cell("server_instance.stop()\n"),
     ]
-    for cell in notebook["cells"]:
-        if cell["cell_type"] == "code":
-            compile("".join(cell["source"]), "generated_notebook", "exec")
+    for index, cell in enumerate(notebook["cells"]):
+        if cell["cell_type"] != "code":
+            continue
+        source = "".join(cell["source"])
+        _assert_model_imports_safe(source, f"notebook cell {index}")
+        compile(source, "generated_notebook", "exec")
     write_json(output / "evaluation.ipynb", notebook)
     meta = json.loads(metadata.read_text())
     meta.update(
@@ -617,7 +722,7 @@ def generate_pair(
         "pins_mode": protocol["pins_mode"],
         "wheelhouse_dataset": wheelhouse_source,
         "wheelhouse_version": wheelhouse_version,
-        "harness_pins": dict(HARNESS_PINS),
+        "harness_pins": harness_pins_record(),
         "arms": arm_provenance,
         "status": "generated",
     }
@@ -749,6 +854,7 @@ def load_import_repos():
 
 
 def _pair_server_cell(source, protocol, pins):
+    source = _install_declared_model_shim(source)
     source = _replace_required(
         source,
         ["declared_model = validate_single_declared_model(AGENT_DIR)\n"],

@@ -81,6 +81,10 @@ parent hashes matched their recorded values on the same pack.
 - structured-v6: `6d324b008ea5c3a389d34277087433200e2521fd17edfd7b3ddc616c965e6e56`
 - single-v2: `28d5b6e46ad8a95d1ed48086f5c63b003a3d78a11e281c210dd98a3b0d40325c`
 
-swegemma 0.2.10 and adk-submission 0.2.13 are not installable from PyPI in this
-environment, and this VM has no Kaggle credentials. Stub capture of the thinking
-config stays with Verification.
+Verified on swegemma 0.2.10 and 0.2.11 with adk-submission 0.2.13. swegemma 0.2.11
+removed `swegemma.models.discovery`, `swegemma.models.registry`, and the
+re-exports `discover_declared_models`, `normalize_model_name`,
+`resolve_local_model_path`, `resolve_swegemma_adapter`,
+`setup_gemma_model_registry`, and `validate_single_declared_model`. Those
+wheels are not installable from PyPI in this environment, and this VM has no
+Kaggle credentials. Stub capture of the thinking config stays with Verification.

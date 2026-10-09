@@ -60,7 +60,11 @@ def main(argv=None):
         "--wheelhouse-version",
         type=int,
         required=True,
-        help="Kaggle wheelhouse dataset version, as owner/slug/<version>",
+        help=(
+            "Positive integer Kaggle wheelhouse dataset version. Recorded in "
+            "kernel-metadata.json and pair_manifest.json. Kaggle ignores the /N pin "
+            "and mounts its current wheelhouse, so this records intent only."
+        ),
     )
     notebook_pair.add_argument(
         "--bundle-dataset",

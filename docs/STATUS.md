@@ -302,3 +302,12 @@ read). fastapi_14356, the non-format failures, and the two controls stay out.
 Schedule `31398c6c61900f3f4813ad59e151df2a15b6549c120fb656c461d438be81a345` is
 not the 13-task schedule. The pair report is marked smoke and is not promotion
 eligible; runtime gates are not applied. The frozen 13-task protocols are unchanged.
+
+## Harness 0.2.11
+
+Verified on swegemma 0.2.10 and 0.2.11 with adk-submission 0.2.13. swegemma
+0.2.11 removed the `swegemma.models` discovery and registry helpers, including
+`validate_single_declared_model`. Generated notebooks try that import and fall
+back to `adk_submission.discovery.discover_declared_models`. The wheelhouse
+`/N` pin records intent only; Kaggle mounts its current wheelhouse. Real
+0.2.10 and 0.2.11 wheels were not installed here.
