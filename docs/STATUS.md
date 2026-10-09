@@ -36,6 +36,18 @@ Remaining differences: `docs/SINGLE_V1.md`. Src-layout (requests) tasks are excl
 from promotion decisions. No GPU run and no submission. Re-packed structured-v4,
 structured-v4-10m, and simple-v3 archives match their documented hashes.
 
+## Thinking-off copies for the paired run
+
+`agents/structured-v5t0` and `agents/single-v1t0` are unevaluated copies of the
+frozen parents. The only change is `thinking_budget: 0` with `include_thoughts`
+still false, because on adk-submission 0.2.13 a missing budget is overridden by
+swegemma's default of 4096. The two thinking files are byte-identical, and so
+are the two `eval_config.yaml` files. `configs/protocols/v5-vs-single-v1.yaml`
+now points at these copies. Archives: structured-v5t0
+`b2cce93de41ad7a487178de67fe10ef82d3aa69f48820639dc3ee720839ae7a9`, single-v1t0
+`90ba7ee8918daf959831cf2845d771c3f09cf46295546d0509f98e6641da845f`.
+Notes: `docs/THINKING_OFF_T0.md`. No GPU run.
+
 ## Current development budget variant
 
 User requested10–15minutes after the five-minute pilot. New active development

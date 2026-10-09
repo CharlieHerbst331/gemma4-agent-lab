@@ -1,12 +1,13 @@
-# Predeclared structured-v5 (A) vs single-v1 (B) protocol.
+# Predeclared structured-v5t0 (A) vs single-v1t0 (B) protocol.
+# Parents agents/structured-v5 and agents/single-v1 stay frozen.
 # expected_sha256 stays null until Verification pins the approved archives.
-# Sources are the future candidates; notebook-pair refuses until those trees exist.
+# notebook-pair takes this file via --protocol; it has no other default pair.
 arms:
   A:
-    source: agents/structured-v5
+    source: agents/structured-v5t0
     expected_sha256: null
   B:
-    source: agents/single-v1
+    source: agents/single-v1t0
     expected_sha256: null
 allow_identical: false
 allowed_differences:
