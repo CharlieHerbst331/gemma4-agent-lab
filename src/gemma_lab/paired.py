@@ -2501,6 +2501,290 @@ def release_server_after_stop(pgid, base_url, **kwargs):
 
 # <<<END_NOTEBOOK_RUNTIME>>>
 
+# Pair-report analysis. These bindings replace the notebook copies for local
+# sessions and `gemma-lab pair-report` only. notebook_runtime_source() still
+# copies the text between the markers, so a regenerated notebook stays the
+# same. The Kaggle cell cannot import the hygiene checker.
+
+_NOTEBOOK_PROJECTION_FOR_ARM = projection_for_arm
+_NOTEBOOK_DECISION_RULE = decision_rule
+_NOTEBOOK_BUILD_REPORT = build_report
+_NOTEBOOK_RENDER_REPORT_MD = render_report_md
+_NOTEBOOK_LOAD_HYGIENE = _load_hygiene
+
+_HYGIENE_RANK = {"pass": 0, "warn": 1, "block": 2}
+
+
+def _pair_report_projection_for_arm(
+    rows, *, arm_sha256, cap_seconds, model_load_seconds, session_overhead_seconds, l_default=900
+):
+    """Same block checks as the notebook, and the upload gate's worst-case WARN."""
+    from gemma_lab.operations import DEFAULT_SCORER_OVERHEAD_SECONDS
+
+    result = _NOTEBOOK_PROJECTION_FOR_ARM(
+        rows,
+        arm_sha256=arm_sha256,
+        cap_seconds=cap_seconds,
+        model_load_seconds=model_load_seconds,
+        session_overhead_seconds=session_overhead_seconds,
+        l_default=l_default,
+    )
+    checks = result["checks"]
+    checks.pop("worst_case_12h_n129", None)
+    checks.pop("worst_case_12h_n120", None)
+    overhead = float(DEFAULT_SCORER_OVERHEAD_SECONDS)
+    if cap_seconds is None:
+        worst = None
+    else:
+        worst = float(result["L"]) + 129 * (float(cap_seconds) + overhead)
+    checks["worst_case_12h"] = _check(
+        "worst_case_12h",
+        f"L + 129 * (cap + {DEFAULT_SCORER_OVERHEAD_SECONDS:g})",
+        {
+            "L": result["L"],
+            "L_source": result["L_source"],
+            "cap_seconds": cap_seconds,
+            "overhead_seconds": overhead,
+            "n": 129,
+        },
+        worst,
+        WARN_THRESHOLD_12H,
+        "warn",
+    )
+    result["warnings"] = [
+        name
+        for name, check in checks.items()
+        if check["severity"] == "warn" and not check["passed"]
+    ]
+    result["blocked"] = any(
+        check["severity"] == "block" and not check["passed"] for check in checks.values()
+    )
+    return result
+
+
+def _hygiene_gate(report):
+    if not isinstance(report, dict):
+        return None
+    gate = report.get("gate")
+    if gate not in _HYGIENE_RANK:
+        gate = (report.get("candidate") or {}).get("gate")
+    if gate not in _HYGIENE_RANK:
+        return None
+    return gate
+
+
+def _hygiene_arm_key(key):
+    parts = PurePosixPath(str(key)).parts
+    if len(parts) >= 2 and parts[0] == "results" and parts[1] in {"A", "B"}:
+        return parts[1], parts[2] if len(parts) >= 3 else ""
+    return None, ""
+
+
+def _hygiene_from_sidecars(hygiene):
+    """Per-arm pass/warn/block. not_computed only when no sidecar exists."""
+    arms = {"A": "not_computed", "B": "not_computed"}
+    if not isinstance(hygiene, dict):
+        return "not_computed", arms
+    found = False
+    for key, report in hygiene.items():
+        arm, _repeat = _hygiene_arm_key(key)
+        gate = _hygiene_gate(report)
+        if arm is None or gate is None:
+            continue
+        found = True
+        current = arms[arm]
+        if current == "not_computed" or _HYGIENE_RANK[gate] > _HYGIENE_RANK[current]:
+            arms[arm] = gate
+    if not found:
+        return "not_computed", {"A": "not_computed", "B": "not_computed"}
+    ranked = [arms[label] for label in ("A", "B") if arms[label] != "not_computed"]
+    status = max(ranked, key=lambda item: _HYGIENE_RANK[item])
+    return status, arms
+
+
+def _hygiene_condition_pass(status, arms):
+    if status == "not_computed":
+        return None
+    if any(arms[label] == "block" for label in ("A", "B")):
+        return False
+    if any(arms[label] == "not_computed" for label in ("A", "B")):
+        return None
+    return True
+
+
+def _arm_hygiene_cleared(arms, label):
+    return arms.get(label) in {"pass", "warn"}
+
+
+def _hygiene_note(status, arms):
+    blocked = [label for label in ("A", "B") if arms.get(label) == "block"]
+    if status == "not_computed":
+        return (
+            "Hygiene is not_computed unless a hygiene sidecar is present. "
+            "Verification signs off; this report does not promote."
+        )
+    if blocked:
+        return (
+            f"Hygiene block on {', '.join(blocked)}; a blocked arm cannot win. "
+            "Verification signs off; this report does not promote."
+        )
+    return (
+        "Hygiene sidecars are pass or warn. A block would stop that arm from winning. "
+        "Verification signs off; this report does not promote."
+    )
+
+
+def _pair_report_decision_rule(primary_rows, projection, hygiene=None):
+    """Notebook rule, plus sidecar gates. A blocked arm cannot win."""
+    base = _NOTEBOOK_DECISION_RULE(primary_rows, projection)
+    status, arms = _hygiene_from_sidecars(hygiene)
+    base["conditions"]["hygiene"] = {
+        "pass": _hygiene_condition_pass(status, arms),
+        "status": status,
+        "arms": arms,
+    }
+    conditions = base["conditions"]
+    rival = base["b_as_candidate"]
+    rule_winner = None
+    if (
+        _arm_hygiene_cleared(arms, "A")
+        and conditions["margin"]["pass"]
+        and conditions["paired_breadth"]["pass"]
+        and conditions["budget"]["pass"]
+    ):
+        rule_winner = "A"
+    if (
+        _arm_hygiene_cleared(arms, "B")
+        and rival["margin"]
+        and rival["paired_breadth"]
+        and rival["budget"]
+    ):
+        rule_winner = "B"
+    base["rule_winner"] = rule_winner
+    base["note"] = _hygiene_note(status, arms)
+    return base
+
+
+def _pair_report_build_report(
+    rows,
+    *,
+    projection,
+    exclude_import_origin=True,
+    hygiene=None,
+    protocol_sha256=None,
+    schedule_sha256=None,
+):
+    report = _NOTEBOOK_BUILD_REPORT(
+        rows,
+        projection=projection,
+        exclude_import_origin=exclude_import_origin,
+        hygiene=hygiene,
+        protocol_sha256=protocol_sha256,
+        schedule_sha256=schedule_sha256,
+    )
+    primary = _primary_rows(rows, exclude_import_origin)
+    report["decision_rule"] = decision_rule(primary, projection, hygiene)
+    return report
+
+
+def _explicit_submit_text(report, arm):
+    ratio = (report.get("candidate") or {}).get("explicit_finalization")
+    if not (isinstance(ratio, list) and len(ratio) == 2):
+        for item in report.get("arms") or []:
+            if isinstance(item, dict) and item.get("arm") in {None, arm}:
+                ratio = item.get("explicit_finalization")
+                if isinstance(ratio, list) and len(ratio) == 2:
+                    break
+    if isinstance(ratio, list) and len(ratio) == 2:
+        return f"{ratio[0]}/{ratio[1]}"
+    return "n/a"
+
+
+def _compact_hygiene_lines(hygiene):
+    if not isinstance(hygiene, dict) or not hygiene:
+        status = hygiene if isinstance(hygiene, str) else "not_computed"
+        return [f"Hygiene: {status}"]
+    lines = []
+    for key in sorted(hygiene):
+        report = hygiene[key]
+        arm, repeat = _hygiene_arm_key(key)
+        label = f"{arm}/{repeat}" if arm and repeat else (arm or str(key))
+        if not isinstance(report, dict):
+            lines.append(f"Hygiene {label}: {report}")
+            continue
+        gate = _hygiene_gate(report) or "unknown"
+        counts = {name: 0 for name in ("H1", "H2", "H3", "H5")}
+        for task in report.get("tasks") or []:
+            for item in task.get("findings") or []:
+                family = str(item.get("rule") or "").split(".", 1)[0]
+                if family in counts:
+                    counts[family] += 1
+        lines.append(
+            f"Hygiene {label}: gate {gate}, "
+            f"H1 {counts['H1']}, H2 {counts['H2']}, H3 {counts['H3']}, H5 {counts['H5']}, "
+            f"explicit submit {_explicit_submit_text(report, arm)}"
+        )
+    return lines
+
+
+def _pair_report_render_report_md(report):
+    text = _NOTEBOOK_RENDER_REPORT_MD(report)
+    lines = text.splitlines()
+    rendered = []
+    for line in lines:
+        if line.startswith("Hygiene: "):
+            rendered.extend(_compact_hygiene_lines(report.get("hygiene")))
+        else:
+            rendered.append(line)
+    return "\n".join(rendered) + "\n"
+
+
+def _hygiene_group_ready(path):
+    return any((path / name).exists() for name in ("task_results.jsonl", "patches", "traces"))
+
+
+def _ensure_hygiene_sidecars(output_dir):
+    """Write results/<arm>/<repeat>/hygiene.json when absent. Never raises."""
+    try:
+        results = Path(output_dir) / "results"
+        if not results.is_dir():
+            return
+        from gemma_lab.hygiene import audit_run
+    except Exception:
+        return
+    try:
+        arm_dirs = sorted(path for path in results.iterdir() if path.is_dir())
+    except OSError:
+        return
+    for arm_dir in arm_dirs:
+        try:
+            repeat_dirs = sorted(path for path in arm_dir.iterdir() if path.is_dir())
+        except OSError:
+            continue
+        for repeat_dir in repeat_dirs:
+            destination = repeat_dir / "hygiene.json"
+            try:
+                if destination.exists():
+                    continue
+                if not _hygiene_group_ready(repeat_dir):
+                    continue
+                report = audit_run(repeat_dir)
+                destination.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+            except Exception:
+                continue
+
+
+def _pair_report_load_hygiene(output_dir):
+    _ensure_hygiene_sidecars(output_dir)
+    return _NOTEBOOK_LOAD_HYGIENE(output_dir)
+
+
+projection_for_arm = _pair_report_projection_for_arm
+decision_rule = _pair_report_decision_rule
+build_report = _pair_report_build_report
+render_report_md = _pair_report_render_report_md
+_load_hygiene = _pair_report_load_hygiene
+
 
 def notebook_runtime_source():
     text = Path(__file__).read_text()

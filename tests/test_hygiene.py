@@ -615,6 +615,7 @@ def test_run_rates_warn_when_submit_or_verifier_is_missing(tmp_path):
     assert report["candidate"]["explicit_finalization"] == [1, 2]
     assert report["candidate"]["verifier_reached"] == [1, 2]
     assert report["gate"] == "warn"
+    assert "explicit submit_patch 1/2 is below 1" in report["candidate"]["reasons"]
     after = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
     assert before == after
 
@@ -1084,6 +1085,22 @@ def test_single_agent_run_skips_the_verifier_rate(tmp_path):
     assert not rules(report["candidate"], "R.explicit_submit_rate")
     assert report["tasks"][0]["verifier_reached"] is None
     assert report["gate"] == "pass"
+
+
+def test_h1_block_reasons_name_the_scratch_file(tmp_path):
+    _write_run(
+        tmp_path,
+        [
+            ("fastapi_11194", added("repro.py"), None),
+            ("other_task", modified("pkg/core.py"), _explicit()),
+        ],
+    )
+    report = audit_run(tmp_path)
+    reasons = report["candidate"]["reasons"]
+    assert report["gate"] == "block"
+    assert reasons == ["H1 scratch file repro.py in fastapi_11194"]
+    assert rules(report["candidate"], "R.explicit_submit_rate")[0]["severity"] == "warn"
+    assert all(item["severity"] == "warn" for item in report["candidate"]["findings"])
 
 
 def _write_run(directory, tasks):

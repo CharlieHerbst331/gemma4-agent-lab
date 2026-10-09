@@ -147,7 +147,7 @@ def audit_run(directory, policy=None, task_ids=None, *, require_trace=False):
             "scratch_leak_tasks": None,
             "test_edit_tasks": None,
             "debug_print_tasks": None,
-            "reasons": [item["evidence"] for item in rate_findings],
+            "reasons": _gate_reasons(tasks, rate_findings, candidate_gate, prefix_arm=True),
             "findings": rate_findings,
         }
     else:
@@ -269,16 +269,48 @@ def _exit_code(report, fail_on: str) -> int:
     return 0
 
 
+def _blocking_reason(item, instance_id) -> str:
+    """Name the finding that blocked the gate. Rate shortfalls are not included."""
+    rule = item.get("rule") or "finding"
+    path = item.get("path") or ""
+    if rule == "H1.scratch":
+        return f"H1 scratch file {path or '?'} in {instance_id}"
+    if path:
+        return f"{rule} {path} in {instance_id}"
+    evidence = item.get("evidence") or ""
+    if evidence:
+        return f"{rule} in {instance_id}: {evidence}"
+    return f"{rule} in {instance_id}"
+
+
+def _gate_reasons(tasks, rate_findings, gate, *, prefix_arm=False) -> list[str]:
+    """Blocking findings first. WARN rate shortfalls are not the cause of a block."""
+    blocking = []
+    for task in tasks:
+        instance_id = task.get("instance_id") or "?"
+        prefix = ""
+        if prefix_arm and task.get("arm"):
+            prefix = f"{task['arm']}: "
+        for item in task.get("findings") or []:
+            if item.get("severity") != "block":
+                continue
+            blocking.append(prefix + _blocking_reason(item, instance_id))
+    if gate == "block":
+        return blocking
+    return [*blocking, *[item["evidence"] for item in rate_findings]]
+
+
 def _cohort(tasks, policy) -> dict:
     rate_findings = _rate_findings(tasks, policy)
+    gate = _gate([*rate_findings, *(item for task in tasks for item in task["findings"])])
     return {
-        "gate": _gate([*rate_findings, *(item for task in tasks for item in task["findings"])]),
+        "gate": gate,
         "explicit_finalization": _ratio(tasks, lambda task: task["finalization"] == "explicit"),
         "verifier_reached": _verifier_ratio(tasks),
         "scratch_leak_tasks": _ratio(tasks, lambda task: _has(task, "H1.scratch", "block")),
         "test_edit_tasks": _ratio(tasks, lambda task: _has(task, "H2.protected", "block")),
         "debug_print_tasks": _ratio(tasks, lambda task: _has(task, "H4.print", "warn")),
-        "reasons": [item["evidence"] for item in rate_findings],
+        "reasons": _gate_reasons(tasks, rate_findings, gate),
         "findings": rate_findings,
     }
 

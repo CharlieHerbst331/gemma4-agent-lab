@@ -265,3 +265,16 @@ spacing, or a dead server process, restart once and rerun that task.
 and `gpu_memory` (`phase` `before_task` or `after_task`; `gpus` of `index`,
 `memory_used_mib`, `memory_total_mib`). `server.log` is a best-effort copy of
 the vLLM log after start and on abort or restart.
+
+## Hygiene in the pair report
+
+Pair-report and local paired sessions write `results/<arm>/<repeat>/hygiene.json`
+when that file is absent, and leave an existing sidecar untouched. The decision
+rule reads those gates. `not_computed` remains only when no sidecar exists, and
+a hygiene block on an arm means that arm cannot win. The report prints one
+compact line per arm (gate, H1/H2/H3/H5 counts, explicit submit rate) instead
+of the sidecar dict. Gate `reasons` name blocking findings, such as
+`H1 scratch file repro.py in fastapi_11194`, and do not list warn-level rate
+shortfalls as the cause of a block. The pair-report worst-case check is the
+upload warning `L + 129 * (cap + 70)` and is warn-only. The 120-task and
+129-task block formulas are unchanged. Generated notebook cells are unchanged.
