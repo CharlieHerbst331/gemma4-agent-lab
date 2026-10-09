@@ -2781,6 +2781,12 @@ def _render_smoke_report(report):
         f"Protocol sha256: `{report.get('protocol_sha256')}`",
         f"Schedule sha256: `{report.get('schedule_sha256')}`",
         "",
+        "Arm order for the 5 tasks is AB, BA, AB, BA, AB, so A goes first on 3 tasks "
+        "and B on 2, an odd count that one repeat cannot balance.",
+        "",
+        "The Kaggle notebook's in-kernel report and projection.json are the ordinary "
+        "non-smoke ones. The smoke text appears only after a local `gemma-lab pair-report`.",
+        "",
         "## Raw totals",
     ]
     for label, stats in (report.get("raw_totals") or {}).items():

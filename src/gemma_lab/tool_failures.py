@@ -3,7 +3,9 @@
 Events come from the existing trace parser (ATIF, the synthetic gemma-lab
 trace, or the small ADK-like shape). A failed skill call is ``run_skill_script``
 whose output is ``INVALID_ARGUMENTS`` or a check.py usage / corrected-example
-error. A failed edit is ``edit_file`` whose output is a missing-parameter error.
+error. A failed edit is ``edit_file`` whose output contains the harness sentence
+``mandatory input parameters`` (``Invoking `edit_file()` failed as the following
+mandatory input parameters are not present``) or a ``missing-parameter`` error.
 """
 
 from __future__ import annotations
@@ -36,48 +38,67 @@ def is_failed_edit(event) -> bool:
     if getattr(event, "tool", "") != "edit_file":
         return False
     lowered = str(getattr(event, "output", "") or "").lower()
+    if "mandatory input parameters" in lowered:
+        return True
     return "missing-parameter" in lowered or "missing parameter" in lowered
 
 
-def _recovers(event) -> bool:
-    """A later successful skill or edit call ends an unrecovered loop."""
-    if is_failed_skill(event) or is_failed_edit(event):
-        return False
-    return getattr(event, "tool", "") in {"run_skill_script", "edit_file"}
+def _failed(event) -> bool:
+    return is_failed_skill(event) or is_failed_edit(event)
 
 
 def summarize_events(events) -> dict:
-    """Counts, the longest adjacent failure streak, and whether it was recovered."""
+    """Counts, the longest adjacent failure streak, and the tail streak.
+
+    ``max_consecutive_failures`` is the longest run of adjacent failures.
+    A later success does not shrink it. ``tail_streak`` is the run of
+    failures at the end of the event list.
+    """
     failed_skill = 0
     failed_edit = 0
     submit_patch = 0
     streak = 0
     max_streak = 0
-    recovered = False
     for event in events:
         if getattr(event, "tool", "") == "submit_patch":
             submit_patch += 1
-        failed = is_failed_skill(event) or is_failed_edit(event)
         if is_failed_skill(event):
             failed_skill += 1
         if is_failed_edit(event):
             failed_edit += 1
-        if failed:
+        if _failed(event):
             streak += 1
-            if streak >= max_streak:
+            if streak > max_streak:
                 max_streak = streak
-                recovered = False
             continue
-        if streak and streak == max_streak and _recovers(event):
-            recovered = True
         streak = 0
+    tail = 0
+    for event in reversed(list(events)):
+        if not _failed(event):
+            break
+        tail += 1
     return {
         "failed_skill_calls": failed_skill,
         "failed_edit_calls": failed_edit,
         "max_consecutive_failures": max_streak,
-        "unrecovered_loop": max_streak >= 2 and not recovered,
+        "tail_streak": tail,
         "submit_patch_count": submit_patch,
     }
+
+
+def unrecovered_loop(summary, patch, hit_cap) -> bool:
+    """True when the tool-failure loop was not recovered.
+
+    A later successful skill or edit call does not clear the flag. The run
+    is unrecovered when it hit the cap (timed out, or it never called
+    ``submit_patch``), when the saved patch is empty or scratch-only, or
+    when the tail streak is at least 3. The streak column stays the max.
+    """
+    if hit_cap or summary["submit_patch_count"] == 0:
+        return True
+    if patch in {"empty", "scratch-only"}:
+        return True
+    return summary["tail_streak"] >= 3
 
 
 def patch_kind(text) -> str:
@@ -121,7 +142,7 @@ def collect_tool_failures(run_dir) -> list[dict]:
         for repeat_dir in repeat_dirs:
             for task_id in _task_ids(repeat_dir):
                 try:
-                    rows.append(_task_row(arm_dir.name, repeat_dir, task_id))
+                    rows.append(_task_row(Path(run_dir), arm_dir.name, repeat_dir, task_id))
                 except Exception:
                     continue
     rows.sort(key=lambda item: (item["arm"], item["repeat"], item["task_id"]))
@@ -131,6 +152,11 @@ def collect_tool_failures(run_dir) -> list[dict]:
 def tool_failure_lines(rows) -> list[str]:
     lines = [
         "## Tool-call failures",
+        "",
+        "unrecovered loop is true when the run hit the cap (timed out or never "
+        "called submit_patch), or the saved patch is empty or scratch-only, or "
+        "the tail streak of failed skill or edit_file calls at the end of the "
+        "run is at least 3. max streak is the longest adjacent failure streak.",
         "",
         "| arm | repeat | task | failed skill | failed edit_file | "
         "max streak | unrecovered loop | submit_patch | patch |",
@@ -152,18 +178,21 @@ def smoke_not_applicable() -> str:
     return _NOT_APPLICABLE
 
 
-def _task_row(arm: str, folder: Path, task_id: str) -> dict:
+def _task_row(run_dir: Path, arm: str, folder: Path, task_id: str) -> dict:
     payload = _read_json(_trace_path(folder, task_id))
     summary = summarize_trace(payload)
     summary.pop("trace_schema", None)
     patch_path = folder / "patches" / f"{task_id.replace('/', '__')}.patch"
     text = patch_path.read_text() if patch_path.is_file() else ""
+    kind = patch_kind(text)
+    hit_cap = _task_hit_cap(run_dir, arm, folder, task_id)
     return {
         "arm": arm,
         "repeat": folder.name,
         "task_id": task_id,
-        "patch": patch_kind(text),
+        "patch": kind,
         **summary,
+        "unrecovered_loop": unrecovered_loop(summary, kind, hit_cap),
     }
 
 
@@ -204,3 +233,63 @@ def _read_json(path: Path | None):
     if path is None or not path.is_file():
         return None
     return json.loads(path.read_text())
+
+
+def _task_hit_cap(run_dir: Path, arm: str, folder: Path, task_id: str) -> bool:
+    """Timed out, or the pair row says the wall or session cap was hit."""
+    for row in _iter_jsonl(folder / "task_results.jsonl"):
+        row_id = row.get("instance_id") or row.get("task_id")
+        if row_id == task_id and _cap_row(row):
+            return True
+    repeat = _repeat_number(folder.name)
+    for name in ("pair_results.jsonl", "timing.jsonl"):
+        for row in _iter_jsonl(run_dir / name):
+            if _same_run_row(row, arm, repeat, task_id) and _cap_row(row):
+                return True
+    return False
+
+
+def _cap_row(row: dict) -> bool:
+    hit = row.get("hit_cap")
+    if isinstance(hit, dict) and (hit.get("wall") or hit.get("marker")):
+        return True
+    if str(row.get("failure_class") or "") == "agent_budget":
+        return True
+    text = " ".join(str(row.get(key) or "") for key in ("error", "agent_error", "error_message"))
+    lowered = text.lower()
+    return "exceeded session timeout" in lowered or "exceeded turns budget" in lowered
+
+
+def _same_run_row(row: dict, arm: str, repeat: int | None, task_id: str) -> bool:
+    row_task = row.get("task_id") or row.get("instance_id")
+    if row_task != task_id or row.get("arm") != arm:
+        return False
+    if repeat is None:
+        return True
+    return row.get("repeat") in (repeat, f"r{repeat}")
+
+
+def _repeat_number(name: str) -> int | None:
+    if name.startswith("r") and name[1:].isdigit():
+        return int(name[1:])
+    if name.isdigit():
+        return int(name)
+    return None
+
+
+def _iter_jsonl(path: Path):
+    if not path.is_file():
+        return
+    try:
+        text = path.read_text()
+    except OSError:
+        return
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            yield item

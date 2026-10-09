@@ -26,11 +26,27 @@ index 0000000..1111111
 @@ -0,0 +1 @@
 +x = 1
 """
+CODE_PATCH = """diff --git a/pkg/core.py b/pkg/core.py
+index 1111111..2222222 100644
+--- a/pkg/core.py
++++ b/pkg/core.py
+@@ -1 +1 @@
+-a = 1
++a = 2
+"""
+# ATIF observation.content from the harness when edit_file omits a required argument.
+HARNESS_EDIT_FAILURE = (
+    "Invoking `edit_file()` failed as the following mandatory input parameters are not present"
+)
 
 
-def atif(agent, steps):
+def atif(agent, steps, *, content=False):
     built = []
     for index, (tool, arguments, output) in enumerate(steps, start=1):
+        if content:
+            observation = {"content": output}
+        else:
+            observation = {"results": [{"source_call_id": f"c{index}", "content": output}]}
         built.append(
             {
                 "step_id": index,
@@ -43,7 +59,7 @@ def atif(agent, steps):
                         "arguments": arguments,
                     }
                 ],
-                "observation": {"results": [{"source_call_id": f"c{index}", "content": output}]},
+                "observation": observation,
             }
         )
     return {"schema_version": "ATIF-v1.7", "agent": {"name": agent}, "steps": built}
@@ -96,17 +112,21 @@ def test_smoke_report_banner_and_stub_tool_failures(tmp_path):
             top_level,
             "mode and phase were both omitted. Corrected example call: {}",
         ),
-        ("edit_file", {"path": "pkg/core.py"}, "missing-parameter: old_string"),
-        ("edit_file", {"path": "pkg/core.py"}, "missing-parameter: new_string"),
+        ("edit_file", {"path": "pkg/core.py"}, HARNESS_EDIT_FAILURE),
+        ("edit_file", {"path": "pkg/core.py"}, HARNESS_EDIT_FAILURE + ": old_string"),
         ("submit_patch", {}, "ok"),
     ]
-    summary = summarize_trace(atif("repair", steps))
+    summary = summarize_trace(atif("repair", steps, content=True))
     assert summary["failed_skill_calls"] == 4
     assert summary["failed_edit_calls"] == 2
     assert summary["max_consecutive_failures"] == 6
-    assert summary["unrecovered_loop"] is True
+    assert summary["tail_streak"] == 0
     assert summary["submit_patch_count"] == 1
     assert summary["trace_schema"] == "atif"
+    kept = summarize_trace(
+        atif("repair", [("edit_file", {"path": "pkg/core.py"}, "missing-parameter: old_string")])
+    )
+    assert kept["failed_edit_calls"] == 1
 
     run = tmp_path / "run"
     _arm(run, "A", "fastapi_14786", atif("repair", steps), SCRATCH_PATCH)
@@ -139,11 +159,152 @@ def test_smoke_report_banner_and_stub_tool_failures(tmp_path):
     assert "passed=True" not in text
     assert "passed=False" not in text
     assert "rule_winner: null" in text
+    assert "tail streak" in text
+    assert "AB, BA, AB, BA, AB" in text
+    assert "gemma-lab pair-report" in text
+    assert "projection.json" in text
     assert "| A | r1 | fastapi_14786 | 4 | 2 | 6 | True | 1 | scratch-only |" in text
-    assert "| B | r1 | fastapi_14786 | 0 | 0 | 0 | False | 1 | empty |" in text
+    assert "| B | r1 | fastapi_14786 | 0 | 0 | 0 | True | 1 | empty |" in text
     assert "Hygiene A/r1:" in text
     assert (run / "results" / "A" / "r1" / "hygiene.json").is_file()
     assert (run / "results" / "B" / "r1" / "hygiene.json").is_file()
+
+
+def test_real_harness_edit_string_and_unrecovered_conditions(tmp_path):
+    """Fixture traces. The r1b run directory is not on this machine.
+
+    The edit observations use the harness sentence verbatim, on ATIF
+    ``observation.content``. Counts match the r1b correction: B rich_3934 is
+    25 failed edits in one streak ending in an empty submit, and A
+    fastapi_14262 has 3 failed edits. A fastapi_14356 and A rich_3938 each
+    have one success after the long streak and still ran to the cap.
+    """
+    from gemma_lab.tool_failures import collect_tool_failures
+
+    run = tmp_path / "run"
+    _write_task(
+        run,
+        "B",
+        "rich_3934",
+        atif("single", _edits(25) + [("submit_patch", {}, "ok")], content=True),
+        "",
+    )
+    _write_task(
+        run,
+        "A",
+        "fastapi_14262",
+        atif("repair", _edits(3), content=True),
+        "",
+    )
+    _write_task(
+        run,
+        "A",
+        "fastapi_14356",
+        atif("repair", _edits(21) + _success(), content=True),
+        CODE_PATCH,
+    )
+    _write_task(
+        run,
+        "A",
+        "rich_3938",
+        atif("repair", _edits(12) + _success(), content=True),
+        CODE_PATCH,
+        task_row={
+            "agent_error": "Agent exceeded session timeout (4.5 min)",
+            "failure_class": "agent_budget",
+        },
+    )
+    _write_task(
+        run,
+        "A",
+        "recovered_edit",
+        atif("repair", _edits(4) + _success(), content=True),
+        CODE_PATCH,
+    )
+    _write_task(
+        run,
+        "B",
+        "tail_streak",
+        atif(
+            "single",
+            [
+                ("edit_file", {"path": "pkg/core.py"}, "applied"),
+                ("submit_patch", {}, "ok"),
+                *_edits(3),
+            ],
+            content=True,
+        ),
+        CODE_PATCH,
+    )
+    (run / "pair_results.jsonl").write_text(
+        json.dumps(
+            {
+                "arm": "A",
+                "repeat": 1,
+                "task_id": "fastapi_14356",
+                "resolved": False,
+                "hit_cap": {"wall": True, "marker": False},
+            }
+        )
+        + "\n"
+    )
+    rows = {(row["arm"], row["task_id"]): row for row in collect_tool_failures(run)}
+    rich = rows[("B", "rich_3934")]
+    assert rich["failed_skill_calls"] == 0
+    assert rich["failed_edit_calls"] == 25
+    assert rich["max_consecutive_failures"] == 25
+    assert rich["tail_streak"] == 0
+    assert rich["unrecovered_loop"] is True
+    assert rich["submit_patch_count"] == 1
+    assert rich["patch"] == "empty"
+    edited = rows[("A", "fastapi_14262")]
+    assert edited["failed_edit_calls"] == 3
+    assert edited["max_consecutive_failures"] == 3
+    assert edited["unrecovered_loop"] is True
+    capped = rows[("A", "fastapi_14356")]
+    assert capped["failed_edit_calls"] == 21
+    assert capped["max_consecutive_failures"] == 21
+    assert capped["tail_streak"] == 0
+    assert capped["submit_patch_count"] == 1
+    assert capped["patch"] == "other"
+    assert capped["unrecovered_loop"] is True
+    other = rows[("A", "rich_3938")]
+    assert other["failed_edit_calls"] == 12
+    assert other["max_consecutive_failures"] == 12
+    assert other["patch"] == "other"
+    assert other["unrecovered_loop"] is True
+    recovered = rows[("A", "recovered_edit")]
+    assert recovered["max_consecutive_failures"] == 4
+    assert recovered["unrecovered_loop"] is False
+    tail = rows[("B", "tail_streak")]
+    assert tail["tail_streak"] == 3
+    assert tail["submit_patch_count"] == 1
+    assert tail["patch"] == "other"
+    assert tail["unrecovered_loop"] is True
+
+
+def _edits(count):
+    return [("edit_file", {"path": "pkg/core.py"}, HARNESS_EDIT_FAILURE) for _ in range(count)]
+
+
+def _success():
+    return [
+        ("edit_file", {"path": "pkg/core.py"}, "applied"),
+        ("submit_patch", {}, "ok"),
+    ]
+
+
+def _write_task(root, arm, task_id, trace, patch, task_row=None):
+    folder = root / "results" / arm / "r1"
+    (folder / "patches").mkdir(parents=True, exist_ok=True)
+    (folder / "traces").mkdir(exist_ok=True)
+    (folder / "patches" / f"{task_id}.patch").write_text(patch)
+    (folder / "traces" / f"trace_{task_id}.json").write_text(json.dumps(trace))
+    row = {"instance_id": task_id, "resolved": False}
+    if task_row:
+        row.update(task_row)
+    with (folder / "task_results.jsonl").open("a") as handle:
+        handle.write(json.dumps(row) + "\n")
 
 
 def _arm(root, arm, task_id, trace, patch):
