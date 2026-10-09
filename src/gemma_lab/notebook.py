@@ -437,7 +437,6 @@ def generate_pair(
         assert_arms_compatible,
         build_schedule,
         inspect_arm,
-        load_cohort_ids,
         load_grading_pins,
         load_protocol,
         notebook_runtime_source,
@@ -453,7 +452,7 @@ def generate_pair(
     pins = load_grading_pins()
     if list(pins.get("pytest_command_literals") or []) != list(PYTEST_COMMAND_LITERALS):
         raise ValueError("grading pin pytest literals do not match the runtime constant")
-    cohort_ids = load_cohort_ids(protocol["cohort"]["path"])
+    cohort_ids = list(protocol["_task_ids"])
     repeats = int(protocol["repeats"])
     session_repeats = parse_repeats(repeats_in_session, repeats)
     schedule = build_schedule(

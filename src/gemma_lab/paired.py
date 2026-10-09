@@ -2727,7 +2727,83 @@ def _compact_hygiene_lines(hygiene):
     return lines
 
 
+def _apply_smoke_report(report, run_dirs):
+    """Drop promotion gates. Hygiene sidecars are already on the report."""
+    from gemma_lab.tool_failures import collect_tool_failures, smoke_not_applicable
+
+    note = smoke_not_applicable()
+    report["purpose"] = "smoke"
+    report["promotion"] = note
+    rows = []
+    for run_dir in run_dirs:
+        rows.extend(collect_tool_failures(run_dir))
+    report["tool_failures"] = rows
+    report["decision_rule"] = {
+        "applied_to": "smoke",
+        "rule_winner": None,
+        "promotion": note,
+        "conditions": {
+            "margin": note,
+            "paired_breadth": note,
+            "budget": note,
+            "hygiene": note,
+        },
+        "note": (
+            "Smoke is not promotion eligible. Runtime gates and the decision rule "
+            "are not applicable."
+        ),
+    }
+    projection = report.get("projection") or {}
+    projection["blocked"] = note
+    for arm in (projection.get("arms") or {}).values():
+        if not isinstance(arm, dict):
+            continue
+        arm["blocked"] = note
+        arm["warnings"] = []
+        for check in (arm.get("checks") or {}).values():
+            if isinstance(check, dict):
+                check["passed"] = note
+    report["projection"] = projection
+    return report
+
+
+def _render_smoke_report(report):
+    from gemma_lab.tool_failures import smoke_not_applicable, tool_failure_lines
+
+    note = smoke_not_applicable()
+    lines = [
+        "smoke, not promotion eligible",
+        "",
+        "# Paired evaluation report",
+        "",
+        "This run is a tool-call smoke. It is not promotion eligible.",
+        "",
+        f"Protocol sha256: `{report.get('protocol_sha256')}`",
+        f"Schedule sha256: `{report.get('schedule_sha256')}`",
+        "",
+        "Arm order for the 5 tasks is AB, BA, AB, BA, AB, so A goes first on 3 tasks "
+        "and B on 2, an odd count that one repeat cannot balance.",
+        "",
+        "The Kaggle notebook's in-kernel report and projection.json are the ordinary "
+        "non-smoke ones. The smoke text appears only after a local `gemma-lab pair-report`.",
+        "",
+        "## Raw totals",
+    ]
+    for label, stats in (report.get("raw_totals") or {}).items():
+        lines.append(f"- {label}: resolved {stats.get('resolved')} / {stats.get('rows')}")
+    lines.append("")
+    lines.extend(tool_failure_lines(report.get("tool_failures") or []))
+    lines.extend(["", "## Projection", note, "", "## Decision rule", note])
+    lines.append("rule_winner: null")
+    lines.append(f"Promotion: {note}")
+    lines.append("")
+    lines.extend(_compact_hygiene_lines(report.get("hygiene")))
+    return "\n".join(lines) + "\n"
+
+
 def _pair_report_render_report_md(report):
+    if report.get("purpose") == "smoke":
+        return _render_smoke_report(report)
     text = _NOTEBOOK_RENDER_REPORT_MD(report)
     lines = text.splitlines()
     rendered = []
@@ -3030,7 +3106,61 @@ def load_protocol(path):
     data.setdefault("exclude_import_origin_risk", True)
     data.setdefault("timing_tier", 2)
     data.setdefault("budget_gate", {})
+    data["_task_ids"] = resolve_protocol_task_ids(data)
     return data
+
+
+def resolve_protocol_task_ids(protocol):
+    """Cohort ids, or a strict train/dev subset when the protocol lists task_ids.
+
+    Holdout ids and ids outside the cohort are rejected. Omitting task_ids keeps
+    the full cohort list, in file order, so existing protocols do not change.
+    """
+    cohort = load_cohort_ids(protocol["cohort"]["path"])
+    selected = protocol.get("task_ids")
+    if selected is None:
+        return cohort
+    if (
+        not isinstance(selected, list)
+        or not selected
+        or not all(isinstance(item, str) and item for item in selected)
+        or len(selected) != len(set(selected))
+    ):
+        raise ValueError("Protocol task_ids must be a nonempty list of unique strings")
+    train, dev, holdout = _split_partitions()
+    allowed = train | dev
+    held = [item for item in selected if item in holdout]
+    if held:
+        raise ValueError("Protocol task_ids include holdout ids: " + ", ".join(held))
+    unknown = [item for item in selected if item not in allowed]
+    if unknown:
+        raise ValueError("Protocol task_ids include unknown ids: " + ", ".join(unknown))
+    outside = [item for item in selected if item not in set(cohort)]
+    if outside:
+        raise ValueError("Protocol task_ids are not a subset of the cohort: " + ", ".join(outside))
+    if set(selected) == allowed:
+        raise ValueError("Protocol task_ids must be a strict subset of the train/dev list")
+    return [str(item) for item in selected]
+
+
+def _split_partitions():
+    path = repo_root() / "configs/splits/public-v1.json"
+    data = json.loads(path.read_text())
+    parts = data.get("partitions") or {}
+    return (
+        set(parts.get("train") or []),
+        set(parts.get("dev") or []),
+        set(parts.get("holdout") or []),
+    )
+
+
+def protocol_schedule(protocol):
+    """Schedule for the protocol's task list. The hash covers that list."""
+    return build_schedule(
+        protocol["_task_ids"],
+        repeats=int(protocol["repeats"]),
+        shuffle_seed=protocol.get("shuffle_seed"),
+    )
 
 
 def load_cohort_ids(path):
@@ -3094,11 +3224,7 @@ def report_from_runs(run_dirs, protocol_path, output):
     from gemma_lab.common import write_json
 
     protocol = load_protocol(protocol_path)
-    schedule = build_schedule(
-        load_cohort_ids(protocol["cohort"]["path"]),
-        repeats=int(protocol["repeats"]),
-        shuffle_seed=protocol.get("shuffle_seed"),
-    )
+    schedule = protocol_schedule(protocol)
     protocol["_schedule_sha256"] = schedule["sha256"]
     cap = None
     arm_meta = {"A": {"sha256": None}, "B": {"sha256": None}}
@@ -3170,7 +3296,7 @@ def combine_pair_reports(run_dirs, protocol):
         found = _load_hygiene(run_dir)
         if found:
             hygiene = {**(hygiene or {}), **found}
-    return build_report(
+    report = build_report(
         rows,
         projection=projection,
         exclude_import_origin=bool(protocol.get("exclude_import_origin_risk", True)),
@@ -3178,3 +3304,6 @@ def combine_pair_reports(run_dirs, protocol):
         protocol_sha256=protocol.get("_sha256"),
         schedule_sha256=protocol.get("_schedule_sha256"),
     )
+    if protocol.get("purpose") == "smoke":
+        return _apply_smoke_report(report, run_dirs)
+    return report

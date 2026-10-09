@@ -201,14 +201,10 @@ def main(argv=None):
                     args.wheelhouse_version,
                 )
             case "pair-schedule":
-                from gemma_lab.paired import build_schedule, load_cohort_ids, load_protocol
+                from gemma_lab.paired import load_protocol, protocol_schedule
 
                 protocol = load_protocol(args.protocol)
-                schedule = build_schedule(
-                    load_cohort_ids(protocol["cohort"]["path"]),
-                    repeats=int(protocol["repeats"]),
-                    shuffle_seed=protocol.get("shuffle_seed"),
-                )
+                schedule = protocol_schedule(protocol)
                 result = {
                     "protocol_sha256": protocol["_sha256"],
                     "schedule_sha256": schedule["sha256"],

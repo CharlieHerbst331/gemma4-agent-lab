@@ -290,3 +290,15 @@ of the sidecar dict. Gate `reasons` name blocking findings, such as
 shortfalls as the cause of a block. The pair-report worst-case check is the
 upload warning `L + 129 * (cap + 70)` and is warn-only. The 120-task and
 129-task block formulas are unchanged. Generated notebook cells are unchanged.
+
+## Tool-call smoke protocol
+
+`configs/protocols/v6-vs-single-v2-toolcall-smoke.yaml` is one repeat of
+structured-v6 vs single-v2 on five dev-13 ids: fastapi_14786 (A's skill-format
+loop, B solved it), rich_3934 (skill failures and B's edit_file streak),
+fastapi_11194 (B's skill loop and A's scratch repro.py), rich_3938 (skill streak
+and a scratch-only patch), fastapi_14262 (mild edit failures and a no-edit
+read). fastapi_14356, the non-format failures, and the two controls stay out.
+Schedule `31398c6c61900f3f4813ad59e151df2a15b6549c120fb656c461d438be81a345` is
+not the 13-task schedule. The pair report is marked smoke and is not promotion
+eligible; runtime gates are not applied. The frozen 13-task protocols are unchanged.
