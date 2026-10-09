@@ -48,6 +48,18 @@ now points at these copies. Archives: structured-v5t0
 `90ba7ee8918daf959831cf2845d771c3f09cf46295546d0509f98e6641da845f`.
 Notes: `docs/THINKING_OFF_T0.md`. No GPU run.
 
+## Protocol pair structured-v6 vs single-v2
+
+`agents/structured-v6` (from structured-v5t0) and `agents/single-v2` (from
+single-v1t0) are unevaluated copies for the r1b tool-protocol failures. Thinking
+stays off (`thinking_budget: 0`, `include_thoughts: false`). The 270s / 48-call
+caps are unchanged. The two thinking files and the two `eval_config.yaml` files
+stay byte-identical. `configs/protocols/v6-vs-single-v2.yaml` points at this
+pair. `configs/protocols/v5-vs-single-v1.yaml` is unchanged. Archives:
+structured-v6 `f4bb0ed0bfaa7bfa5d7634f18e74a0d9289b950414578c2e804288f0f7fe3bed`,
+single-v2 `c764637f85cd63f465d45f2ffdef02f43b59586dabbee033d4f42f0d19152251`.
+Notes: `docs/V6_SINGLE_V2.md`. No GPU run.
+
 ## Current development budget variant
 
 User requested10–15minutes after the five-minute pilot. New active development

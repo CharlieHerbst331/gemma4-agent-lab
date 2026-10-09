@@ -1,0 +1,46 @@
+# Predeclared structured-v6 (A) vs single-v2 (B) protocol.
+# Parents agents/structured-v5t0 and agents/single-v1t0 stay frozen.
+# configs/protocols/v5-vs-single-v1.yaml is a separate protocol and is not edited.
+# expected_sha256 stays null until Verification pins the approved archives.
+# notebook-pair takes this file via --protocol; it has no other default pair.
+arms:
+  A:
+    source: agents/structured-v6
+    expected_sha256: null
+  B:
+    source: agents/single-v2
+    expected_sha256: null
+allow_identical: false
+allowed_differences:
+  - agent.yaml
+  - sub_agents/*
+  - skills/*
+  - prompts/*
+cohort:
+  path: configs/cohorts/dev-13-environment-screened.json
+  task_file_sha256: e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6
+repeats: 2
+order_rule: per_task_parity_v1
+shuffle_seed: null
+session_budget_seconds: 40200
+pair_start_pad_seconds: 60
+abort_policy: round2_v1
+early_stop: round2
+budget_gate:
+  block:
+    - name: round2_load_plus_129_mean
+      formula: L + 129 * mean_wall
+      threshold_seconds: 38880
+    - name: coordinator_mean_times_120
+      formula: mean_wall * 120
+      threshold_seconds: 39600
+  warn:
+    - name: worst_case_12h
+      formula: L + n * (cap + p90_delta)
+      threshold_seconds: 43200
+      n_values: [120, 129]
+  L_default: 900
+  coordinator_hours: 11
+timing_tier: 2
+pins_mode: record
+exclude_import_origin_risk: true
