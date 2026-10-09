@@ -21,10 +21,13 @@ and the role prompts.
 - One literal `run_skill_script` call, with top-level `skill_name`, `file_path`,
   and `args`, is in both `SKILL.md` files and in repair, verify, and the single
   prompt, plus the sentence "Never put skill_name or file_path inside args".
-- `check.py` defaults `--mode` to `repro`. A missing mode on a call that already
-  has phase and code is a behavior check. Audit stays explicit so a forgotten
-  mode is not treated as hygiene-only. A bad argument prints that same example
-  call instead of stock argparse usage.
+- `check.py` defaults `--mode` to `repro` when a phase is present. A missing
+  mode on a call that already has phase and code is a behavior check. Audit
+  stays explicit. If both mode and phase are omitted, the script prints the
+  corrected example instead of running a default verify phase (that path used
+  to answer "Baseline repro changed"). A bad argument prints the same example
+  instead of stock argparse usage. The example code is
+  `assert 1 == 2  # put the real failing assert here`, a failing placeholder.
 - The harness error `INVALID_ARGUMENTS` (`Argument file_path is required`) is
   raised before `check.py` runs, when `file_path` is nested inside `args`. That
   string is not produced by this repo and cannot be changed from the agent.
@@ -36,10 +39,16 @@ and the role prompts.
   or quote-heavy text. After one missing-parameter error, retry a smaller edit.
   After a second failure, repair and the single agent rewrite the line with
   `run_command` and a short Python snippet that must not touch tests,
-  `conftest.py`, `pyproject.toml`, or `setup.cfg`.
-- By about 30 counted calls, or when about 18 calls remain, there must be a
-  source edit. Do not read more than about 8 files before that edit. If still
-  unsure, make the smallest change the issue text implies and submit it. The
+  `conftest.py`, `pyproject.toml`, or `setup.cfg`. If that rewrite fails too,
+  repair hands off in its final report and the single agent calls
+  `submit_patch` with the current diff. Verify has no `run_command`: after a
+  second `edit_file` failure it stops editing and calls `submit_patch` with
+  the current diff.
+- The primary edit point stays about 12 counted calls or about 95 seconds.
+  About 30 counted calls, or about 18 calls remaining, is only the hard
+  backstop. Verify's best-guess edit is allowed only on the last iteration,
+  when fewer than 60 seconds remain, or at that backstop. Otherwise an empty
+  diff hands back to repair. If under 20 seconds remain, submit as is. The
   empty UNCERTAIN submit remains only when the issue text is just an issue
   number, such as `Fix #3104`, and that case still says no search.
 - Scratch stays in `/tmp` or top-level `/workspace/build/`. Do not write
@@ -55,18 +64,18 @@ prompt ceiling inside 32768. These instruction files stay far under that.
 | File | Chars before | Chars after | Est. tokens before | Est. tokens after |
 | --- | ---: | ---: | ---: | ---: |
 | structured-v5t0 `sub_agents/triage.md` | 2174 | 2174 | 543 | 543 |
-| structured-v5t0 `sub_agents/repair.md` | 4691 | 5733 | 1172 | 1433 |
-| structured-v5t0 `sub_agents/verify.md` | 4715 | 6171 | 1178 | 1542 |
-| verify-patch `SKILL.md` (both trees) | 3702 | 4277 | 925 | 1069 |
-| single-v1t0 `prompts/system.md` | 6221 | 7344 | 1555 | 1836 |
+| structured-v5t0 `sub_agents/repair.md` | 4691 | 6230 | 1172 | 1557 |
+| structured-v5t0 `sub_agents/verify.md` | 4715 | 6980 | 1178 | 1745 |
+| verify-patch `SKILL.md` (both trees) | 3702 | 4399 | 925 | 1099 |
+| single-v1t0 `prompts/system.md` | 6221 | 7980 | 1555 | 1995 |
 
 ## Archives
 
 Packed with `gemma-lab pack` to `/tmp` (archives are not committed). The ten
 parent hashes matched their recorded values on the same pack.
 
-- structured-v6: `f4bb0ed0bfaa7bfa5d7634f18e74a0d9289b950414578c2e804288f0f7fe3bed`
-- single-v2: `c764637f85cd63f465d45f2ffdef02f43b59586dabbee033d4f42f0d19152251`
+- structured-v6: `cd2854e6e9f11bdfe432065281d2c3188f5be7545080258981f7782a56d0d27c`
+- single-v2: `0135d1d3efa0e4909349fd128bfc01837593fa443a1dcaa0675ded447d44b95d`
 
 swegemma 0.2.10 and adk-submission 0.2.13 are not installable from PyPI in this
 environment, and this VM has no Kaggle credentials. Stub capture of the thinking

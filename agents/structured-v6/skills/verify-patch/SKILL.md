@@ -4,9 +4,8 @@ description: Create and rerun assertion-based scratch repros with real exit stat
 ---
 Run scripts/check.py with run_skill_script. skill_name, file_path, and args are
 top-level. Never put skill_name or file_path inside args. One full call:
-{"skill_name":"verify-patch","file_path":"scripts/check.py","args":{"mode":"repro","phase":"before","code":"assert True","timeout":"20"}}
-args is one JSON object of scalar strings. If a tool returns the same error twice, do not repeat that call. Switch to run_command or edit_file. Use edit_file when
-the role has no run_command. The outer ADK envelope
+{"skill_name":"verify-patch","file_path":"scripts/check.py","args":{"mode":"repro","phase":"before","code":"assert 1 == 2  # put the real failing assert here","timeout":"20"}}
+args is one JSON object of scalar strings. The code value is a failing placeholder, not a real check. If a tool returns the same error twice, do not repeat that call. A role with run_command may switch to run_command. Verify has no run_command, so verify uses edit_file only. The outer ADK envelope
 can say warning even when the child check fails. Use the JSON passed and exit_code
 fields. If --mode is omitted, check.py defaults to repro. The harness error
 INVALID_ARGUMENTS ('Argument file_path is required') is raised before this script

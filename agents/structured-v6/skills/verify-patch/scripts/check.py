@@ -330,39 +330,52 @@ def repro(workspace, scratch, phase, code=None, timeout=20):
 
 
 # r1b omitted --mode and argparse printed usage, which the model then repeated.
-# A missing mode on a call that already has phase and code is a behavior check,
-# so the default is repro. Audit stays explicit: a forgotten mode must not be
-# treated as hygiene-only.
+# When phase is present and mode is not, the default is repro: a call that
+# already has phase and code is a behavior check. Audit stays explicit.
+# When both mode and phase are omitted, the old default phase was verify, which
+# reused a pinned script and answered "Baseline repro changed" instead of
+# showing a corrected call. That path prints the example and does not run.
 EXAMPLE_CALL = (
-    '{"skill_name":"verify-patch","file_path":"scripts/check.py",'
-    '"args":{"mode":"repro","phase":"before","code":"assert True","timeout":"20"}}'
+    '{"skill_name":"verify-patch","file_path":"scripts/check.py","args":'
+    '{"mode":"repro","phase":"before",'
+    '"code":"assert 1 == 2  # put the real failing assert here","timeout":"20"}}'
 )
 NEVER_NEST = "Never put skill_name or file_path inside args"
+
+
+def emit_corrected_example(message):
+    payload = {
+        "passed": False,
+        "blocked": True,
+        "error": f"{message}. Corrected example call: {EXAMPLE_CALL}. {NEVER_NEST}.",
+        "example_call": json.loads(EXAMPLE_CALL),
+    }
+    print(json.dumps(payload, ensure_ascii=True))
+    raise SystemExit(2)
 
 
 class ExampleParser(argparse.ArgumentParser):
     """Print one corrected call instead of stock argparse usage."""
 
     def error(self, message):
-        payload = {
-            "passed": False,
-            "blocked": True,
-            "error": f"{message}. Corrected example call: {EXAMPLE_CALL}. {NEVER_NEST}.",
-            "example_call": json.loads(EXAMPLE_CALL),
-        }
-        print(json.dumps(payload, ensure_ascii=True))
-        raise SystemExit(2)
+        emit_corrected_example(message)
 
 
 def main():
     parser = ExampleParser()
-    parser.add_argument("--mode", choices=["audit", "repro"], default="repro")
+    parser.add_argument("--mode", choices=["audit", "repro"], default=None)
     parser.add_argument("--workspace", default=os.environ.get("PWD", "/workspace"))
     parser.add_argument("--scratch", default=os.environ.get("TEST_TMPDIR", tempfile.gettempdir()))
-    parser.add_argument("--phase", default="verify")
+    parser.add_argument("--phase", default=None)
     parser.add_argument("--code")
     parser.add_argument("--timeout", type=int, default=20)
     args = parser.parse_args()
+    if args.mode is None and args.phase is None:
+        emit_corrected_example("mode and phase were both omitted")
+    if args.mode is None:
+        args.mode = "repro"
+    if args.phase is None:
+        args.phase = "verify"
     try:
         result = (
             audit(args.workspace)

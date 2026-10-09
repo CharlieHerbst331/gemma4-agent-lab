@@ -18,13 +18,15 @@ time_seconds_remaining. get_status reports max_turns but never turns used. If th
 issue and hints are only an issue number with no behavior clue, return UNCERTAIN
 and loop_iteration immediately. No searches, no edits. Hand off when
 time_seconds_remaining is about 90 or less, even if the check is unfinished, so
-verify still has its 60 second submit margin. By about 30 counted calls
-(tool_calls_used), or when tool_calls_remaining is about 18, you must have
-edited a source file. Never read more than about 8 files before that first
-edit. If you are still unsure and the issue text is more than an issue number,
-make the smallest change the issue text implies and report it so verify can
-submit. Empty submit stays only for that UNCERTAIN path, when the issue text
-is only an issue number, such as Fix #3104.
+verify still has its 60 second submit margin. The primary edit point is about
+12 counted calls or about 95 seconds, in step 3. That comes first. The hard
+backstop is later: by about 30 counted calls (tool_calls_used), or when
+tool_calls_remaining is about 18, you must have edited a source file. Never
+read more than about 8 files before that first edit. If you reach the backstop
+still unsure and the issue text is more than an issue number, make the smallest
+change the issue text implies and report it so verify can submit. Empty submit
+stays only for that UNCERTAIN path, when the issue text is only an issue
+number, such as Fix #3104.
 
 1. Open the triage files first. Use read_file with integer start and end, at most
    80 lines (end - start < 80). Use source-lookup for a literal that is not a known
@@ -49,18 +51,22 @@ is only an issue number, such as Fix #3104.
 
 3. Make a provisional implementation edit by about 12 counted calls
    (get_status tool_calls_used) or about 95 seconds (agent_elapsed_seconds),
-   whichever comes first. 95 seconds is 35 percent of the 270 second cap. Do not
-   keep searching past that point. Use edit_file. Keep old_string and new_string
-   to a few plain lines. No backticks, no \n escapes, and no quote-heavy strings.
-   After one missing-parameter error, retry a smaller edit. After a second
-   failure, use run_command with a short Python snippet to rewrite the line. A
-   run_command edit must not touch protected paths: tests, conftest.py, pyproject.toml, or setup.cfg.
+   whichever comes first. 95 seconds is 35 percent of the 270 second cap. This
+   12-call or 95-second edit is the primary rule. The about-30-call or
+   about-18-remaining line above is only the hard backstop. Do not keep
+   searching past the primary point. Use edit_file. Keep old_string and
+   new_string to a few plain lines. No backticks, no \n escapes, and no
+   quote-heavy strings. After one missing-parameter error, retry a smaller edit.
+   After a second failure, use run_command with a short Python snippet
+   to rewrite the line. If that rewrite fails too, stop editing and end with the final report
+   so verify can submit the current diff. Do not send a
+   text-only reply that only repeats the error. A run_command edit must not touch protected paths: tests, conftest.py, pyproject.toml, or setup.cfg.
    Do not edit a path the verify-patch audit flags:
    conftest.py, pytest.ini, pyproject.toml, tox.ini, setup.cfg, sitecustomize.py,
    any .pth file, test_*.py, *_test.py, or a .py file under tests, test, or testing.
 
 4. Check the workspace copy with verify-patch. One full call:
-   {"skill_name":"verify-patch","file_path":"scripts/check.py","args":{"mode":"repro","phase":"before","code":"assert True","timeout":"20"}}
+   {"skill_name":"verify-patch","file_path":"scripts/check.py","args":{"mode":"repro","phase":"before","code":"assert 1 == 2  # put the real failing assert here","timeout":"20"}}
    Never put skill_name or file_path inside args. That JSON is the call shape.
    Put the real failing assert in code. If a tool returns the same error twice, do not repeat that call.
    Switch to run_command or edit_file. The script must

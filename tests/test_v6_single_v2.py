@@ -15,8 +15,10 @@ SINGLE = ROOT / "single-v2"
 PARENTS = {"structured-v5t0": ROOT / "structured-v5t0", "single-v1t0": ROOT / "single-v1t0"}
 EXAMPLE = (
     '{"skill_name":"verify-patch","file_path":"scripts/check.py",'
-    '"args":{"mode":"repro","phase":"before","code":"assert True","timeout":"20"}}'
+    '"args":{"mode":"repro","phase":"before",'
+    '"code":"assert 1 == 2  # put the real failing assert here","timeout":"20"}}'
 )
+PLACEHOLDER = "assert 1 == 2  # put the real failing assert here"
 NEVER_NEST = "Never put skill_name or file_path inside args"
 LOOP = "If a tool returns the same error twice, do not repeat that call."
 SHARED = (
@@ -68,8 +70,9 @@ def test_check_defaults_to_repro_and_prints_a_corrected_example(tmp_path):
     for candidate in (V6, SINGLE):
         script = candidate / "skills/verify-patch/scripts/check.py"
         text = script.read_text()
-        assert 'default="repro"' in text or "default='repro'" in text
-        assert "A missing mode" in text
+        assert 'args.mode = "repro"' in text
+        assert "the default is repro" in text
+        assert json.loads(EXAMPLE)["args"]["code"] == PLACEHOLDER
         default = subprocess.run(
             [
                 sys.executable,
@@ -109,8 +112,31 @@ def test_check_defaults_to_repro_and_prints_a_corrected_example(tmp_path):
         assert error["example_call"]["skill_name"] == "verify-patch"
         assert error["example_call"]["file_path"] == "scripts/check.py"
         assert "skill_name" not in error["example_call"]["args"]
+        assert error["example_call"]["args"]["code"] == PLACEHOLDER
         assert "usage:" not in broken.stdout.lower()
         assert "usage:" not in broken.stderr.lower()
+        omitted = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--workspace",
+                str(root),
+                "--scratch",
+                str(scratch),
+                "--code",
+                PLACEHOLDER,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert omitted.returncode == 2
+        omitted_error = json.loads(omitted.stdout)
+        assert EXAMPLE in omitted_error["error"]
+        assert omitted_error["example_call"]["args"]["code"] == PLACEHOLDER
+        assert "Baseline repro changed" not in omitted.stdout
+        assert "usage:" not in omitted.stdout.lower()
+        assert "usage:" not in omitted.stderr.lower()
 
 
 def test_prompts_and_skill_carry_the_call_shape_and_fallbacks():
@@ -122,6 +148,8 @@ def test_prompts_and_skill_carry_the_call_shape_and_fallbacks():
         "single": (SINGLE / "prompts/system.md").read_text(),
     }
     assert texts["v6-skill"] == texts["single-skill"]
+    assert json.loads(EXAMPLE)["args"]["phase"] == "before"
+    assert "Verify has no run_command" in texts["v6-skill"]
     for name, text in texts.items():
         assert EXAMPLE in text, name
         assert NEVER_NEST in text, name
@@ -141,6 +169,31 @@ def test_prompts_and_skill_carry_the_call_shape_and_fallbacks():
         assert "No backticks" in text
     assert "No searches, no edits." in texts["repair"]
     assert "Do not search." in texts["single"]
+    assert "primary edit point" in texts["repair"]
+    assert "primary edit point" in texts["single"]
+    assert "hard backstop" in texts["repair"]
+    assert "hard backstop" in texts["single"]
+    assert "only the hard backstop" in texts["repair"]
+    assert "only the hard backstop" in texts["single"]
+    for name in ("repair", "single"):
+        assert "12 counted calls" in texts[name]
+        assert "95 seconds" in texts[name]
+    assert (
+        "If that rewrite fails too, stop editing and end with the final report" in texts["repair"]
+    )
+    assert (
+        "If that rewrite fails too, stop editing and call submit_patch with the current diff"
+        in texts["single"]
+    )
+    assert "A best-guess edit is allowed only on the last iteration" in texts["verify"]
+    assert "Hand back to repair" in texts["verify"]
+    assert "If under 20 s remain, submit as is" in texts["verify"]
+    assert "If under 20 s remain, submit as is" in texts["single"]
+    assert "stop editing and call submit_patch with the current diff" in texts["verify"]
+    assert (
+        "make the smallest change the issue text implies, then submit that edit"
+        not in texts["verify"]
+    )
     for name in ("repair", "single"):
         text = texts[name]
         assert "short Python snippet" in text
