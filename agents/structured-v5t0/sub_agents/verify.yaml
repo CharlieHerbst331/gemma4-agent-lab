@@ -1,0 +1,19 @@
+agent_class: LlmAgent
+name: verify
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Check the workspace copy and submit. submit_patch is the final action.
+instruction: !include verify.md
+generate_content_config:
+  temperature: 0.5
+  top_p: 0.95
+  # 1536 completion tokens leaves a 31232-token prompt ceiling inside 32768.
+  max_output_tokens: 1536
+  thinking_config: !include thinking.yaml
+tools:
+- get_status
+- read_file
+- edit_file
+- submit_patch
+include_contents: none
+skills:
+- skills/verify-patch

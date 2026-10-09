@@ -42,6 +42,8 @@ Research/training plans: [RESEARCH](docs/RESEARCH.md), [PORTFOLIO](docs/PORTFOLI
 | agents/structured-v4 | Five-minute evaluated development candidate | Diagnostic1/3, zero skill calls, two timeouts |
 | agents/structured-v4-10m | Latest evaluated development candidate; not submitted | Same diagnostic3/3, two paired wins; scratch/fallback issues remain |
 | agents/structured-v5 | Unevaluated fork; not submitted | No score. See docs/STRUCTURED_V5.md |
+| agents/structured-v5t0 | Unevaluated thinking-off copy of structured-v5 | No score. See docs/THINKING_OFF_T0.md |
+| agents/single-v1t0 | Unevaluated thinking-off copy of single-v1 | No score. Paired with structured-v5t0 |
 
 Latest archive SHA256:
 `0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.

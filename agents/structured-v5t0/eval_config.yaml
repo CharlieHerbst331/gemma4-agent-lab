@@ -1,0 +1,13 @@
+evaluation:
+  # 4.5 minutes = 270 seconds. The harness reads max_time_minutes.
+  # 48 counted calls is inside the 40-60 band. Skill script runs count as
+  # tool calls, so turns and counted calls are roughly co-binding. The 270s
+  # clock usually binds before either. 64 turns keeps the turn cap from being
+  # clearly tighter than the call cap: get_status, submit_patch, skill loads,
+  # and text replies cost turns but not counted calls, and get_status never
+  # reports turns used. timeout_seconds is the per-command ceiling; remaining
+  # task time lowers it further.
+  timeout_seconds: 300
+  max_tool_calls: 48
+  max_time_minutes: 4.5
+  max_turns: 64
