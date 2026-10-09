@@ -360,6 +360,10 @@ def _strip_paired_budget_prelude(source):
     return source
 
 
+WHEELHOUSE_DATASET = "metric/gemma-4-developer-agent-wheelhouse"
+# Wheelhouse v29, the Kaggle crash environment: swegemma 0.2.10, adk-submission 0.2.13.
+HARNESS_PINS = {"swegemma": "0.2.10", "adk-submission": "0.2.13"}
+
 _WHEEL_ANCHOR = "# Remove broken cutlass .pth hooks if present"
 _WHEEL_INSERT = """if not any(WHEELHOUSE_DIR.glob('*.whl')):
     matches = [p for p in Path('/kaggle/input').rglob('gemma-4-developer-agent-wheelhouse')
@@ -371,6 +375,51 @@ _WHEEL_INSERT = """if not any(WHEELHOUSE_DIR.glob('*.whl')):
 # Remove broken cutlass .pth hooks if present"""
 
 
+def _wheelhouse_source(version):
+    """Dataset source accepted by kaggle-api ``validate_dataset_string``.
+
+    The CLI allows ``{username}/{dataset-slug}/{version-number}`` (three
+    parts). ``owner/slug/versions/29`` is four parts and is rejected.
+    """
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ValueError("wheelhouse_version is required and must be a positive integer")
+    return f"{WHEELHOUSE_DATASET}/{version}"
+
+
+def _pin_dataset_sources(sources, version):
+    pinned = _wheelhouse_source(version)
+    kept = []
+    for item in sources or []:
+        text = str(item)
+        if text == WHEELHOUSE_DATASET or text.startswith(WHEELHOUSE_DATASET + "/"):
+            continue
+        kept.append(item)
+    return [pinned, *kept]
+
+
+def _harness_pin_block(pins):
+    return (
+        "import importlib.metadata as _pkg_metadata\n"
+        f"_HARNESS_PINS = {pins!r}\n"
+        "for _pkg, _expected in _HARNESS_PINS.items():\n"
+        "    try:\n"
+        "        _installed = _pkg_metadata.version(_pkg)\n"
+        "    except _pkg_metadata.PackageNotFoundError:\n"
+        "        raise RuntimeError(\n"
+        "            'Wheelhouse pin failed before model load: '\n"
+        "            f'{_pkg} is not installed; expected {_expected}. '\n"
+        "            'Refusing to start the model server.'\n"
+        "        ) from None\n"
+        "    if _installed != _expected:\n"
+        "        raise RuntimeError(\n"
+        "            'Wheelhouse pin failed before model load: '\n"
+        "            f'{_pkg} {_installed} != {_expected}. '\n"
+        "            'Refusing to start the model server.'\n"
+        "        )\n"
+        "print('Harness pins', _HARNESS_PINS)\n"
+    )
+
+
 def generate_pair(
     protocol_path,
     owner,
@@ -379,6 +428,7 @@ def generate_pair(
     repeats_in_session="1",
     prior_run=None,
     bundle_datasets=None,
+    wheelhouse_version=None,
 ):
     """Generate a two-arm notebook. generate() is not used and its cells stay unchanged."""
     from gemma_lab.paired import (
@@ -396,6 +446,7 @@ def generate_pair(
 
     if not re.fullmatch(r"[a-zA-Z0-9_-]+", owner) or not re.fullmatch(r"[a-z0-9-]+", slug):
         raise ValueError("Invalid Kaggle owner or notebook slug")
+    wheelhouse_source = _wheelhouse_source(wheelhouse_version)
     protocol = load_protocol(protocol_path)
     if protocol.get("pins_mode") not in {"record", "enforce"}:
         raise ValueError("pins_mode must be record or enforce")
@@ -468,9 +519,13 @@ def generate_pair(
         sha_b=packed["B"]["sha256"],
     )
     budgets = {label: packed[label]["budgets"] for label in ("A", "B")}
+    wheel_cell = codes[0].replace(_WHEEL_ANCHOR, _WHEEL_INSERT)
+    if not wheel_cell.endswith("\n"):
+        wheel_cell += "\n"
     codes[0] = (
         "import time\nSESSION_WALL_T0 = time.time()\nSESSION_PERF_T0 = time.perf_counter()\n"
-        + codes[0].replace(_WHEEL_ANCHOR, _WHEEL_INSERT)
+        + wheel_cell
+        + _harness_pin_block(HARNESS_PINS)
     )
     codes[1] = _pair_payload_cell(protocol, packed, cohort_ids, schedule, session_repeats, pins)
     codes[3] = _pair_server_cell(codes[3], protocol, pins)
@@ -523,7 +578,7 @@ def generate_pair(
         }
     )
     meta.pop("id_no", None)
-    meta.setdefault("dataset_sources", [])
+    meta["dataset_sources"] = _pin_dataset_sources(meta.get("dataset_sources"), wheelhouse_version)
     for dataset in datasets.values():
         if dataset not in meta["dataset_sources"]:
             meta["dataset_sources"].append(dataset)
@@ -548,6 +603,9 @@ def generate_pair(
         "repeats_in_session": session_repeats,
         "skipped_arm": skipped,
         "pins_mode": protocol["pins_mode"],
+        "wheelhouse_dataset": wheelhouse_source,
+        "wheelhouse_version": wheelhouse_version,
+        "harness_pins": dict(HARNESS_PINS),
         "arms": arm_provenance,
         "status": "generated",
     }

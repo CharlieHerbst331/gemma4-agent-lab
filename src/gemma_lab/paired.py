@@ -1785,34 +1785,84 @@ def server_process_pid(server):
 
 
 def start_model_server(server):
-    """Call ``server.start()`` with subprocesses in their own session."""
+    """Call ``server.start()`` with subprocesses in their own session.
+
+    Only real modules are patched, by identity with ``subprocess`` or with
+    its original ``Popen``. Reads go through the module dict and
+    ``inspect.getattr_static`` so a lazy namespace such as ``torch.classes``
+    cannot run ``__getattr__``. The notebook does not star-import this name.
+    """
     import subprocess
     import sys
+    import types
 
     original = subprocess.Popen
+    subprocess_module = sys.modules.get("subprocess", subprocess)
+    missing = object()
 
     def patched(*args, **kwargs):
         kwargs["start_new_session"] = True
         return original(*args, **kwargs)
 
+    def read_attr(module, name):
+        try:
+            mapping = object.__getattribute__(module, "__dict__")
+            if name in mapping:
+                return mapping[name]
+        except Exception:
+            pass
+        try:
+            return inspect.getattr_static(module, name)
+        except Exception:
+            return missing
+
+    def assign_popen(module, value):
+        try:
+            mapping = object.__getattribute__(module, "__dict__")
+            mapping["Popen"] = value
+            return True
+        except Exception:
+            pass
+        try:
+            module.Popen = value
+            return True
+        except Exception:
+            return False
+
     restored = []
-    subprocess.Popen = patched
-    for module in list(sys.modules.values()):
-        if module is None:
-            continue
-        if getattr(module, "Popen", None) is original:
-            module.Popen = patched
+    seen = set()
+
+    def patch_holder(module):
+        if module is None or id(module) in seen:
+            return
+        if not isinstance(module, types.ModuleType):
+            return
+        seen.add(id(module))
+        if read_attr(module, "Popen") is not original:
+            return
+        if assign_popen(module, patched):
             restored.append(module)
-        nested = getattr(module, "subprocess", None)
-        if nested is not None and getattr(nested, "Popen", None) is original:
-            nested.Popen = patched
-            restored.append(nested)
+
+    def consider(module):
+        if not isinstance(module, types.ModuleType):
+            return
+        patch_holder(module)
+        nested = read_attr(module, "subprocess")
+        if isinstance(nested, types.ModuleType) and nested is subprocess_module:
+            patch_holder(nested)
+
     try:
+        consider(subprocess_module)
+        for module in list(sys.modules.values()):
+            try:
+                consider(module)
+            except Exception:
+                continue
         return server.start()
     finally:
-        subprocess.Popen = original
-        for module in restored:
-            module.Popen = original
+        for module in reversed(restored):
+            assign_popen(module, original)
+        assign_popen(subprocess, original)
 
 
 def session_pgid(pid):
