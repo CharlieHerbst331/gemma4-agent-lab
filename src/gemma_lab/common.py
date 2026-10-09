@@ -28,16 +28,26 @@ def write_json(path: Path, value):
 
 
 def kaggle(*args, timeout=120):
-    # Use this environment's installed CLI, and let it handle authentication.
+    """Run the Kaggle CLI in this environment and let it handle authentication.
+
+    ``kernels push`` prints ``not valid dataset sources`` and still exits 0
+    when Kaggle drops a dataset source, including the wheelhouse ``/N`` pin,
+    after the kernel push itself succeeded. That warning is not a failure.
+    """
     proc = subprocess.run(
         [sys.executable, "-m", "kaggle", *map(str, args)],
         capture_output=True,
         text=True,
         timeout=timeout,
     )
-    if proc.returncode:
-        raise RuntimeError((proc.stderr or proc.stdout).strip())
-    return proc.stdout
+    stdout = proc.stdout or ""
+    stderr = proc.stderr or ""
+    if proc.returncode == 0:
+        return stdout
+    combined = stdout + stderr
+    if "not valid dataset sources" in combined and "successfully pushed" in combined:
+        return stdout
+    raise RuntimeError((stderr or stdout).strip())
 
 
 def _git(args, cwd=None):

@@ -276,7 +276,8 @@ spacing, or a dead server process, restart once and rerun that task.
 `attempt`), `health_poll` (`url`, `status`, `latency_seconds`), `task_retry`,
 and `gpu_memory` (`phase` `before_task` or `after_task`; `gpus` of `index`,
 `memory_used_mib`, `memory_total_mib`). `server.log` is a best-effort copy of
-the vLLM log after start and on abort or restart.
+the vLLM log after the server starts, again before a restart, and on abort.
+It is not copied at normal session end.
 
 ## Hygiene in the pair report
 
@@ -308,6 +309,23 @@ eligible; runtime gates are not applied. The frozen 13-task protocols are unchan
 Verified on swegemma 0.2.10 and 0.2.11 with adk-submission 0.2.13. swegemma
 0.2.11 removed the `swegemma.models` discovery and registry helpers, including
 `validate_single_declared_model`. Generated notebooks try that import and fall
-back to `adk_submission.discovery.discover_declared_models`. The wheelhouse
-`/N` pin records intent only; Kaggle mounts its current wheelhouse. Real
-0.2.10 and 0.2.11 wheels were not installed here.
+back to `adk_submission.discovery.discover_declared_models`. Kaggle ignores
+the `/N` dataset pin and mounts the latest wheelhouse version. The allow-list
+in the first code cell and the recorded installed versions are the real
+control. `wheelhouse_version` records intent only.
+
+Which file holds what:
+
+- Generation-time `pair_manifest.json` and `provenance.json` list the
+  allow-list as `harness_verified_pairs`. They do not record installed
+  versions, because the kernel has not run.
+- The kernel writes `/kaggle/working/run_manifest.json` from that allow-list
+  cell, merging `installed_harness`, `swegemma`, and `adk-submission` into any
+  existing keys.
+- Each arm's `results/<arm>/r<k>/run_manifest.json` copies those installed
+  versions next to `model_load_seconds` and the task ids.
+- After the session, the kernel's `pair_manifest.json` (not the generation-time
+  file) gains `installed_harness`. The pair report header and
+  `pair_report.json` `harness_versions` read that post-run record.
+
+Real 0.2.10 and 0.2.11 wheels were not installed here.

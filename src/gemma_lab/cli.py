@@ -62,8 +62,10 @@ def main(argv=None):
         required=True,
         help=(
             "Positive integer Kaggle wheelhouse dataset version. Recorded in "
-            "kernel-metadata.json and pair_manifest.json. Kaggle ignores the /N pin "
-            "and mounts its current wheelhouse, so this records intent only."
+            "kernel-metadata.json and the generation-time pair_manifest.json. "
+            "Kaggle ignores the /N dataset pin and mounts the latest wheelhouse "
+            "version, so this records intent only. The first-code-cell allow-list "
+            "and the recorded installed versions are the real control."
         ),
     )
     notebook_pair.add_argument(

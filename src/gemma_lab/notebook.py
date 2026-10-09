@@ -369,7 +369,10 @@ WHEELHOUSE_DATASET = "metric/gemma-4-developer-agent-wheelhouse"
 # swegemma 0.2.11 removed swegemma.models.discovery, swegemma.models.registry,
 # and the re-exports discover_declared_models, normalize_model_name,
 # resolve_local_model_path, resolve_swegemma_adapter, setup_gemma_model_registry,
-# and validate_single_declared_model. Kaggle ignores the wheelhouse /N pin.
+# and validate_single_declared_model. Kaggle ignores the /N dataset pin and
+# mounts the latest wheelhouse version. The allow-list in the first code cell
+# and the installed versions recorded after the run are the real control.
+# wheelhouse_version is intent only.
 HARNESS_VERIFIED = (
     ("0.2.10", "0.2.13"),
     ("0.2.11", "0.2.13"),
@@ -438,12 +441,13 @@ def _pin_dataset_sources(sources, version):
     return [pinned, *kept]
 
 
-def harness_pins_record():
-    """Allow-list written to pair_manifest.json. Not a single equality pin."""
-    return {
-        "packages": ["swegemma", "adk-submission"],
-        "verified": [list(pair) for pair in HARNESS_VERIFIED],
-    }
+def harness_verified_pairs():
+    """Allow-list for the generation-time pair_manifest.json.
+
+    This is not an installed-version pin and not one required pair. The kernel
+    has not run yet, so this file does not record installed versions.
+    """
+    return [{"swegemma": swegemma, "adk-submission": adk} for swegemma, adk in HARNESS_VERIFIED]
 
 
 def _harness_pin_block():
@@ -487,6 +491,10 @@ def _harness_pin_block():
         "    _packages['swegemma'] = installed[0]\n"
         "    _packages['adk-submission'] = installed[1]\n"
         "    _saved['packages'] = _packages\n"
+        "    _saved['installed_harness'] = {\n"
+        "        'swegemma': installed[0],\n"
+        "        'adk-submission': installed[1],\n"
+        "    }\n"
         "    RUN_PROVENANCE = _saved\n"
         "    _manifest_path.parent.mkdir(parents=True, exist_ok=True)\n"
         "    _manifest_path.write_text(_harness_json.dumps(_saved, indent=2) + '\\n')\n"
@@ -722,7 +730,7 @@ def generate_pair(
         "pins_mode": protocol["pins_mode"],
         "wheelhouse_dataset": wheelhouse_source,
         "wheelhouse_version": wheelhouse_version,
-        "harness_pins": harness_pins_record(),
+        "harness_verified_pairs": harness_verified_pairs(),
         "arms": arm_provenance,
         "status": "generated",
     }

@@ -3,7 +3,10 @@
 Unevaluated copies of the frozen parents `agents/structured-v5` and
 `agents/single-v1`. Neither parent directory is edited. No score is claimed.
 
-Verified on swegemma 0.2.10 and 0.2.11 with adk-submission 0.2.13. swegemma
+Verified on swegemma 0.2.10 and 0.2.11 with adk-submission 0.2.13. Kaggle
+ignores the `/N` dataset pin and mounts the latest wheelhouse version, so the
+first-code-cell allow-list and the recorded installed versions are the real
+control. swegemma
 0.2.11 removed the `swegemma.models` discovery and registry helpers. On
 adk-submission 0.2.13 with swegemma 0.2.10, `include_thoughts: false` with
 no `thinking_budget` no longer turns thinking off. swegemma's default budget

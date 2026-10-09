@@ -552,10 +552,11 @@ def test_pair_pins_wheelhouse_version_and_harness(tmp_path, monkeypatch, capsys)
         record = json.loads((output / name).read_text())
         assert record["wheelhouse_version"] == 29
         assert record["wheelhouse_dataset"] == "metric/gemma-4-developer-agent-wheelhouse/29"
-        assert record["harness_pins"] == {
-            "packages": ["swegemma", "adk-submission"],
-            "verified": [["0.2.10", "0.2.13"], ["0.2.11", "0.2.13"]],
-        }
+        assert record["harness_verified_pairs"] == [
+            {"swegemma": "0.2.10", "adk-submission": "0.2.13"},
+            {"swegemma": "0.2.11", "adk-submission": "0.2.13"},
+        ]
+        assert "harness_pins" not in record
     _run_pin(first, {"swegemma": "0.2.10", "adk-submission": "0.2.13"}, monkeypatch)
     _run_pin(first, {"swegemma": "0.2.11", "adk-submission": "0.2.13"}, monkeypatch)
     assert "Harness verified" in capsys.readouterr().out

@@ -244,8 +244,14 @@ def test_allow_list_accepts_verified_pairs_and_rejects_the_rest(tmp_path, monkey
     assert saved["model_load_seconds"] == 3
     assert saved["task_ids"] == ["fastapi_14786"]
     assert saved["harness_verified"] is True
+    assert saved["swegemma"] == "0.2.11"
+    assert saved["adk-submission"] == "0.2.13"
     assert saved["packages"]["swegemma"] == "0.2.11"
     assert saved["packages"]["adk-submission"] == "0.2.13"
+    assert saved["installed_harness"] == {
+        "swegemma": "0.2.11",
+        "adk-submission": "0.2.13",
+    }
     rejected = (
         ("0.2.12", "0.2.13"),
         ("0.2.10", "0.2.12"),
@@ -313,5 +319,114 @@ def test_wheelhouse_version_help_records_intent_only(monkeypatch, capsys):
     assert "Positive integer Kaggle wheelhouse dataset version" in text
     assert "kernel-metadata.json" in text
     assert "pair_manifest.json" in text
-    assert "Kaggle ignores the /N pin" in text
+    assert "Kaggle ignores the /N dataset pin" in text
+    assert "mounts the latest wheelhouse" in text
     assert "records intent only" in text
+    assert "real control" in text
+
+
+def test_report_reads_installed_harness_from_run_manifest(tmp_path):
+    root = tmp_path / "run"
+    root.mkdir()
+    rows = []
+    for arm in ("A", "B"):
+        rows.append(
+            {
+                "arm": arm,
+                "repeat": 1,
+                "task_id": "fastapi_14786",
+                "resolved": False,
+                "wall_seconds": 1,
+                "hit_cap": {},
+            }
+        )
+    (root / "pair_results.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+    (root / "pair_manifest.json").write_text(
+        json.dumps(
+            {
+                "harness_verified_pairs": [
+                    {"swegemma": "0.2.10", "adk-submission": "0.2.13"},
+                    {"swegemma": "0.2.11", "adk-submission": "0.2.13"},
+                ],
+                "status": "complete",
+            }
+        )
+    )
+    (root / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "installed_harness": {"swegemma": "0.2.11", "adk-submission": "0.2.13"},
+                "harness_verified": True,
+                "task_ids": ["fastapi_14786"],
+            }
+        )
+    )
+    output = tmp_path / "report"
+    report_from_runs([root], SMOKE, output)
+    saved = json.loads((output / "pair_report.json").read_text())
+    text = (output / "pair_report.md").read_text()
+    assert saved["harness_versions"][0]["swegemma"] == "0.2.11"
+    assert saved["harness_versions"][0]["adk-submission"] == "0.2.13"
+    assert "Harness: swegemma 0.2.11, adk-submission 0.2.13" in text
+
+
+def test_kaggle_dataset_source_warning_with_exit_zero_is_success(monkeypatch):
+    import subprocess
+
+    def fake_run(cmd, capture_output, text, timeout):
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=(
+                "The following are not valid dataset sources and could not be added "
+                "to the kernel: ['metric/gemma-4-developer-agent-wheelhouse/30']\n"
+                "Kernel version 3 successfully pushed.\n"
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr("gemma_lab.common.subprocess.run", fake_run)
+    from gemma_lab.common import kaggle
+
+    out = kaggle("kernels", "push", "-p", "folder")
+    assert "not valid dataset sources" in out
+    assert "successfully pushed" in out
+
+
+def test_kaggle_dataset_source_warning_with_successful_push_is_success(monkeypatch):
+    import subprocess
+
+    def fake_run(cmd, capture_output, text, timeout):
+        return subprocess.CompletedProcess(
+            cmd,
+            1,
+            stdout="Kernel version 3 successfully pushed.\n",
+            stderr=(
+                "The following are not valid dataset sources and could not be added "
+                "to the kernel: ['metric/gemma-4-developer-agent-wheelhouse/30']\n"
+            ),
+        )
+
+    monkeypatch.setattr("gemma_lab.common.subprocess.run", fake_run)
+    from gemma_lab.common import kaggle
+
+    out = kaggle("kernels", "push", "-p", "folder")
+    assert "successfully pushed" in out
+
+
+def test_kaggle_nonzero_without_successful_push_still_raises(monkeypatch):
+    import subprocess
+
+    def fake_run(cmd, capture_output, text, timeout):
+        return subprocess.CompletedProcess(
+            cmd,
+            1,
+            stdout="",
+            stderr="The following are not valid dataset sources and the push failed",
+        )
+
+    monkeypatch.setattr("gemma_lab.common.subprocess.run", fake_run)
+    from gemma_lab.common import kaggle
+
+    with pytest.raises(RuntimeError, match="not valid dataset sources"):
+        kaggle("kernels", "push", "-p", "folder")
