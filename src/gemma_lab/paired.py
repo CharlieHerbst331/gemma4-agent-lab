@@ -1267,6 +1267,156 @@ def _session_stopped(status):
     return str(status).startswith("aborted:") or status == "truncated_by_budget"
 
 
+HEALTH_FAILURES_BEFORE_RESTART = 3
+HEALTH_FAILURE_SPACING_SECONDS = 2.0
+STARTUP_HEALTH_POLLS = 3
+
+
+def model_server_root(server):
+    """Root origin for ``/health`` and ``/metrics``.
+
+    ``health_url`` wins when the server exposes it (the harness value is
+    ``http://host:port/health``). Otherwise a trailing ``/v1`` is removed from
+    ``base_url``, because vLLM serves those paths at the root only.
+    """
+    health_url = getattr(server, "health_url", None)
+    if isinstance(health_url, str) and health_url.strip():
+        text = health_url.strip().rstrip("/")
+        if text.endswith("/health"):
+            text = text[: -len("/health")]
+        return text.rstrip("/")
+    base = str(getattr(server, "base_url", "") or "").strip().rstrip("/")
+    if base.endswith("/v1"):
+        base = base[: -len("/v1")]
+    return base.rstrip("/")
+
+
+def model_health_url(server):
+    health_url = getattr(server, "health_url", None)
+    if isinstance(health_url, str) and health_url.strip():
+        return health_url.strip()
+    return model_server_root(server) + "/health"
+
+
+def model_metrics_url(server):
+    return model_server_root(server) + "/metrics"
+
+
+def server_process_exited(server):
+    """True when ``server.process.poll()`` shows the process has exited.
+
+    A missing ``process`` attribute, or a missing ``poll``, is not an exit.
+    """
+    process = getattr(server, "process", None)
+    if process is None:
+        return False
+    poll = getattr(process, "poll", None)
+    if not callable(poll):
+        return False
+    try:
+        return poll() is not None
+    except Exception:
+        return False
+
+
+def probe_http(url, timeout):
+    """GET ``url``. HTTP 4xx/5xx are ``http_error``; other failures are connection errors."""
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            status = int(getattr(resp, "status", 200))
+            body = resp.read()
+    except urllib.error.HTTPError as exc:
+        return {
+            "ok": False,
+            "url": url,
+            "status": getattr(exc, "code", None),
+            "error": repr(exc),
+            "kind": "http_error",
+            "body": None,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "url": url,
+            "status": None,
+            "error": repr(exc),
+            "kind": "connection_error",
+            "body": None,
+        }
+    ok = 200 <= status < 300
+    return {
+        "ok": ok,
+        "url": url,
+        "status": status,
+        "error": None if ok else repr(status),
+        "kind": None if ok else "http_error",
+        "body": body,
+    }
+
+
+def probe_model_health(server, timeout=5):
+    result = probe_http(model_health_url(server), timeout)
+    result["process_exited"] = server_process_exited(server)
+    return result
+
+
+def read_model_prefix_cache(server, timeout=2):
+    result = probe_http(model_metrics_url(server), timeout)
+    if not result.get("ok"):
+        return None
+    body = result.get("body")
+    if isinstance(body, bytes):
+        body = body.decode("utf-8", "replace")
+    if not isinstance(body, str):
+        return None
+    return parse_prefix_cache_metrics(body)
+
+
+def copy_server_log(server, dest):
+    """Copy ``server.log_path`` to ``dest``. Best effort: never raises."""
+    try:
+        path = getattr(server, "log_path", None)
+        if not path:
+            return False
+        source = _Path(path)
+        if not source.is_file():
+            return False
+        target = _Path(dest)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(source.read_bytes())
+        return True
+    except Exception:
+        return False
+
+
+def record_startup_health(server, events_path, attempts=STARTUP_HEALTH_POLLS, timeout=5):
+    """Record the first health polls after a server start. Never raises."""
+    for attempt in range(1, int(attempts) + 1):
+        started = _time.perf_counter()
+        try:
+            result = probe_model_health(server, timeout=timeout)
+        except Exception as exc:
+            result = {"ok": False, "url": None, "status": None, "error": repr(exc)}
+        latency = _time.perf_counter() - started
+        try:
+            append_jsonl(
+                events_path,
+                {
+                    "event": "health_poll",
+                    "url": result.get("url"),
+                    "status": result.get("status"),
+                    "latency_seconds": latency,
+                    "attempt": attempt,
+                    "ok": bool(result.get("ok")),
+                },
+            )
+        except Exception:
+            return
+
+
 def execute_session(
     *,
     schedule,
@@ -1297,6 +1447,9 @@ def execute_session(
     protocol_sha256=None,
     requested_tier=2,
     initial_stopped=None,
+    health_pause=None,
+    capture_server_log=None,
+    read_gpu_memory=None,
 ):
     output_dir = _Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1310,6 +1463,7 @@ def execute_session(
     rows = []
     walls = []
     restarts = 0
+    retried_tasks = set()
     post_restart = False
     stopped_arms = set(initial_stopped or ())
     status = "running"
@@ -1329,6 +1483,105 @@ def execute_session(
     def event(payload):
         payload = {"t": clock() - session_start, **payload}
         append_jsonl(events, payload)
+
+    def pause_health(seconds):
+        if health_pause is not None:
+            health_pause(seconds)
+        else:
+            _time.sleep(seconds)
+
+    def capture_log():
+        if capture_server_log is None:
+            return
+        try:
+            capture_server_log()
+        except Exception:
+            pass
+
+    def gpu_event(phase, arm_label, task_repeat, task_id):
+        snapshot = {"gpus": None, "error": None}
+        try:
+            reader = read_gpu_memory or gpu_memory_snapshot
+            raw = reader()
+            if isinstance(raw, dict):
+                snapshot = {"gpus": raw.get("gpus"), "error": raw.get("error")}
+            else:
+                snapshot = {"gpus": raw, "error": None}
+        except Exception as exc:
+            snapshot = {"gpus": None, "error": repr(exc)[:300]}
+        event(
+            {
+                "event": "gpu_memory",
+                "phase": phase,
+                "arm": arm_label,
+                "repeat": task_repeat,
+                "task_id": task_id,
+                "gpus": snapshot.get("gpus"),
+                "error": snapshot.get("error"),
+            }
+        )
+
+    def health_snapshot(value):
+        if isinstance(value, dict):
+            status = value.get("status")
+            kind = value.get("kind")
+            if kind is None and isinstance(status, int) and status >= 400:
+                kind = "http_error"
+            return {
+                "ok": bool(value.get("ok")),
+                "url": value.get("url"),
+                "status": status,
+                "error": value.get("error"),
+                "kind": kind,
+                "process_exited": bool(value.get("process_exited")),
+            }
+        return {
+            "ok": bool(value),
+            "url": None,
+            "status": None,
+            "error": None,
+            "kind": None,
+            "process_exited": False,
+        }
+
+    def log_health_failure(snap, attempt, arm_label, task_id, task_repeat, after_restart=False):
+        payload = {
+            "event": "health_check_failed",
+            "url": snap.get("url"),
+            "status": snap.get("status"),
+            "error": snap.get("error"),
+            "kind": snap.get("kind"),
+            "attempt": attempt,
+            "process_exited": snap.get("process_exited"),
+            "arm": arm_label,
+            "task_id": task_id,
+            "repeat": task_repeat,
+        }
+        if after_restart:
+            payload["after_restart"] = True
+        event(payload)
+
+    def poll_health(arm_label, task_id, task_repeat):
+        failures = 0
+        while True:
+            try:
+                snap = health_snapshot(health())
+            except Exception as exc:
+                snap = {
+                    "ok": False,
+                    "url": None,
+                    "status": None,
+                    "error": repr(exc),
+                    "kind": "connection_error",
+                    "process_exited": False,
+                }
+            if snap["ok"]:
+                return True, snap
+            failures += 1
+            log_health_failure(snap, failures, arm_label, task_id, task_repeat)
+            if snap.get("process_exited") or failures >= HEALTH_FAILURES_BEFORE_RESTART:
+                return False, snap
+            pause_health(HEALTH_FAILURE_SPACING_SECONDS)
 
     def persist():
         manifest["status"] = status
@@ -1389,6 +1642,7 @@ def execute_session(
             event(
                 {"event": "arm_run_start", "arm": arm, "repeat": repeat, "task_id": pair["task_id"]}
             )
+            gpu_event("before_task", arm, repeat, pair["task_id"])
             try:
                 verify_extracted_tree(meta["root"], meta["files"])
             except PinError as exc:
@@ -1396,6 +1650,7 @@ def execute_session(
                 row["error"] = "candidate_tree_mismatch"
                 row["arm"] = arm
                 row["crashed"] = True
+                gpu_event("after_task", arm, repeat, pair["task_id"])
                 _finish_row(
                     rows,
                     row,
@@ -1415,9 +1670,12 @@ def execute_session(
                 status = "aborted:candidate_tree_mismatch"
                 event({"event": "abort", "status": status})
                 break
-            if not health():
+            task_key = (arm, repeat, pair["task_id"])
+            healthy, _snap = poll_health(arm, pair["task_id"], repeat)
+            if not healthy:
                 recovered = False
-                if restarts < 1 and restart_server is not None:
+                if restarts < 1 and restart_server is not None and task_key not in retried_tasks:
+                    capture_log()
                     try:
                         load_seconds = restart_server()
                     except Exception as exc:
@@ -1426,39 +1684,58 @@ def execute_session(
                         restarts += 1
                         post_restart = True
                         event({"event": "server_restart", "load_seconds": load_seconds})
-                        recovered = bool(health())
-                row = crash_row(task, RuntimeError("model_server_unhealthy"))
-                row["error"] = "model_server_unhealthy"
-                _finish_row(
-                    rows,
-                    row,
-                    pair,
-                    meta,
-                    post_restart,
-                    planned,
-                    pair["order"],
-                    arm,
-                    import_origins,
-                    events,
-                    pair_results,
-                    timing_path,
-                    folder,
-                )
-                rewrite_run_manifest(arm, repeat)
-                if after_row is not None:
-                    _after(after_row, row, event)
+                        try:
+                            recheck = health_snapshot(health())
+                        except Exception as exc:
+                            recheck = {
+                                "ok": False,
+                                "url": None,
+                                "status": None,
+                                "error": repr(exc),
+                                "kind": "connection_error",
+                                "process_exited": False,
+                            }
+                        if recheck["ok"]:
+                            recovered = True
+                            retried_tasks.add(task_key)
+                            event(
+                                {
+                                    "event": "task_retry",
+                                    "arm": arm,
+                                    "task_id": pair["task_id"],
+                                    "repeat": repeat,
+                                }
+                            )
+                        else:
+                            log_health_failure(
+                                recheck, 1, arm, pair["task_id"], repeat, after_restart=True
+                            )
                 if not recovered:
+                    capture_log()
+                    row = crash_row(task, RuntimeError("model_server_unhealthy"))
+                    row["error"] = "model_server_unhealthy"
+                    gpu_event("after_task", arm, repeat, pair["task_id"])
+                    _finish_row(
+                        rows,
+                        row,
+                        pair,
+                        meta,
+                        post_restart,
+                        planned,
+                        pair["order"],
+                        arm,
+                        import_origins,
+                        events,
+                        pair_results,
+                        timing_path,
+                        folder,
+                    )
+                    rewrite_run_manifest(arm, repeat)
+                    if after_row is not None:
+                        _after(after_row, row, event)
                     status = "aborted:model_server"
                     event({"event": "abort", "status": status})
                     break
-                code = abort_code(
-                    [item for item in rows if item.get("arm") == arm], cap_seconds, arm
-                )
-                if code:
-                    status, stopped_arms = _apply_abort(code, arm, stopped_arms, event)
-                    if _session_stopped(status):
-                        break
-                continue
             if arm not in evaluators or evaluators[arm][0] != repeat:
                 evaluators[arm] = (repeat, rebuild(arm, repeat))
             sweep_sandboxes()
@@ -1544,6 +1821,7 @@ def execute_session(
                         delta[key] = value - previous
             prefix_previous = cache if isinstance(cache, dict) else prefix_previous
             row["prefix_cache"] = {"cumulative": cache, "delta": delta}
+            gpu_event("after_task", arm, repeat, pair["task_id"])
             _finish_row(
                 rows,
                 row,
@@ -2050,6 +2328,57 @@ def nvidia_smi_gpu_pids(timeout=NVIDIA_SMI_POLL_TIMEOUT_SECONDS):
         if piece.isdigit():
             pids.append(int(piece))
     return pids
+
+
+def gpu_memory_snapshot(timeout=5.0):
+    """Per-GPU memory from nvidia-smi. Failure returns an error and no rows."""
+    import shutil
+    import subprocess
+
+    if shutil.which("nvidia-smi") is None:
+        return {"gpus": None, "error": "nvidia-smi not found"}
+    proc = subprocess.Popen(
+        [
+            "nvidia-smi",
+            "--query-gpu=index,memory.used,memory.total",
+            "--format=csv,noheader,nounits",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _reap_nvidia_smi(proc)
+            return {"gpus": None, "error": "nvidia-smi timed out"}
+    finally:
+        for stream in (proc.stdout, proc.stderr):
+            if stream is not None:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+    if proc.returncode not in (0, None):
+        detail = (stderr or "nvidia-smi failed").strip()
+        return {"gpus": None, "error": detail[:300]}
+    gpus = []
+    for line in (stdout or "").splitlines():
+        parts = [piece.strip() for piece in line.split(",")]
+        if len(parts) < 3:
+            continue
+        try:
+            gpus.append(
+                {
+                    "index": int(parts[0]),
+                    "memory_used_mib": float(parts[1]),
+                    "memory_total_mib": float(parts[2]),
+                }
+            )
+        except ValueError:
+            continue
+    return {"gpus": gpus, "error": None}
 
 
 def wait_for_server_release(

@@ -551,6 +551,19 @@ def generate_pair(
                 "Restart refuses to signal process groups None, 0, -1, 1, and its own group. "
                 "Each nvidia-smi poll is capped at 10 s and by the time left in the "
                 "60 s release deadline. Only a full 10 s expiry is logged as unknown.\n",
+                "Health uses `health_url` when the server has one; otherwise the root is "
+                "`base_url` with a trailing `/v1` removed. `/health` and `/metrics` are "
+                "requested on that root. Three consecutive failures, 2 s apart, restart "
+                "the server once. A dead server process restarts immediately. When the "
+                "re-check passes, the same task runs once and no "
+                "`model_server_unhealthy` row is written.\n",
+                "`events.jsonl` records `health_check_failed` "
+                "(`url`, `status`, `error`, `kind`, `attempt`), `health_poll` for the "
+                "first three polls after each start (`url`, `status`, `latency_seconds`), "
+                "`task_retry`, and `gpu_memory` with `phase` `before_task` or "
+                "`after_task` and `gpus` entries of `index`, `memory_used_mib`, "
+                "`memory_total_mib`. `server.log` is a best-effort copy of "
+                "`server_instance.log_path` after start and on abort or restart.\n",
             ],
         },
         code_cell(codes[0]),
@@ -805,6 +818,8 @@ def _pair_server_cell(source, protocol, pins):
         "json.dumps(MANIFEST, indent=2, sort_keys=True))\n"
         "append_jsonl(WORKING_DIR / 'events.jsonl', "
         "{'event': 'server_ready', 'model_load_seconds': MODEL_LOAD_SECONDS})\n"
+        "copy_server_log(server_instance, WORKING_DIR / 'server.log')\n"
+        "record_startup_health(server_instance, WORKING_DIR / 'events.jsonl')\n"
     )
     return source
 
@@ -862,15 +877,10 @@ def run_evaluate(evaluator, task, dashboard, task_index, total_tasks):
                     total_tasks=total_tasks, slot_id=0, dashboard=dashboard)
 
 def server_health():
-    import urllib.request
-    try:
-        with urllib.request.urlopen(
-            server_instance.base_url.rstrip('/') + '/health', timeout=5) as resp:
-            return 200 <= getattr(resp, 'status', 200) < 300
-    except Exception:
-        return False
+    return probe_model_health(server_instance)
 
 def restart_model_server():
+    copy_server_log(server_instance, WORKING_DIR / 'server.log')
     _t0 = time.perf_counter()
     _pid = server_process_pid(server_instance)
     _pgid = session_pgid(_pid)
@@ -883,16 +893,12 @@ def restart_model_server():
         _row['kill_refused_reason'] = _release['kill_refused_reason']
     append_jsonl(WORKING_DIR / 'events.jsonl', _row)
     start_model_server(server_instance)
+    copy_server_log(server_instance, WORKING_DIR / 'server.log')
+    record_startup_health(server_instance, WORKING_DIR / 'events.jsonl')
     return time.perf_counter() - _t0
 
 def read_prefix_cache():
-    import urllib.request
-    try:
-        with urllib.request.urlopen(
-            server_instance.base_url.rstrip('/') + '/metrics', timeout=2) as resp:
-            return parse_prefix_cache_metrics(resp.read().decode('utf-8', 'replace'))
-    except Exception:
-        return None
+    return read_model_prefix_cache(server_instance)
 
 ARMS = {{
     label: {{'sha256': ARM_SHA[label], 'root': ARM_DIRS[label], 'files': ARM_FILES[label]}}
@@ -913,6 +919,7 @@ SESSION_RESULT = execute_session(
     session_start=SESSION_PERF_T0,
     health=server_health,
     restart_server=restart_model_server,
+    capture_server_log=lambda: copy_server_log(server_instance, WORKING_DIR / 'server.log'),
     import_origins=IMPORT_ORIGINS,
     early_stop=EARLY_STOP,
     prefix_cache=read_prefix_cache,

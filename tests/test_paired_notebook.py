@@ -344,6 +344,15 @@ def test_pair_notebook_sets_configured_budgets_and_adk_floor(tmp_path, monkeypat
     assert restart.index("server_instance.stop()") < restart.index("release_server_after_stop")
     assert "kill_refused_pgid" in restart
     assert "kill_refused_reason" in restart
+    assert "copy_server_log" in restart
+    assert "record_startup_health" in restart
+    assert "probe_model_health(server_instance)" in code
+    assert "read_model_prefix_cache(server_instance)" in code
+    assert "def model_server_root" in code
+    assert "base_url.rstrip('/') + '/health'" not in code
+    assert "base_url.rstrip('/') + '/metrics'" not in code
+    assert "health_check_failed" in code
+    assert "gpu_memory" in code
     markdown = "\n".join(
         "".join(cell["source"]) for cell in notebook["cells"] if cell["cell_type"] == "markdown"
     )
