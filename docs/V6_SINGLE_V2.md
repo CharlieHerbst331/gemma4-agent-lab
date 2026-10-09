@@ -46,11 +46,15 @@ and the role prompts.
   the current diff.
 - The primary edit point stays about 12 counted calls or about 95 seconds.
   About 30 counted calls, or about 18 calls remaining, is only the hard
-  backstop. Verify's best-guess edit is allowed only on the last iteration,
-  when fewer than 60 seconds remain, or at that backstop. Otherwise an empty
-  diff hands back to repair. If under 20 seconds remain, submit as is. The
-  empty UNCERTAIN submit remains only when the issue text is just an issue
-  number, such as `Fix #3104`, and that case still says no search.
+  backstop. Verify hands back only when more than 90 seconds remain. A
+  hand-back reply starts with `loop_iteration: N` (the iteration it received)
+  and the next line is `next loop_iteration: N+1`, which repair reads as its
+  counter. At 90 seconds or less with no edit, verify makes its best-guess
+  edit and submits. Fewer than 60 seconds means do not start a new repro.
+  Under 20 seconds, submit as is. The empty UNCERTAIN submit remains only when
+  the issue text is just an issue number, such as `Fix #3104`, and that case
+  still says no search. A copied placeholder assertion is refused before it
+  can pin a baseline.
 - Scratch stays in `/tmp` or top-level `/workspace/build/`. Do not write
   `repro.py` or `repro*.py` inside the repo.
 
@@ -64,8 +68,8 @@ prompt ceiling inside 32768. These instruction files stay far under that.
 | File | Chars before | Chars after | Est. tokens before | Est. tokens after |
 | --- | ---: | ---: | ---: | ---: |
 | structured-v5t0 `sub_agents/triage.md` | 2174 | 2174 | 543 | 543 |
-| structured-v5t0 `sub_agents/repair.md` | 4691 | 6230 | 1172 | 1557 |
-| structured-v5t0 `sub_agents/verify.md` | 4715 | 6980 | 1178 | 1745 |
+| structured-v5t0 `sub_agents/repair.md` | 4691 | 6332 | 1172 | 1583 |
+| structured-v5t0 `sub_agents/verify.md` | 4715 | 7919 | 1178 | 1979 |
 | verify-patch `SKILL.md` (both trees) | 3702 | 4399 | 925 | 1099 |
 | single-v1t0 `prompts/system.md` | 6221 | 7980 | 1555 | 1995 |
 
@@ -74,8 +78,8 @@ prompt ceiling inside 32768. These instruction files stay far under that.
 Packed with `gemma-lab pack` to `/tmp` (archives are not committed). The ten
 parent hashes matched their recorded values on the same pack.
 
-- structured-v6: `cd2854e6e9f11bdfe432065281d2c3188f5be7545080258981f7782a56d0d27c`
-- single-v2: `0135d1d3efa0e4909349fd128bfc01837593fa443a1dcaa0675ded447d44b95d`
+- structured-v6: `6d324b008ea5c3a389d34277087433200e2521fd17edfd7b3ddc616c965e6e56`
+- single-v2: `28d5b6e46ad8a95d1ed48086f5c63b003a3d78a11e281c210dd98a3b0d40325c`
 
 swegemma 0.2.10 and adk-submission 0.2.13 are not installable from PyPI in this
 environment, and this VM has no Kaggle credentials. Stub capture of the thinking

@@ -16,7 +16,7 @@ captured. End with a short text report so verify can run.
 Start with get_status. Fields that matter: tool_calls_used, agent_elapsed_seconds,
 time_seconds_remaining. get_status reports max_turns but never turns used. If the
 issue and hints are only an issue number with no behavior clue, return UNCERTAIN
-and loop_iteration immediately. No searches, no edits. Hand off when
+immediately. Start that reply with loop_iteration: 1. No searches, no edits. Hand off when
 time_seconds_remaining is about 90 or less, even if the check is unfinished, so
 verify still has its 60 second submit margin. The primary edit point is about
 12 counted calls or about 95 seconds, in step 3. That comes first. The hard
@@ -59,7 +59,7 @@ number, such as Fix #3104.
    quote-heavy strings. After one missing-parameter error, retry a smaller edit.
    After a second failure, use run_command with a short Python snippet
    to rewrite the line. If that rewrite fails too, stop editing and end with the final report
-   so verify can submit the current diff. Do not send a
+   so verify can act on it. Do not send a
    text-only reply that only repeats the error. A run_command edit must not touch protected paths: tests, conftest.py, pyproject.toml, or setup.cfg.
    Do not edit a path the verify-patch audit flags:
    conftest.py, pytest.ini, pyproject.toml, tox.ini, setup.cfg, sitecustomize.py,
@@ -89,7 +89,9 @@ number, such as Fix #3104.
    the final report. Above about 14k prompt tokens, history can be replaced by
    a text-only summary, and the next role may see only that summary.
 
-Return a report under 220 words: cause, files changed, probe origin, before/after
-exit codes, uncertainty, and one line loop_iteration: N. Include the checkpoint
-in that report. That report is the only reply with no tool call. First pass uses
-1. If verify reported loop_iteration: N, this pass uses N+1. No source dumps.
+Return a report under 220 words. Start the report with loop_iteration: N, where
+N is this pass. First pass uses 1. If verify gave next loop_iteration: M, N is
+M. Do not add 1 again. If verify reported only loop_iteration: N, this pass
+uses N+1. Then give cause, files changed, probe origin, before/after exit
+codes, uncertainty, and the checkpoint. That report is the only reply with no
+tool call. No source dumps.

@@ -56,8 +56,8 @@ stays off (`thinking_budget: 0`, `include_thoughts: false`). The 270s / 48-call
 caps are unchanged. The two thinking files and the two `eval_config.yaml` files
 stay byte-identical. `configs/protocols/v6-vs-single-v2.yaml` points at this
 pair. `configs/protocols/v5-vs-single-v1.yaml` is unchanged. Archives:
-structured-v6 `cd2854e6e9f11bdfe432065281d2c3188f5be7545080258981f7782a56d0d27c`,
-single-v2 `0135d1d3efa0e4909349fd128bfc01837593fa443a1dcaa0675ded447d44b95d`.
+structured-v6 `6d324b008ea5c3a389d34277087433200e2521fd17edfd7b3ddc616c965e6e56`,
+single-v2 `28d5b6e46ad8a95d1ed48086f5c63b003a3d78a11e281c210dd98a3b0d40325c`.
 Notes: `docs/V6_SINGLE_V2.md`. No GPU run.
 
 ## Current development budget variant

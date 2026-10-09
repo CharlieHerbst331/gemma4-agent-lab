@@ -376,6 +376,10 @@ def main():
         args.mode = "repro"
     if args.phase is None:
         args.phase = "verify"
+    if args.code and "put the real failing assert here" in args.code:
+        emit_corrected_example(
+            "code still contains the placeholder; replace it with the real failing assert"
+        )
     try:
         result = (
             audit(args.workspace)

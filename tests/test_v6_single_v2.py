@@ -137,6 +137,31 @@ def test_check_defaults_to_repro_and_prints_a_corrected_example(tmp_path):
         assert "Baseline repro changed" not in omitted.stdout
         assert "usage:" not in omitted.stdout.lower()
         assert "usage:" not in omitted.stderr.lower()
+        placeholder = subprocess.run(
+            [
+                sys.executable,
+                str(script),
+                "--workspace",
+                str(root),
+                "--scratch",
+                str(scratch),
+                "--phase",
+                "before",
+                "--code",
+                PLACEHOLDER,
+                "--timeout",
+                "20",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert placeholder.returncode == 2
+        refused = json.loads(placeholder.stdout)
+        assert refused["blocked"] is True
+        assert refused["passed"] is False
+        assert EXAMPLE in refused["error"]
+        assert "behavior-check" not in placeholder.stdout
 
 
 def test_prompts_and_skill_carry_the_call_shape_and_fallbacks():
@@ -186,6 +211,11 @@ def test_prompts_and_skill_carry_the_call_shape_and_fallbacks():
         in texts["single"]
     )
     assert "A best-guess edit is allowed only on the last iteration" in texts["verify"]
+    assert "more than 90 seconds remain" in texts["verify"]
+    assert "90 seconds or less remain" in texts["verify"]
+    assert "fewer than 60 seconds remain" in texts["verify"]
+    assert "so verify can act on it" in texts["repair"]
+    assert "next loop_iteration: M" in texts["repair"]
     assert "Hand back to repair" in texts["verify"]
     assert "If under 20 s remain, submit as is" in texts["verify"]
     assert "If under 20 s remain, submit as is" in texts["single"]
@@ -209,6 +239,35 @@ def test_prompts_and_skill_carry_the_call_shape_and_fallbacks():
     assert "That text is not produced here" in texts["v6-skill"]
     assert "submit_patch" in texts["verify"]
     assert "You do not have submit_patch" in texts["repair"]
+
+
+def _bullets(text):
+    found = []
+    current = []
+    for line in text.splitlines():
+        if line.startswith("- "):
+            if current:
+                found.append("\n".join(current))
+            current = [line]
+        elif current and line.startswith("  "):
+            current.append(line)
+        elif current:
+            found.append("\n".join(current))
+            current = []
+    if current:
+        found.append("\n".join(current))
+    return found
+
+
+def test_every_verify_hand_back_bullet_names_loop_iteration():
+    bullets = _bullets((V6 / "sub_agents/verify.md").read_text())
+    hand_backs = [item for item in bullets if "Hand back to repair" in item]
+    assert len(hand_backs) >= 2
+    for item in hand_backs:
+        assert "loop_iteration" in item
+        assert item.strip().startswith("- ")
+        assert "Start the reply with loop_iteration: N" in item
+        assert "next loop_iteration: N+1, which is the counter repair must read" in item
 
 
 def test_shared_files_match_and_thinking_eval_stay_on_the_t0_bytes():
