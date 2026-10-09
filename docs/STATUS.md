@@ -253,3 +253,15 @@ is recorded before stop(); after stop() that group gets SIGTERM and then
 SIGKILL, and the same id is used for a wait of up to 60 s for the port and any
 leftover GPU memory. Agent trees and the recorded archive
 hashes are unchanged.
+
+## Health probe
+
+t0-r1 aborted on the first task because the notebook probed `base_url + '/health'`
+while harness `base_url` is `http://host:port/v1` and vLLM serves `/health` at the
+root. Probes use `health_url` or strip a trailing `/v1`. Three failures at 2 s
+spacing, or a dead server process, restart once and rerun that task.
+`events.jsonl` adds `health_check_failed` (`url`, `status`, `error`, `kind`,
+`attempt`), `health_poll` (`url`, `status`, `latency_seconds`), `task_retry`,
+and `gpu_memory` (`phase` `before_task` or `after_task`; `gpus` of `index`,
+`memory_used_mib`, `memory_total_mib`). `server.log` is a best-effort copy of
+the vLLM log after start and on abort or restart.

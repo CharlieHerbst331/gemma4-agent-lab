@@ -1,8 +1,11 @@
 import json
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from types import SimpleNamespace
+
+import pytest
 
 from gemma_lab.stub_server import (
     MOCK_BASE_COMMIT,
@@ -34,9 +37,12 @@ def _post(server, text):
 def test_stub_server_health_metrics_and_tool_calls():
     server = StubModelServer(ScriptedResponder({"": repair_turns()}))
     with server:
-        with urllib.request.urlopen(server.base_url + "/health") as response:
+        with urllib.request.urlopen(server.health_url) as response:
             assert json.load(response)["status"] == "ok"
-        with urllib.request.urlopen(server.base_url + "/v1/models") as response:
+        with pytest.raises(urllib.error.HTTPError) as wrong:
+            urllib.request.urlopen(server.base_url + "/health")
+        assert wrong.value.code == 404
+        with urllib.request.urlopen(server.openai_base_url + "/models") as response:
             assert json.load(response)["data"][0]["id"] == "stub-model"
         first = _post(server, "fix the calculator")
         message = first["choices"][0]["message"]
@@ -45,8 +51,11 @@ def test_stub_server_health_metrics_and_tool_calls():
         second = _post(server, "fix the calculator")
         submitted = second["choices"][0]["message"]["tool_calls"][0]["function"]["name"]
         assert submitted == "submit_patch"
-        with urllib.request.urlopen(server.base_url + "/metrics") as response:
+        with urllib.request.urlopen(server.root_url + "/metrics") as response:
             metrics = response.read().decode()
+        with pytest.raises(urllib.error.HTTPError) as metrics_wrong:
+            urllib.request.urlopen(server.base_url + "/metrics")
+        assert metrics_wrong.value.code == 404
         assert "vllm:prefix_cache_hits_total 2" in metrics
         assert "vllm:prefix_cache_queries_total 2" in metrics
 

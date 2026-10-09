@@ -172,7 +172,11 @@ def apply_tool_calls(root, turn):
 
 
 class StubModelServer:
-    """Tiny ``/v1/chat/completions`` server plus ``/health`` and ``/metrics``."""
+    """Tiny OpenAI server shaped like the harness.
+
+    ``base_url`` ends in ``/v1``. ``/health`` and ``/metrics`` exist only at the
+    root, so ``/v1/health`` is a 404, matching vLLM.
+    """
 
     def __init__(self, responder, host="127.0.0.1", port=0):
         self.responder = responder
@@ -265,12 +269,20 @@ class StubModelServer:
         self.close()
 
     @property
-    def base_url(self):
+    def root_url(self):
         return f"http://{self.host}:{self.port}"
 
     @property
+    def base_url(self):
+        return self.root_url + "/v1"
+
+    @property
+    def health_url(self):
+        return self.root_url + "/health"
+
+    @property
     def openai_base_url(self):
-        return self.base_url + "/v1"
+        return self.base_url
 
 
 def smoke_server_for_candidate(source, behavior="repair"):

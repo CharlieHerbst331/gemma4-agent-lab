@@ -150,24 +150,46 @@ def test_kernel_death_keeps_fsynced_rows(tmp_path):
     assert not (tmp_path / "run" / "projection.json").exists()
 
 
+def _down(status=503, kind="http_error", url="http://h:1/health", process_exited=False):
+    return {
+        "ok": False,
+        "url": url,
+        "status": status,
+        "error": f"HTTPError({status})" if status is not None else "URLError('down')",
+        "kind": kind,
+        "process_exited": process_exited,
+    }
+
+
+def _up():
+    return {
+        "ok": True,
+        "url": "http://h:1/health",
+        "status": 200,
+        "error": None,
+        "kind": None,
+        "process_exited": False,
+    }
+
+
+def _events(tmp_path):
+    path = tmp_path / "run" / "events.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
 def test_one_server_restart_then_abort(tmp_path):
-    checks = {"n": 0}
+    pauses = []
     restarts = []
 
     def health():
-        checks["n"] += 1
-        if checks["n"] == 1:
-            return False
-        if checks["n"] == 2:
-            return True
-        return False
+        return _down()
 
     def restart():
         restarts.append(1)
         return 4.0
 
     def run_evaluate(evaluator, task, dashboard, position, total):
-        return Result(resolved=True)
+        raise AssertionError("task must not run when the re-check stays down")
 
     outcome = run_session(
         tmp_path,
@@ -175,13 +197,317 @@ def test_one_server_restart_then_abort(tmp_path):
         run_evaluate,
         health=health,
         restart_server=restart,
+        health_pause=pauses.append,
     )
+    assert pauses == [2.0, 2.0]
     assert restarts == [1]
     assert outcome["status"] == "aborted:model_server"
     unhealthy = [row for row in outcome["rows"] if row["error"] == "model_server_unhealthy"]
-    assert len(unhealthy) == 2
+    assert len(unhealthy) == 1
     assert unhealthy[0]["post_restart"] is True
-    assert all(row["post_restart"] for row in outcome["rows"])
+    failed = [row for row in _events(tmp_path) if row["event"] == "health_check_failed"]
+    assert [row["attempt"] for row in failed] == [1, 2, 3, 1]
+    assert failed[-1]["after_restart"] is True
+    assert failed[0]["kind"] == "http_error"
+    assert failed[0]["status"] == 503
+    assert "HTTPError(503)" in failed[0]["error"]
+
+
+def test_one_or_two_health_failures_do_not_restart(tmp_path):
+    for failures in (1, 2):
+        pauses = []
+        restarts = []
+        state = {"n": 0}
+
+        def health(needed=failures, state=state):
+            state["n"] += 1
+            if state["n"] <= needed:
+                return _down(status=404, url="http://h:1/v1/health")
+            return _up()
+
+        def restart(bucket=restarts):
+            bucket.append(1)
+            return 1.0
+
+        def run_evaluate(evaluator, task, dashboard, position, total):
+            return Result(resolved=True)
+
+        root = tmp_path / str(failures)
+        root.mkdir()
+        outcome = run_session(
+            root,
+            ["t1"],
+            run_evaluate,
+            health=health,
+            restart_server=restart,
+            health_pause=pauses.append,
+        )
+        assert restarts == []
+        assert pauses == [2.0] * failures
+        assert outcome["status"] == "complete"
+        assert not any(row.get("error") == "model_server_unhealthy" for row in outcome["rows"])
+        kinds = [row["kind"] for row in _events(root) if row["event"] == "health_check_failed"]
+        assert kinds == ["http_error"] * failures
+
+
+def test_dead_process_restarts_immediately_and_retries_the_task(tmp_path):
+    pauses = []
+    restarts = []
+    ran = []
+    state = {"n": 0}
+
+    def health():
+        state["n"] += 1
+        if state["n"] == 1:
+            return _down(status=None, kind="connection_error", process_exited=True)
+        return _up()
+
+    def restart():
+        restarts.append(1)
+        return 1.5
+
+    def run_evaluate(evaluator, task, dashboard, position, total):
+        ran.append((evaluator, task.instance_id))
+        return Result(resolved=True)
+
+    outcome = run_session(
+        tmp_path,
+        ["t1"],
+        run_evaluate,
+        health=health,
+        restart_server=restart,
+        health_pause=pauses.append,
+    )
+    assert pauses == []
+    assert restarts == [1]
+    assert ran == [("A", "t1"), ("B", "t1")]
+    assert outcome["status"] == "complete"
+    assert not any(row.get("error") == "model_server_unhealthy" for row in outcome["rows"])
+    events = _events(tmp_path)
+    failed = [row for row in events if row["event"] == "health_check_failed"]
+    assert len(failed) == 1
+    assert failed[0]["kind"] == "connection_error"
+    assert failed[0]["status"] is None
+    assert failed[0]["attempt"] == 1
+    assert failed[0]["process_exited"] is True
+    retries = [row for row in events if row["event"] == "task_retry"]
+    assert len(retries) == 1
+    assert retries[0]["arm"] == "A"
+    assert retries[0]["task_id"] == "t1"
+
+
+def test_three_failures_retry_once_and_a_later_failure_aborts(tmp_path):
+    pauses = []
+    restarts = []
+    ran = []
+    state = {"n": 0}
+
+    def health():
+        state["n"] += 1
+        if state["n"] <= 3:
+            return _down()
+        if state["n"] == 4:
+            return _up()
+        return _down(status=None, kind="connection_error")
+
+    def restart():
+        restarts.append(1)
+        return 2.0
+
+    def run_evaluate(evaluator, task, dashboard, position, total):
+        ran.append(evaluator)
+        return Result(resolved=True)
+
+    outcome = run_session(
+        tmp_path,
+        ["t1"],
+        run_evaluate,
+        health=health,
+        restart_server=restart,
+        health_pause=pauses.append,
+    )
+    assert pauses == [2.0, 2.0, 2.0, 2.0]
+    assert restarts == [1]
+    assert ran == ["A"]
+    assert outcome["status"] == "aborted:model_server"
+    unhealthy = [row for row in outcome["rows"] if row.get("error") == "model_server_unhealthy"]
+    assert len(unhealthy) == 1
+    assert unhealthy[0]["arm"] == "B"
+    assert [row for row in outcome["rows"] if row["arm"] == "A"][0]["resolved"] is True
+    retries = [row for row in _events(tmp_path) if row["event"] == "task_retry"]
+    assert len(retries) == 1
+
+
+def test_failed_task_rerun_is_a_crash_row_not_another_restart(tmp_path):
+    restarts = []
+    state = {"n": 0}
+
+    def health():
+        state["n"] += 1
+        if state["n"] <= 3:
+            return _down()
+        return _up()
+
+    def restart():
+        restarts.append(1)
+        return 1.0
+
+    def run_evaluate(evaluator, task, dashboard, position, total):
+        if evaluator == "A":
+            raise RuntimeError("rerun failed")
+        return Result(resolved=True)
+
+    outcome = run_session(
+        tmp_path,
+        ["t1"],
+        run_evaluate,
+        health=health,
+        restart_server=restart,
+        health_pause=lambda _seconds: None,
+    )
+    assert restarts == [1]
+    assert outcome["status"] == "complete"
+    crashed = [row for row in outcome["rows"] if row["arm"] == "A"]
+    assert crashed[0]["crashed"] is True
+    assert "rerun failed" in crashed[0]["error"]
+    assert crashed[0]["error"] != "model_server_unhealthy"
+    assert len([row for row in _events(tmp_path) if row["event"] == "task_retry"]) == 1
+
+
+def test_root_health_probe_and_old_v1_probe(tmp_path):
+    from gemma_lab.paired import (
+        copy_server_log,
+        model_server_root,
+        probe_http,
+        probe_model_health,
+        read_model_prefix_cache,
+        record_startup_health,
+        server_process_exited,
+    )
+    from gemma_lab.stub_server import ScriptedResponder, StubModelServer, empty_submit_turns
+
+    class Dead:
+        def poll(self):
+            return 1
+
+    assert server_process_exited(type("Missing", (), {})()) is False
+    assert server_process_exited(type("Exited", (), {"process": Dead()})()) is True
+
+    server = StubModelServer(ScriptedResponder({"": empty_submit_turns()}))
+    with server:
+        assert server.base_url.endswith("/v1")
+        assert server.health_url == server.root_url + "/health"
+        probed = probe_model_health(server)
+        assert probed["ok"] is True
+        assert probed["status"] == 200
+        assert probed["url"] == server.health_url
+        bare = type("Bare", (), {"base_url": server.base_url})()
+        assert not hasattr(bare, "health_url")
+        assert model_server_root(bare) == server.root_url
+        fallback = probe_model_health(bare)
+        assert fallback["ok"] is True
+        assert fallback["url"] == server.root_url + "/health"
+        metrics = read_model_prefix_cache(bare)
+        assert metrics["vllm:prefix_cache_hits_total"] == 0.0
+        missed = probe_http(server.base_url + "/health", 5)
+        assert missed["ok"] is False
+        assert missed["status"] == 404
+        assert missed["kind"] == "http_error"
+        metrics_missed = probe_http(server.base_url + "/metrics", 5)
+        assert metrics_missed["status"] == 404
+        assert metrics_missed["kind"] == "http_error"
+        events = tmp_path / "events.jsonl"
+        record_startup_health(server, events)
+        polls = [json.loads(line) for line in events.read_text().splitlines()]
+        assert [row["attempt"] for row in polls] == [1, 2, 3]
+        assert all(row["event"] == "health_poll" and row["status"] == 200 for row in polls)
+        assert all(row["url"].endswith("/health") for row in polls)
+        assert all("/v1/health" not in row["url"] for row in polls)
+        log = tmp_path / "vllm.log"
+        log.write_text("ready\n")
+        logged = type("Logged", (), {"log_path": log})()
+        assert copy_server_log(logged, tmp_path / "server.log") is True
+        assert (tmp_path / "server.log").read_text() == "ready\n"
+        assert copy_server_log(type("NoLog", (), {})(), tmp_path / "missing.log") is False
+
+    refused = probe_http("http://127.0.0.1:9/health", 0.2)
+    assert refused["ok"] is False
+    assert refused["status"] is None
+    assert refused["kind"] == "connection_error"
+
+
+def _old_base_url_health(server):
+    """The t0-r1 probe: base_url already ends in /v1, so this requests /v1/health."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(server.base_url.rstrip("/") + "/health", timeout=5) as resp:
+            return 200 <= getattr(resp, "status", 200) < 300
+    except Exception:
+        return False
+
+
+def test_old_probe_aborts_and_root_probe_runs_thirteen_tasks(tmp_path):
+    from gemma_lab.paired import probe_model_health
+    from gemma_lab.stub_server import ScriptedResponder, StubModelServer, empty_submit_turns
+
+    ids = [f"t{index:02d}" for index in range(13)]
+    server = StubModelServer(ScriptedResponder({"": empty_submit_turns()}))
+    with server:
+        assert _old_base_url_health(server) is False
+        assert server.base_url.rstrip("/") + "/health" == server.base_url + "/health"
+        assert probe_model_health(server)["ok"] is True
+
+        def run_evaluate(evaluator, task, dashboard, position, total):
+            return Result(resolved=True)
+
+        def restart():
+            return 0.1
+
+        (tmp_path / "old").mkdir()
+        (tmp_path / "new").mkdir()
+        old = run_session(
+            tmp_path / "old",
+            ids,
+            run_evaluate,
+            health=lambda: _old_base_url_health(server),
+            restart_server=restart,
+            health_pause=lambda _seconds: None,
+        )
+        assert old["status"] == "aborted:model_server"
+        assert old["rows"][0]["task_id"] == ids[0]
+        assert old["rows"][0]["error"] == "model_server_unhealthy"
+        assert {row["task_id"] for row in old["rows"]} == {ids[0]}
+
+        fresh = run_session(
+            tmp_path / "new",
+            ids,
+            run_evaluate,
+            health=lambda: probe_model_health(server),
+            restart_server=restart,
+            health_pause=lambda _seconds: None,
+        )
+    assert fresh["status"] == "complete"
+    assert fresh["restarts"] == 0
+    assert {row["task_id"] for row in fresh["rows"]} == set(ids)
+    assert len(fresh["rows"]) == 26
+    assert not any(row.get("error") == "model_server_unhealthy" for row in fresh["rows"])
+    phases = [
+        (row["phase"], row["task_id"])
+        for row in _events(tmp_path / "new")
+        if row["event"] == "gpu_memory"
+    ]
+    assert phases[0] == ("before_task", ids[0])
+    assert phases[1][0] == "after_task"
+
+
+def test_gpu_memory_snapshot_tolerates_a_missing_tool(monkeypatch):
+    import shutil
+
+    from gemma_lab.paired import gpu_memory_snapshot
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    assert gpu_memory_snapshot() == {"gpus": None, "error": "nvidia-smi not found"}
 
 
 def test_abort_rules_validity_and_early_stop(tmp_path):
