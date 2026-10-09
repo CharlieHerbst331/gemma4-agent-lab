@@ -7,19 +7,27 @@ from pathlib import Path
 import pytest
 
 from gemma_lab.metrics import load_results, summary
-from gemma_lab.operations import check_evaluation
+from gemma_lab.operations import (
+    DEFAULT_SCORER_OVERHEAD_SECONDS,
+    check_evaluation,
+    runtime_projection,
+)
 from gemma_lab.paired import (
     abort_code,
     build_projection,
+    build_report,
     build_schedule,
     clean_stray_sandboxes,
     collect_live_sandbox_names,
+    decision_rule,
     early_stop_loser,
     execute_session,
     kill_process_group,
     projection_for_arm,
     release_server_after_stop,
+    render_report_md,
     repeat_is_valid,
+    report_from_runs,
     round2_scenario_seconds,
     start_model_server,
     summarize_pair_run,
@@ -623,9 +631,16 @@ def test_timing_tiers_and_projection_math():
         model_load_seconds=900,
         session_overhead_seconds=None,
     )
-    assert quiet["checks"]["worst_case_12h_n129"]["passed"] is False
+    overhead = DEFAULT_SCORER_OVERHEAD_SECONDS
+    assert quiet["checks"]["worst_case_12h"]["value"] == 900 + 129 * (10 + overhead)
+    assert quiet["checks"]["worst_case_12h"]["passed"] is True
+    assert quiet["checks"]["worst_case_12h"]["severity"] == "warn"
+    assert "worst_case_12h_n129" not in quiet["checks"]
+    assert "worst_case_12h_n120" not in quiet["checks"]
     assert quiet["checks"]["round2_load_plus_129_mean"]["passed"] is True
+    assert quiet["checks"]["round2_load_plus_129_mean"]["formula"] == "L + 129 * mean_wall"
     assert quiet["checks"]["coordinator_mean_times_120"]["passed"] is True
+    assert quiet["checks"]["coordinator_mean_times_120"]["formula"] == "mean_wall * 120"
     assert quiet["blocked"] is False
     blocked = build_projection(
         [{"arm": "A", "wall_seconds": 400, "hit_cap": {}}],
@@ -1334,3 +1349,233 @@ def test_server_release_waits_for_port_and_gpu():
     )
     assert absent["waited_on"] == []
     assert absent["nvidia_smi"] is False
+
+
+def _decision_rows(*, a_wins=True):
+    rows = []
+    for repeat in (1, 2):
+        for task_id in ("t1", "t2"):
+            for arm in ("A", "B"):
+                resolved = a_wins if arm == "A" else not a_wins
+                rows.append(
+                    {
+                        "arm": arm,
+                        "repeat": repeat,
+                        "task_id": task_id,
+                        "resolved": resolved,
+                        "wall_seconds": 10,
+                        "hit_cap": {},
+                    }
+                )
+    return rows
+
+
+def _decision_projection(rows):
+    return build_projection(
+        rows,
+        {"A": {"sha256": "a" * 64}, "B": {"sha256": "b" * 64}},
+        60,
+        900,
+        None,
+    )
+
+
+def _hygiene_sidecar(gate):
+    return {
+        "gate": gate,
+        "candidate": {"gate": gate, "explicit_finalization": [1, 1]},
+        "tasks": [],
+    }
+
+
+def _hygiene_sides(gate_a, gate_b):
+    return {
+        "results/A/r1/hygiene.json": _hygiene_sidecar(gate_a),
+        "results/B/r1/hygiene.json": _hygiene_sidecar(gate_b),
+    }
+
+
+def test_decision_rule_reads_hygiene_sidecars():
+    rows = _decision_rows()
+    projection = _decision_projection(rows)
+    absent = decision_rule(rows, projection, None)
+    assert absent["conditions"]["hygiene"]["status"] == "not_computed"
+    assert absent["conditions"]["hygiene"]["pass"] is None
+    assert absent["conditions"]["hygiene"]["arms"] == {"A": "not_computed", "B": "not_computed"}
+    assert absent["rule_winner"] is None
+    blank = decision_rule(rows, projection, "not_computed")
+    assert blank["rule_winner"] is None
+    assert blank["conditions"]["hygiene"]["status"] == "not_computed"
+
+    passed = decision_rule(rows, projection, _hygiene_sides("pass", "pass"))
+    assert passed["conditions"]["hygiene"]["status"] == "pass"
+    assert passed["conditions"]["hygiene"]["pass"] is True
+    assert passed["conditions"]["hygiene"]["arms"] == {"A": "pass", "B": "pass"}
+    assert passed["rule_winner"] == "A"
+
+    warned = decision_rule(rows, projection, _hygiene_sides("warn", "pass"))
+    assert warned["conditions"]["hygiene"]["status"] == "warn"
+    assert warned["conditions"]["hygiene"]["arms"]["A"] == "warn"
+    assert warned["rule_winner"] == "A"
+
+    blocked = decision_rule(rows, projection, _hygiene_sides("block", "pass"))
+    assert blocked["conditions"]["hygiene"]["status"] == "block"
+    assert blocked["conditions"]["hygiene"]["pass"] is False
+    assert blocked["rule_winner"] is None
+    assert "Hygiene block on A" in blocked["note"]
+    assert "cannot win" in blocked["note"]
+
+    both = decision_rule(rows, projection, _hygiene_sides("block", "block"))
+    assert both["rule_winner"] is None
+    assert both["conditions"]["hygiene"]["arms"] == {"A": "block", "B": "block"}
+
+    rival_rows = _decision_rows(a_wins=False)
+    rival_projection = _decision_projection(rival_rows)
+    rival = decision_rule(rival_rows, rival_projection, _hygiene_sides("block", "pass"))
+    assert rival["rule_winner"] == "B"
+    held = decision_rule(rival_rows, rival_projection, _hygiene_sides("pass", "block"))
+    assert held["rule_winner"] is None
+    assert "Hygiene block on B" in held["note"]
+
+
+def test_worst_case_line_matches_the_upload_gate(tmp_path):
+    import zipfile
+
+    archive = tmp_path / "candidate.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("eval_config.yaml", "evaluation:\n  max_time_minutes: 4.5\n")
+    uploaded = runtime_projection(
+        [{"instance_id": "t", "duration_seconds": 10}],
+        {"model_load_seconds": 900},
+        archive,
+        DEFAULT_SCORER_OVERHEAD_SECONDS,
+    )
+    projected = projection_for_arm(
+        [{"wall_seconds": 10, "hit_cap": {}}],
+        arm_sha256="a" * 64,
+        cap_seconds=270,
+        model_load_seconds=900,
+        session_overhead_seconds=None,
+    )
+    check = projected["checks"]["worst_case_12h"]
+    assert check["severity"] == "warn"
+    assert check["formula"] == "L + 129 * (cap + 70)"
+    assert check["value"] == uploaded["worst_case_seconds"]
+    assert check["value"] == 900 + 129 * (270 + 70)
+    assert check["passed"] is False
+    assert uploaded["worst_case_warn"] is True
+    assert projected["blocked"] is False
+    assert projected["checks"]["round2_load_plus_129_mean"]["formula"] == "L + 129 * mean_wall"
+    report = build_report(
+        [{"arm": "A", "repeat": 1, "task_id": "t", "resolved": False, "wall_seconds": 10}],
+        projection={"arms": {"A": projected}, "blocked": False},
+        hygiene="not_computed",
+    )
+    text = render_report_md(report)
+    assert "worst_case_12h [warn]:" in text
+    assert f"value={check['value']}" in text
+    assert "Hygiene: not_computed" in text
+
+
+_SCRATCH_PATCH = """diff --git a/repro.py b/repro.py
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1 @@
++x = 1
+"""
+
+
+def _arm_repeat(root, arm, task_id="fastapi_11194"):
+    folder = root / "results" / arm / "r1"
+    (folder / "patches").mkdir(parents=True)
+    (folder / "patches" / f"{task_id}.patch").write_text(_SCRATCH_PATCH)
+    (folder / "task_results.jsonl").write_text(
+        json.dumps({"instance_id": task_id, "resolved": False}) + "\n"
+    )
+    return folder
+
+
+def _pair_protocol(tmp_path):
+    cohort = tmp_path / "cohort.json"
+    cohort.write_text(json.dumps(["fastapi_11194"]))
+    protocol = tmp_path / "protocol.yaml"
+    protocol.write_text(
+        "arms:\n"
+        "  A:\n"
+        "    source: missing-a\n"
+        "  B:\n"
+        "    source: missing-b\n"
+        "cohort:\n"
+        f"  path: {cohort}\n"
+        "repeats: 2\n"
+    )
+    return protocol
+
+
+def _pair_rows():
+    rows = []
+    for repeat in (1, 2):
+        for arm in ("A", "B"):
+            rows.append(
+                {
+                    "arm": arm,
+                    "repeat": repeat,
+                    "task_id": "fastapi_11194",
+                    "resolved": arm == "A",
+                    "wall_seconds": 10,
+                    "hit_cap": {},
+                }
+            )
+    return rows
+
+
+def test_pair_report_writes_hygiene_sidecars(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    run = tmp_path / "run"
+    _arm_repeat(run, "A")
+    _arm_repeat(run, "B")
+    (run / "pair_results.jsonl").write_text("".join(json.dumps(row) + "\n" for row in _pair_rows()))
+    output = tmp_path / "report"
+    report_from_runs([run], _pair_protocol(tmp_path), output)
+    for arm in ("A", "B"):
+        sidecar = json.loads((run / "results" / arm / "r1" / "hygiene.json").read_text())
+        assert sidecar["gate"] == "block"
+        assert "H1 scratch file repro.py in fastapi_11194" in sidecar["candidate"]["reasons"]
+        assert all("is below" not in reason for reason in sidecar["candidate"]["reasons"])
+        assert sidecar["candidate"]["findings"][0]["severity"] == "warn"
+    text = (output / "pair_report.md").read_text()
+    assert "Hygiene A/r1: gate block, H1 1, H2 0, H3 1, H5 0, explicit submit 0/1" in text
+    assert "Hygiene B/r1: gate block, H1 1, H2 0, H3 1, H5 0, explicit submit 0/1" in text
+    assert "Hygiene: {" not in text
+    saved = json.loads((output / "pair_report.json").read_text())
+    assert saved["decision_rule"]["conditions"]["hygiene"]["arms"] == {"A": "block", "B": "block"}
+    assert saved["decision_rule"]["rule_winner"] is None
+
+
+def test_pair_report_keeps_existing_hygiene_sidecars(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    run = tmp_path / "run"
+    for arm in ("A", "B"):
+        folder = _arm_repeat(run, arm)
+        payload = {
+            "gate": "pass",
+            "candidate": {"gate": "pass", "explicit_finalization": [1, 1], "reasons": ["leave me"]},
+            "tasks": [],
+        }
+        (folder / "hygiene.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    before = {
+        arm: (run / "results" / arm / "r1" / "hygiene.json").read_bytes() for arm in ("A", "B")
+    }
+    (run / "pair_results.jsonl").write_text("".join(json.dumps(row) + "\n" for row in _pair_rows()))
+    output = tmp_path / "report"
+    report_from_runs([run], _pair_protocol(tmp_path), output)
+    for arm in ("A", "B"):
+        path = run / "results" / arm / "r1" / "hygiene.json"
+        assert path.read_bytes() == before[arm]
+    text = (output / "pair_report.md").read_text()
+    assert "Hygiene A/r1: gate pass, H1 0, H2 0, H3 0, H5 0, explicit submit 1/1" in text
+    assert "Hygiene: {" not in text
+    saved = json.loads((output / "pair_report.json").read_text())
+    assert saved["decision_rule"]["conditions"]["hygiene"]["status"] == "pass"
