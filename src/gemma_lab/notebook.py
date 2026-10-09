@@ -519,9 +519,12 @@ def generate_pair(
         sha_b=packed["B"]["sha256"],
     )
     budgets = {label: packed[label]["budgets"] for label in ("A", "B")}
+    wheel_cell = codes[0].replace(_WHEEL_ANCHOR, _WHEEL_INSERT)
+    if not wheel_cell.endswith("\n"):
+        wheel_cell += "\n"
     codes[0] = (
         "import time\nSESSION_WALL_T0 = time.time()\nSESSION_PERF_T0 = time.perf_counter()\n"
-        + codes[0].replace(_WHEEL_ANCHOR, _WHEEL_INSERT)
+        + wheel_cell
         + _harness_pin_block(HARNESS_PINS)
     )
     codes[1] = _pair_payload_cell(protocol, packed, cohort_ids, schedule, session_repeats, pins)

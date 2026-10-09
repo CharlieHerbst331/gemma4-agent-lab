@@ -513,12 +513,13 @@ def test_pair_pins_wheelhouse_version_and_harness(tmp_path, monkeypatch, capsys)
     meta_path.write_text(json.dumps(starter_meta))
     monkeypatch.chdir(tmp_path)
     output = tmp_path / "paired"
+    protocol = _arms(tmp_path)
     with pytest.raises(ValueError, match="wheelhouse_version is required"):
-        generate_pair(_arms(tmp_path), "owner", "pair-v1", output)
+        generate_pair(protocol, "owner", "pair-v1", output)
     for bad in (0, True, "29"):
         with pytest.raises(ValueError, match="wheelhouse_version is required"):
-            generate_pair(_arms(tmp_path), "owner", "pair-v1", output, wheelhouse_version=bad)
-    generate_pair(_arms(tmp_path), "owner", "pair-v1", output, wheelhouse_version=29)
+            generate_pair(protocol, "owner", "pair-v1", output, wheelhouse_version=bad)
+    generate_pair(protocol, "owner", "pair-v1", output, wheelhouse_version=29)
     notebook, code, cells = _notebook_code(output / "evaluation.ipynb")
     assert "import *" not in code
     server_fn = code.split("def start_model_server", 1)[1].split("\ndef ", 1)[0]
