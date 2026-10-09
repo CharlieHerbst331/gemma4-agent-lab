@@ -57,6 +57,12 @@ def main(argv=None):
     notebook_pair.add_argument("--output", type=Path, required=True)
     notebook_pair.add_argument("--prior-run", type=Path)
     notebook_pair.add_argument(
+        "--wheelhouse-version",
+        type=int,
+        required=True,
+        help="Kaggle wheelhouse dataset version, as owner/slug/<version>",
+    )
+    notebook_pair.add_argument(
         "--bundle-dataset",
         action="append",
         default=[],
@@ -192,6 +198,7 @@ def main(argv=None):
                     args.repeats_in_session,
                     args.prior_run,
                     datasets,
+                    args.wheelhouse_version,
                 )
             case "pair-schedule":
                 from gemma_lab.paired import build_schedule, load_cohort_ids, load_protocol

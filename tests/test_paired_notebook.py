@@ -324,7 +324,7 @@ def test_pair_notebook_sets_configured_budgets_and_adk_floor(tmp_path, monkeypat
     monkeypatch.chdir(tmp_path)
     protocol = _arms(tmp_path)
     output = tmp_path / "paired"
-    generate_pair(protocol, "owner", "pair-v1", output)
+    generate_pair(protocol, "owner", "pair-v1", output, wheelhouse_version=29)
     notebook = json.loads((output / "evaluation.ipynb").read_text())
     code = "\n".join(
         "".join(cell["source"]) for cell in notebook["cells"] if cell["cell_type"] == "code"
@@ -371,7 +371,9 @@ def test_pair_starter_drift_fails_closed(tmp_path, monkeypatch):
     path = tmp_path / "vendor/official/notebook/getting-started-gemma-4-developer-agent.ipynb"
     path.write_text(json.dumps({"cells": []}))
     with pytest.raises(ValueError, match="structure changed"):
-        generate_pair(_arms(tmp_path), "owner", "pair-v1", tmp_path / "output")
+        generate_pair(
+            _arms(tmp_path), "owner", "pair-v1", tmp_path / "output", wheelhouse_version=29
+        )
 
 
 def test_pair_schedule_cli_does_not_pack(tmp_path, monkeypatch, capsys):
@@ -450,7 +452,7 @@ def test_official_starter_pair_has_no_undefined_names(tmp_path, monkeypatch):
     _official_starter(tmp_path)
     monkeypatch.chdir(tmp_path)
     output = tmp_path / "paired"
-    generate_pair(_arms(tmp_path), "owner", "pair-v1", output)
+    generate_pair(_arms(tmp_path), "owner", "pair-v1", output, wheelhouse_version=29)
     _notebook, code, cells = _notebook_code(output / "evaluation.ipynb")
     eval_cell = _eval_cell(cells)
     assert "AGENT_DIR" not in eval_cell
@@ -464,7 +466,7 @@ def test_live_eval_config_reads_still_set_per_arm_caps(tmp_path, monkeypatch):
     _official_starter(tmp_path, live_caps=True)
     monkeypatch.chdir(tmp_path)
     output = tmp_path / "paired"
-    generate_pair(_arms(tmp_path), "owner", "pair-v1", output)
+    generate_pair(_arms(tmp_path), "owner", "pair-v1", output, wheelhouse_version=29)
     _notebook, code, cells = _notebook_code(output / "evaluation.ipynb")
     eval_cell = _eval_cell(cells)
     assert "AGENT_DIR" not in eval_cell
@@ -479,6 +481,103 @@ def test_live_eval_config_reads_still_set_per_arm_caps(tmp_path, monkeypatch):
     assert "eval_section.get('max_tool_calls'" not in single_code
     assert "timeout_seconds = int(eval_section.get('timeout_seconds', 300))" in single_code
     assert undefined_names(single_code) == []
+
+
+def _pin_source(cell):
+    marker = "import importlib.metadata as _pkg_metadata\n"
+    assert marker in cell
+    return cell[cell.index(marker) :]
+
+
+def _run_pin(cell, versions, monkeypatch):
+    import importlib.metadata as metadata
+
+    def version(name):
+        if name not in versions:
+            raise metadata.PackageNotFoundError(name)
+        return versions[name]
+
+    monkeypatch.setattr(metadata, "version", version)
+    exec(_pin_source(cell), {})
+
+
+def test_pair_pins_wheelhouse_version_and_harness(tmp_path, monkeypatch, capsys):
+    _official_starter(tmp_path)
+    meta_path = tmp_path / "vendor/official/notebook/kernel-metadata.json"
+    starter_meta = json.loads(meta_path.read_text())
+    starter_meta["dataset_sources"] = [
+        "metric/gemma-4-developer-agent-wheelhouse",
+        "metric/gemma-4-developer-agent-wheelhouse/7",
+        "owner/extra-bundle",
+    ]
+    meta_path.write_text(json.dumps(starter_meta))
+    monkeypatch.chdir(tmp_path)
+    output = tmp_path / "paired"
+    with pytest.raises(ValueError, match="wheelhouse_version is required"):
+        generate_pair(_arms(tmp_path), "owner", "pair-v1", output)
+    for bad in (0, True, "29"):
+        with pytest.raises(ValueError, match="wheelhouse_version is required"):
+            generate_pair(_arms(tmp_path), "owner", "pair-v1", output, wheelhouse_version=bad)
+    generate_pair(_arms(tmp_path), "owner", "pair-v1", output, wheelhouse_version=29)
+    notebook, code, cells = _notebook_code(output / "evaluation.ipynb")
+    assert "import *" not in code
+    server_fn = code.split("def start_model_server", 1)[1].split("\ndef ", 1)[0]
+    assert "inspect.getattr_static" in server_fn
+    assert "__dict__" in server_fn
+    assert "types.ModuleType" in server_fn
+    first = cells[0]
+    assert first.index("Wheelhouse installation complete.") < first.index(
+        "import importlib.metadata as _pkg_metadata"
+    )
+    assert "def start_model_server" not in first
+    assert any("start_model_server(server_instance)" in cell for cell in cells[1:])
+    assert "{'swegemma': '0.2.10', 'adk-submission': '0.2.13'}" in first
+    metadata = json.loads((output / "kernel-metadata.json").read_text())
+    assert metadata["dataset_sources"] == [
+        "metric/gemma-4-developer-agent-wheelhouse/29",
+        "owner/extra-bundle",
+    ]
+    for name in ("provenance.json", "pair_manifest.json"):
+        record = json.loads((output / name).read_text())
+        assert record["wheelhouse_version"] == 29
+        assert record["wheelhouse_dataset"] == "metric/gemma-4-developer-agent-wheelhouse/29"
+        assert record["harness_pins"] == {"swegemma": "0.2.10", "adk-submission": "0.2.13"}
+    expected = {"swegemma": "0.2.10", "adk-submission": "0.2.13"}
+    _run_pin(first, expected, monkeypatch)
+    assert "Harness pins" in capsys.readouterr().out
+    with pytest.raises(RuntimeError, match="swegemma 0.2.9 != 0.2.10") as raised:
+        _run_pin(first, {"swegemma": "0.2.9", "adk-submission": "0.2.13"}, monkeypatch)
+    assert "Wheelhouse pin failed before model load" in str(raised.value)
+    assert "Refusing to start the model server." in str(raised.value)
+    with pytest.raises(RuntimeError, match="adk-submission 0.2.12 != 0.2.13"):
+        _run_pin(first, {"swegemma": "0.2.10", "adk-submission": "0.2.12"}, monkeypatch)
+    with pytest.raises(RuntimeError, match="adk-submission is not installed"):
+        _run_pin(first, {"swegemma": "0.2.10"}, monkeypatch)
+    assert notebook["cells"][1]["cell_type"] == "code"
+
+
+def test_notebook_pair_requires_wheelhouse_version(monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "gemma-lab",
+            "notebook-pair",
+            "--protocol",
+            "protocol.yaml",
+            "--owner",
+            "owner",
+            "--slug",
+            "pair-v1",
+            "--output",
+            "out",
+        ],
+    )
+    from gemma_lab.cli import main
+
+    with pytest.raises(SystemExit) as raised:
+        main()
+    assert raised.value.code == 2
 
 
 def test_unrecognized_cap_assignment_fails_closed(tmp_path, monkeypatch):

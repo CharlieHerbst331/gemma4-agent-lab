@@ -572,6 +572,75 @@ def test_start_model_server_uses_a_new_session(monkeypatch):
     assert original is not FakePopen
 
 
+def test_start_model_server_skips_lazy_class_namespace(monkeypatch):
+    import subprocess
+    import sys
+    import types
+
+    calls = []
+
+    class FakePopen:
+        def __init__(self, *args, **kwargs):
+            calls.append(kwargs)
+            self.pid = 4321
+
+    monkeypatch.setattr(subprocess, "Popen", FakePopen)
+
+    class Proxy:
+        def __getattr__(self, attr):
+            raise RuntimeError(
+                "Tried to instantiate class 'subprocess."
+                f"{attr}', but it does not exist! "
+                "Ensure that it is registered via torch::class_"
+            )
+
+    class LazyNamespace(types.ModuleType):
+        def __init__(self, name):
+            super().__init__(name)
+            self.lookups = []
+
+        def __getattr__(self, name):
+            self.lookups.append(name)
+            return Proxy()
+
+    lazy = LazyNamespace("torch.classes")
+    other = types.ModuleType("not_subprocess")
+    other.Popen = FakePopen
+    holder = types.ModuleType("holds_other_subprocess")
+    holder.subprocess = other
+    monkeypatch.setitem(sys.modules, "torch.classes", lazy)
+    monkeypatch.setitem(sys.modules, "holds_other_subprocess", holder)
+
+    class Server:
+        def start(self):
+            subprocess.Popen(["vllm"])
+            return "started"
+
+    assert start_model_server(Server()) == "started"
+    assert calls == [{"start_new_session": True}]
+    assert lazy.lookups == []
+    assert subprocess.Popen is FakePopen
+    assert other.Popen is FakePopen
+
+
+def test_start_model_server_survives_real_torch_classes():
+    import subprocess
+    import sys
+
+    torch = pytest.importorskip("torch")
+    classes = sys.modules.get("torch.classes", getattr(torch, "classes", None))
+    if classes is None:
+        pytest.skip("torch.classes is not registered")
+    original = subprocess.Popen
+
+    class Server:
+        def start(self):
+            return "started"
+
+    assert start_model_server(Server()) == "started"
+    assert subprocess.Popen is original
+
+
 def test_release_kills_the_session_child_after_stop_reaps_the_parent():
     import selectors
     import signal
