@@ -44,6 +44,8 @@ Research/training plans: [RESEARCH](docs/RESEARCH.md), [PORTFOLIO](docs/PORTFOLI
 | agents/structured-v5 | Unevaluated fork; not submitted | No score. See docs/STRUCTURED_V5.md |
 | agents/structured-v5t0 | Unevaluated thinking-off copy of structured-v5 | No score. See docs/THINKING_OFF_T0.md |
 | agents/single-v1t0 | Unevaluated thinking-off copy of single-v1 | No score. Paired with structured-v5t0 |
+| agents/structured-v6 | Unevaluated protocol fix of structured-v5t0 | No score. See docs/V6_SINGLE_V2.md |
+| agents/single-v2 | Unevaluated protocol fix of single-v1t0 | No score. Paired with structured-v6 |
 
 Latest archive SHA256:
 `0730b5f0a373fc23bdb4362779a4757ded14cfa6a77896c7d54ce3efb7ad8cab`.

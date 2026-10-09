@@ -1,0 +1,8 @@
+# Single thinking knob for every role.
+# include_thoughts false alone does not turn thinking off on adk-submission
+# 0.2.13 with swegemma 0.2.10. A missing budget is replaced by the harness
+# default of 4096, which sends enable_thinking true. thinking_budget 0 turns
+# thinking off on 0.2.12 and 0.2.13. include_thoughts stays false. A budget
+# of 0 does not compile on 0.2.11.
+include_thoughts: false
+thinking_budget: 0
