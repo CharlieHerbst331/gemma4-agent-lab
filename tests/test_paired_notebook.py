@@ -342,6 +342,14 @@ def test_pair_notebook_sets_configured_budgets_and_adk_floor(tmp_path, monkeypat
     restart = code.split("def restart_model_server", 1)[1].split("def ", 1)[0]
     assert restart.index("session_pgid") < restart.index("server_instance.stop()")
     assert restart.index("server_instance.stop()") < restart.index("release_server_after_stop")
+    assert "kill_refused_pgid" in restart
+    assert "kill_refused_reason" in restart
+    markdown = "\n".join(
+        "".join(cell["source"]) for cell in notebook["cells"] if cell["cell_type"] == "markdown"
+    )
+    assert "None, 0, -1, 1" in markdown
+    assert "own group" in markdown
+    assert "capped at 10 s" in markdown
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         assert_adk_submission_version("0.2.12")

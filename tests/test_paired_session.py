@@ -665,11 +665,181 @@ def test_kill_process_group_terms_then_kills_a_recorded_pgid():
     assert kill_process_group(50, grace=5, sleep=fail_sleep, killpg=missing) == 50
 
 
+def test_kill_process_group_refuses_the_notebook_group(monkeypatch):
+    calls = []
+
+    def spy(pgid, sig):
+        calls.append((pgid, sig))
+
+    monkeypatch.setattr(os, "killpg", spy)
+    own = os.getpgrp()
+    with pytest.warns(UserWarning, match="notebook's own process group"):
+        assert kill_process_group(own, grace=5) is None
+    assert calls == []
+    for bad in (None, 0, -1, 1):
+        with pytest.warns(UserWarning, match="not a server process group"):
+            assert kill_process_group(bad) is None
+        assert calls == []
+
+
+def test_hung_nvidia_smi_returns_within_the_deadline(monkeypatch):
+    import shutil
+    import subprocess
+    import warnings
+
+    from gemma_lab.paired import (
+        NVIDIA_SMI_POLL_TIMEOUT_SECONDS,
+        nvidia_smi_gpu_pids,
+        wait_for_server_release,
+    )
+
+    observed = []
+    waits = []
+
+    class Hung:
+        def __init__(self, *args, **kwargs):
+            self.stdout = None
+            self.stderr = None
+            self.returncode = None
+
+        def communicate(self, timeout=None):
+            observed.append(timeout)
+            raise subprocess.TimeoutExpired("nvidia-smi", timeout)
+
+        def kill(self):
+            self.killed = True
+
+        def wait(self, timeout=None):
+            waits.append(timeout)
+            raise subprocess.TimeoutExpired("nvidia-smi", timeout)
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(subprocess, "Popen", Hung)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/nvidia-smi")
+    started = time.perf_counter()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        log = wait_for_server_release(
+            None,
+            424242,
+            timeout=60,
+            nvidia_smi_present=True,
+            group_pids=lambda pgid: [],
+        )
+    elapsed = time.perf_counter() - started
+    messages = " ".join(str(item.message) for item in caught)
+    assert observed == [NVIDIA_SMI_POLL_TIMEOUT_SECONDS]
+    assert waits == [2]
+    assert elapsed < 1
+    assert log["gpu_memory"] == "unknown"
+    assert log["timed_out"] is False
+    assert "nvidia-smi timed out" in messages
+    assert "did not exit after kill" in messages
+    with warnings.catch_warnings(record=True) as shortened:
+        warnings.simplefilter("always")
+        assert nvidia_smi_gpu_pids(timeout=2) == "deadline"
+    shortened_text = " ".join(str(item.message) for item in shortened)
+    assert "nvidia-smi timed out" not in shortened_text
+    assert "did not exit after kill" in shortened_text
+
+
+@pytest.mark.parametrize("deadline", [2, 3, 5])
+def test_slow_nvidia_smi_at_a_short_deadline_keeps_holders(monkeypatch, deadline):
+    import shutil
+    import subprocess
+    import warnings
+
+    from gemma_lab.paired import wait_for_server_release
+
+    timeouts = []
+
+    class Slow:
+        def __init__(self, *args, **kwargs):
+            self.stdout = None
+            self.stderr = None
+            self.returncode = None
+
+        def communicate(self, timeout=None):
+            timeouts.append(timeout)
+            time.sleep(0.7)
+            if timeout is not None and timeout < 0.7:
+                raise subprocess.TimeoutExpired("nvidia-smi", timeout)
+            self.returncode = 0
+            return ("777777\n", "")
+
+        def kill(self):
+            self.returncode = -9
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setattr(subprocess, "Popen", Slow)
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/nvidia-smi")
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        log = wait_for_server_release(
+            None,
+            424242,
+            timeout=deadline,
+            nvidia_smi_present=True,
+            group_pids=lambda pgid: [777777],
+        )
+    messages = " ".join(str(item.message) for item in caught)
+    assert log["timed_out"] is True
+    assert log["gpu_pids"] == [777777]
+    assert log["waited_on"] == ["gpu"]
+    assert log["gpu_memory"] != "unknown"
+    assert log["detail"] == "release deadline reached"
+    assert "nvidia-smi timed out" not in messages
+    assert timeouts
+    assert min(timeouts) >= 1.0
+
+
+def test_refused_kill_is_written_to_events(tmp_path):
+    from gemma_lab.paired import append_jsonl
+
+    own = os.getpgrp()
+    with pytest.warns(UserWarning, match="notebook's own process group"):
+        log = release_server_after_stop(
+            own,
+            "http://127.0.0.1:9",
+            nvidia_smi_present=False,
+            port_open=lambda port: False,
+        )
+    assert log["kill_refused_pgid"] == own
+    assert log["kill_refused_reason"] == "own_group"
+    path = tmp_path / "events.jsonl"
+    row = {"event": "server_restart_release", "release": log}
+    row["kill_refused_pgid"] = log["kill_refused_pgid"]
+    row["kill_refused_reason"] = log["kill_refused_reason"]
+    append_jsonl(path, row)
+    saved = json.loads(path.read_text())
+    assert saved["kill_refused_pgid"] == own
+    assert saved["kill_refused_reason"] == "own_group"
+    assert saved["release"]["kill_refused_pgid"] == own
+    with pytest.warns(UserWarning, match="not a server process group"):
+        invalid = release_server_after_stop(
+            1,
+            "http://127.0.0.1:9",
+            nvidia_smi_present=False,
+            port_open=lambda port: False,
+        )
+    assert invalid["kill_refused_pgid"] == 1
+    assert invalid["kill_refused_reason"] == "invalid_pgid"
+
+
 def test_server_release_waits_for_port_and_gpu():
     from gemma_lab.paired import server_process_pid, wait_for_server_release
 
-    assert kill_process_group(None) is None
-    assert kill_process_group(0) is None
+    with pytest.warns(UserWarning, match="not a server process group"):
+        assert kill_process_group(None) is None
+    with pytest.warns(UserWarning, match="not a server process group"):
+        assert kill_process_group(0) is None
 
     class Process:
         pid = 50
@@ -698,17 +868,18 @@ def test_server_release_waits_for_port_and_gpu():
         return now["t"] < 0.5
 
     server.stop()
-    log = release_server_after_stop(
-        None,
-        server.base_url,
-        timeout=60,
-        sleep=sleep,
-        clock=lambda: now["t"],
-        port_open=port_open,
-        gpu_pids=lambda: [50],
-        group_pids=lambda pgid: [50],
-        nvidia_smi_present=True,
-    )
+    with pytest.warns(UserWarning, match="not a server process group"):
+        log = release_server_after_stop(
+            None,
+            server.base_url,
+            timeout=60,
+            sleep=sleep,
+            clock=lambda: now["t"],
+            port_open=port_open,
+            gpu_pids=lambda: [50],
+            group_pids=lambda pgid: [50],
+            nvidia_smi_present=True,
+        )
     server.start()
     assert server.events == ["stop", "start"]
     assert log["waited_on"] == ["port"]
@@ -752,7 +923,10 @@ def test_server_release_waits_for_port_and_gpu():
     )
     assert timed["timed_out"] is True
     assert timed["waited_on"] == ["port", "gpu"]
-    assert timed["seconds"] >= 60
+    assert timed["seconds"] >= 59
+    assert timed["detail"] == "release deadline reached"
+    assert timed["gpu_pids"] == [50]
+    assert timed["gpu_memory"] != "unknown"
     absent = wait_for_server_release(
         None,
         None,
