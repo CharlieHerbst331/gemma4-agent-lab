@@ -1,0 +1,8 @@
+# Single thinking knob. This file is the only thinking control.
+# 256, not 512 and not the harness default of 4096. The task cap is 270 seconds.
+# At about 26 ms per completion token, 256 adds at most about 6.7 s per call.
+# 512 adds about 13 s and does not fit that cap. adk-submission 0.2.13 ignores
+# include_thoughts: false and replaces a missing budget with 4096, so both
+# fields below are explicit.
+include_thoughts: true
+thinking_budget: 256

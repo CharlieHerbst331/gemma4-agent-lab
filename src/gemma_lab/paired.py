@@ -3203,6 +3203,22 @@ def unexpected_file_diffs(files_a, files_b, allowed, ignored=(), yaml_a=None, ya
     return bad
 
 
+def _thinking_only_difference_allowed(left, right, allowed):
+    """True when sampling differs only in thinking and this protocol allows it.
+
+    The marker is the literal entry ``thinking.yaml`` in ``allowed_differences``.
+    ``sub_agents/*`` does not count, so existing protocols still refuse a
+    thinking-budget change. Temperature and top_p still have to match.
+    """
+    if "thinking.yaml" not in (allowed or []):
+        return False
+
+    def rest(rows):
+        return [(row[0], row[1]) for row in rows]
+
+    return rest(left) == rest(right)
+
+
 def assert_arms_compatible(
     arm_a,
     arm_b,
@@ -3217,7 +3233,9 @@ def assert_arms_compatible(
 
     ``matched_pair`` false skips only the shared-file identity check. Model,
     budget, sampling, adapter, and identical-archive refusals still apply.
-    Omitting the flag keeps the shared-file check.
+    Omitting the flag keeps the shared-file check. A protocol that lists
+    ``thinking.yaml`` in ``allowed_differences`` may differ in thinking budget
+    and ``include_thoughts`` only. That does not loosen temperature or top_p.
     """
     if not isinstance(matched_pair, bool):
         raise ValueError("matched_pair must be true or false")
@@ -3231,7 +3249,9 @@ def assert_arms_compatible(
         raise ValueError(f"Arms must declare the same single model {MODEL}")
     if arm_a["budgets"] != arm_b["budgets"]:
         raise ValueError(f"Arm budgets differ: {arm_a['budgets']} != {arm_b['budgets']}")
-    if arm_a["sampling"] != arm_b["sampling"]:
+    if arm_a["sampling"] != arm_b["sampling"] and not _thinking_only_difference_allowed(
+        arm_a["sampling"], arm_b["sampling"], allowed_differences
+    ):
         raise ValueError(
             "Resolved generation settings differ in temperature, top_p, or thinking_budget: "
             f"{arm_a['sampling']} != {arm_b['sampling']}"
