@@ -351,3 +351,22 @@ B single-v3. Schedule
 and not promotion eligible. `matched_pair: false` skips only the shared-file
 identity check. Existing protocols omit the flag and keep the check. No Kaggle
 push and no GPU run.
+
+## single-v4, sed reads
+
+`agents/single-v4` is a prompt-only copy of `agents/single-v3`. `agent.yaml`,
+`thinking.yaml`, and `eval_config.yaml` are byte-identical. Verification wording
+restored `Never send that list as a message of its own.` and changed the loop
+breaker to `Never run the same command more than twice unless you changed the
+code since.` The prompt is 6699 characters; single-v3's is 6656. `read_file`
+takes `filepath` only. Line ranges use `sed -n 'A,Bp' path | head -c 4000`.
+Archive SHA256
+`470eb8b70f8dfd47d39efa15311aec832bb6a94117274cbc4a8d4e8a14863ffc`. Hygiene gate
+pass. Not submitted. The thirteen previous archive hashes are unchanged.
+
+`configs/protocols/single-v3-vs-single-v4-toolcall-smoke.yaml` is those five
+tasks in the original order, one repeat, arm A single-v3 and arm B single-v4.
+The schedule hash is `31398c6c61900f3f4813ad59e151df2a15b6549c120fb656c461d438be81a345`,
+the same as the first five-task smoke, because schedule hashes are not required
+to be unique. `prompts/*` is an allowed difference, so `matched_pair` stays on.
+The report is smoke and not promotion eligible. No Kaggle push and no GPU run.
