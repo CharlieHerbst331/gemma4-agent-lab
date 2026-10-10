@@ -1,0 +1,23 @@
+agent_class: LlmAgent
+name: single_v1
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Single-agent control matched to single-v2 budgets and sampling, with no skills.
+instruction: !include prompts/system.md
+generate_content_config:
+  temperature: 0.5
+  top_p: 0.95
+  # 2048 completion tokens leaves a 30720-token prompt ceiling inside 32768.
+  # This is repair's cap, the largest of v5's 1024/2048/1536 role caps.
+  max_output_tokens: 2048
+  thinking_config: !include thinking.yaml
+# default keeps this agent's own tool history. v5 sets none on each LlmAgent.
+include_contents: default
+tools:
+- get_status
+- read_file
+- edit_file
+- run_command
+- search_similar_code
+- get_code_neighbors
+- get_code_subgraph
+- submit_patch

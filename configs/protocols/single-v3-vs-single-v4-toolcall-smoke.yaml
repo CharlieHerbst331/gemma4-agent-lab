@@ -1,0 +1,59 @@
+# Smoke protocol: single-v3 (A) vs single-v4 (B) on the five tool-call tasks.
+# Not promotion eligible. One repeat.
+# The arms differ only in prompts/system.md: the read rule and the loop breaker.
+# prompts/* is already an allowed difference, so the shared-file check stays on.
+# matched_pair is omitted and stays true. A prompt-only difference does not need
+# matched_pair false.
+#
+# Task order is the original five-task smoke order, so each task keeps the same
+# A-first or B-first slot. Nothing in the repo requires schedule hashes to be
+# unique, so this schedule hash matches v6-vs-single-v2-toolcall-smoke.yaml.
+purpose: smoke
+arms:
+  A:
+    source: agents/single-v3
+    expected_sha256: null
+  B:
+    source: agents/single-v4
+    expected_sha256: null
+notes: "The arms differ only in the prompt read rule and the loop breaker."
+allow_identical: false
+allowed_differences:
+  - agent.yaml
+  - sub_agents/*
+  - skills/*
+  - prompts/*
+cohort:
+  path: configs/cohorts/dev-13-environment-screened.json
+  task_file_sha256: e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6
+task_ids:
+  - fastapi_14786
+  - rich_3934
+  - fastapi_11194
+  - rich_3938
+  - fastapi_14262
+repeats: 1
+order_rule: per_task_parity_v1
+shuffle_seed: null
+session_budget_seconds: 5400
+pair_start_pad_seconds: 60
+abort_policy: round2_v1
+early_stop: null
+budget_gate:
+  block:
+    - name: round2_load_plus_129_mean
+      formula: L + 129 * mean_wall
+      threshold_seconds: 38880
+    - name: coordinator_mean_times_120
+      formula: mean_wall * 120
+      threshold_seconds: 39600
+  warn:
+    - name: worst_case_12h
+      formula: L + n * (cap + p90_delta)
+      threshold_seconds: 43200
+      n_values: [120, 129]
+  L_default: 900
+  coordinator_hours: 11
+timing_tier: 2
+pins_mode: record
+exclude_import_origin_risk: true
