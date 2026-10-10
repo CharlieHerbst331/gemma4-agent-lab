@@ -2806,7 +2806,60 @@ def _compact_hygiene_lines(hygiene):
     return lines
 
 
-def _apply_smoke_report(report, run_dirs):
+def _source_declares_skills(source):
+    """True, False, or None when the tree cannot be read."""
+    root = Path(source)
+    if not (root / "agent.yaml").is_file():
+        return None
+    from gemma_lab.bundle import load_yaml
+
+    saw_error = False
+    try:
+        paths = sorted(
+            path for path in root.rglob("*") if path.is_file() and path.suffix in {".yaml", ".yml"}
+        )
+    except OSError:
+        return None
+    for path in paths:
+        try:
+            document = load_yaml(path, root)
+        except Exception:
+            saw_error = True
+            continue
+        if _document_has_skills(document):
+            return True
+    if saw_error:
+        return None
+    return False
+
+
+def _document_has_skills(value):
+    if isinstance(value, dict):
+        skills = value.get("skills")
+        if isinstance(skills, list) and skills:
+            return True
+        return any(_document_has_skills(child) for child in value.values())
+    if isinstance(value, list):
+        return any(_document_has_skills(child) for child in value)
+    return False
+
+
+def _arms_without_skills(protocol):
+    if not isinstance(protocol, dict):
+        return []
+    missing = []
+    for label in ("A", "B"):
+        spec = (protocol.get("arms") or {}).get(label) or {}
+        source = spec.get("source")
+        if not source:
+            continue
+        declared = _source_declares_skills(source)
+        if declared is False:
+            missing.append(label)
+    return missing
+
+
+def _apply_smoke_report(report, run_dirs, protocol=None):
     """Drop promotion gates. Hygiene sidecars are already on the report."""
     from gemma_lab.tool_failures import collect_tool_failures, smoke_not_applicable
 
@@ -2843,6 +2896,9 @@ def _apply_smoke_report(report, run_dirs):
             if isinstance(check, dict):
                 check["passed"] = note
     report["projection"] = projection
+    missing = _arms_without_skills(protocol)
+    if missing:
+        report["arms_without_skills"] = missing
     return report
 
 
@@ -2853,26 +2909,43 @@ def _render_smoke_report(report):
     lines = [
         "smoke, not promotion eligible",
         "",
-        "# Paired evaluation report",
-        "",
-        "This run is a tool-call smoke. It is not promotion eligible.",
-        "",
-        f"Protocol sha256: `{report.get('protocol_sha256')}`",
-        f"Schedule sha256: `{report.get('schedule_sha256')}`",
-        *_harness_report_lines(report),
-        "",
-        "Arm order for the 5 tasks is AB, BA, AB, BA, AB, so A goes first on 3 tasks "
-        "and B on 2, an odd count that one repeat cannot balance.",
-        "",
-        "The Kaggle notebook's in-kernel report and projection.json are the ordinary "
-        "non-smoke ones. The smoke text appears only after a local `gemma-lab pair-report`.",
-        "",
-        "## Raw totals",
     ]
+    banner = report.get("notes")
+    if isinstance(banner, str) and banner.strip():
+        lines.append(banner.strip())
+        lines.append("")
+    lines.extend(
+        [
+            "# Paired evaluation report",
+            "",
+            "This run is a tool-call smoke. It is not promotion eligible.",
+            "",
+        ]
+    )
+    lines.extend(
+        [
+            f"Protocol sha256: `{report.get('protocol_sha256')}`",
+            f"Schedule sha256: `{report.get('schedule_sha256')}`",
+            *_harness_report_lines(report),
+            "",
+            "Arm order for the 5 tasks is AB, BA, AB, BA, AB, so A goes first on 3 tasks "
+            "and B on 2, an odd count that one repeat cannot balance.",
+            "",
+            "The Kaggle notebook's in-kernel report and projection.json are the ordinary "
+            "non-smoke ones. The smoke text appears only after a local `gemma-lab pair-report`.",
+            "",
+            "## Raw totals",
+        ]
+    )
     for label, stats in (report.get("raw_totals") or {}).items():
         lines.append(f"- {label}: resolved {stats.get('resolved')} / {stats.get('rows')}")
     lines.append("")
     lines.extend(tool_failure_lines(report.get("tool_failures") or []))
+    missing_skills = report.get("arms_without_skills") or []
+    if missing_skills:
+        lines.append("")
+    for label in missing_skills:
+        lines.append(f"Arm {label} has no skills. Skill calls for that arm are 0.")
     lines.extend(["", "## Projection", note, "", "## Decision rule", note])
     lines.append("rule_winner: null")
     lines.append(f"Promotion: {note}")
@@ -2887,6 +2960,10 @@ def _pair_report_render_report_md(report):
     text = _NOTEBOOK_RENDER_REPORT_MD(report)
     lines = text.splitlines()
     rendered = []
+    banner = report.get("notes")
+    if isinstance(banner, str) and banner.strip():
+        rendered.append(banner.strip())
+        rendered.append("")
     for line in lines:
         if line.startswith("Hygiene: "):
             rendered.extend(_compact_hygiene_lines(report.get("hygiene")))
@@ -3126,7 +3203,24 @@ def unexpected_file_diffs(files_a, files_b, allowed, ignored=(), yaml_a=None, ya
     return bad
 
 
-def assert_arms_compatible(arm_a, arm_b, *, allow_identical, allowed_differences, sha_a, sha_b):
+def assert_arms_compatible(
+    arm_a,
+    arm_b,
+    *,
+    allow_identical,
+    allowed_differences,
+    sha_a,
+    sha_b,
+    matched_pair=True,
+):
+    """Refuse arms that are not a pair.
+
+    ``matched_pair`` false skips only the shared-file identity check. Model,
+    budget, sampling, adapter, and identical-archive refusals still apply.
+    Omitting the flag keeps the shared-file check.
+    """
+    if not isinstance(matched_pair, bool):
+        raise ValueError("matched_pair must be true or false")
     if sha_a == sha_b and not allow_identical:
         raise ValueError(
             "Refusing identical arm archives; set allow_identical for an A/A noise run"
@@ -3142,6 +3236,8 @@ def assert_arms_compatible(arm_a, arm_b, *, allow_identical, allowed_differences
             "Resolved generation settings differ in temperature, top_p, or thinking_budget: "
             f"{arm_a['sampling']} != {arm_b['sampling']}"
         )
+    if not matched_pair:
+        return True
     ignored = set(arm_a.get("settings_includes") or ()) | set(arm_b.get("settings_includes") or ())
     diffs = unexpected_file_diffs(
         arm_a["files"],
@@ -3174,6 +3270,13 @@ def load_protocol(path):
         raise ValueError("Protocol cohort.path is required")
     data["_path"] = str(path)
     data["_sha256"] = hashlib.sha256(raw).hexdigest()
+    if "matched_pair" in data:
+        flag = data["matched_pair"]
+        if not isinstance(flag, bool):
+            raise ValueError("matched_pair must be true or false")
+        notes = data.get("notes")
+        if flag is False and (not isinstance(notes, str) or not notes.strip()):
+            raise ValueError("matched_pair false is not allowed without notes naming the mismatch")
     data.setdefault("allow_identical", False)
     data.setdefault("allowed_differences", [])
     data.setdefault("repeats", 2)
@@ -3389,7 +3492,12 @@ def combine_pair_reports(run_dirs, protocol):
     distinct = {(item.get("swegemma"), item.get("adk-submission")) for item in versions}
     report["harness_mixed"] = len(distinct) > 1
     if protocol.get("purpose") == "smoke":
-        return _apply_smoke_report(report, run_dirs)
+        report = _apply_smoke_report(report, run_dirs, protocol)
+    notes = protocol.get("notes")
+    if isinstance(notes, str) and notes.strip():
+        report["notes"] = notes.strip()
+    if protocol.get("matched_pair") is False:
+        report["matched_pair"] = False
     return report
 
 

@@ -626,6 +626,7 @@ def generate_pair(
         allowed_differences=list(protocol.get("allowed_differences") or []),
         sha_a=packed["A"]["sha256"],
         sha_b=packed["B"]["sha256"],
+        matched_pair=protocol.get("matched_pair", True),
     )
     budgets = {label: packed[label]["budgets"] for label in ("A", "B")}
     wheel_cell = codes[0].replace(_WHEEL_ANCHOR, _WHEEL_INSERT)

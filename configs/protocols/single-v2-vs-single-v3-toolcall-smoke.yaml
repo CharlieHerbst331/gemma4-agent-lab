@@ -1,0 +1,60 @@
+# Smoke protocol: single-v2 (A) vs single-v3 (B) on the five tool-call tasks.
+# Not promotion eligible. One repeat.
+# Not a matched pair: the prompts and skills are not byte-identical.
+# The arms differ only in the skill removal and the run_command recipe.
+# matched_pair false skips only the shared-file identity check.
+#
+# Same five dev-13 ids as configs/protocols/v6-vs-single-v2-toolcall-smoke.yaml.
+# Listed in reverse schedule order so this schedule hash is not 31398c6c…
+# (that hash is the task list, the repeat count, and the parity rule).
+# The set is fastapi_14786, rich_3934, fastapi_11194, rich_3938, fastapi_14262.
+purpose: smoke
+arms:
+  A:
+    source: agents/single-v2
+    expected_sha256: null
+  B:
+    source: agents/single-v3
+    expected_sha256: null
+matched_pair: false
+notes: "not a matched pair: arm A uses skills, arm B has none. The arms differ only in the skill removal and the run_command recipe."
+allow_identical: false
+allowed_differences:
+  - agent.yaml
+  - sub_agents/*
+  - skills/*
+  - prompts/*
+cohort:
+  path: configs/cohorts/dev-13-environment-screened.json
+  task_file_sha256: e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6
+task_ids:
+  - fastapi_14262
+  - rich_3938
+  - fastapi_11194
+  - rich_3934
+  - fastapi_14786
+repeats: 1
+order_rule: per_task_parity_v1
+shuffle_seed: null
+session_budget_seconds: 5400
+pair_start_pad_seconds: 60
+abort_policy: round2_v1
+early_stop: null
+budget_gate:
+  block:
+    - name: round2_load_plus_129_mean
+      formula: L + 129 * mean_wall
+      threshold_seconds: 38880
+    - name: coordinator_mean_times_120
+      formula: mean_wall * 120
+      threshold_seconds: 39600
+  warn:
+    - name: worst_case_12h
+      formula: L + n * (cap + p90_delta)
+      threshold_seconds: 43200
+      n_values: [120, 129]
+  L_default: 900
+  coordinator_hours: 11
+timing_tier: 2
+pins_mode: record
+exclude_import_origin_risk: true
