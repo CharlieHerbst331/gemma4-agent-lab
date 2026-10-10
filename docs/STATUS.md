@@ -355,10 +355,13 @@ push and no GPU run.
 ## single-v4, sed reads
 
 `agents/single-v4` is a prompt-only copy of `agents/single-v3`. `agent.yaml`,
-`thinking.yaml`, and `eval_config.yaml` are byte-identical. The prompt is 6619
-characters; single-v3's is 6656. `read_file` takes `filepath` only. Line ranges
-use `sed -n 'A,Bp' path | head -c 4000`. Archive SHA256
-`af39c7eb1f2e58ebb2c7efceeb5c6ac567615019eec06b0d8a6d78e7603200cd`. Hygiene gate
+`thinking.yaml`, and `eval_config.yaml` are byte-identical. Verification wording
+restored `Never send that list as a message of its own.` and changed the loop
+breaker to `Never run the same command more than twice unless you changed the
+code since.` The prompt is 6699 characters; single-v3's is 6656. `read_file`
+takes `filepath` only. Line ranges use `sed -n 'A,Bp' path | head -c 4000`.
+Archive SHA256
+`470eb8b70f8dfd47d39efa15311aec832bb6a94117274cbc4a8d4e8a14863ffc`. Hygiene gate
 pass. Not submitted. The thirteen previous archive hashes are unchanged.
 
 `configs/protocols/single-v3-vs-single-v4-toolcall-smoke.yaml` is those five

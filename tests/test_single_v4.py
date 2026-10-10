@@ -37,8 +37,8 @@ def test_single_v4_changes_only_the_prompt():
     prompt = (V4 / "prompts" / "system.md").read_text()
     parent = (V3 / "prompts" / "system.md").read_text()
     assert prompt != parent
-    assert len(prompt) <= len(parent)
-    assert len(prompt) <= 6656
+    assert len(parent) == 6656
+    assert len(prompt) == 6699
     for phrase in (
         "Call read_file with filepath only",
         "Do not pass start_line or end_line",
@@ -48,8 +48,9 @@ def test_single_v4_changes_only_the_prompt():
         "same first lines twice",
         "start_line: 1",
         "stop re-reading and use sed",
+        "Never send that list as a message of its own.",
         "If the same tool call fails twice, change the call or the tool",
-        "Never run the same command more than twice",
+        "Never run the same command more than twice unless you changed the code since.",
         'python -c "import X; print(X.__version__)"',
         "about 12 counted calls or about 95 seconds",
         "primary rule",

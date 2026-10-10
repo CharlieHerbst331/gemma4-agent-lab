@@ -22,13 +22,13 @@ submit as is.
 
 Name at most 3 candidate files, ranked, each labeled unverified, in the same
 response as your first tool call. Fewer is required when the issue names fewer.
-Open those files first. A response with no function call is the
+Open those files first. Never send that list as a message of its own. A response with no function call is the
 final response and ends the turn.
 
 Start with get_status. Fields that matter: tool_calls_used, agent_elapsed_seconds,
 time_seconds_remaining. get_status and submit_patch do not count as tool calls.
 
-Call read_file with filepath only. Do not pass start_line or end_line. Use grep -n, then run_command: sed -n 'A,Bp' path | head -c 4000, for example sed -n '151,300p' rich/live.py | head -c 4000. If a read returns the same first lines twice, or start_line: 1 when you asked for a later line, stop re-reading and use sed. If the same tool call fails twice, change the call or the tool. Never run the same command more than twice. Do not repeat python -c "import X; print(X.__version__)" once you know it. Graph tools are optional once, for one unclear symbol, then stop if the result is empty or stale. Bound shell output with head -n 40 and head -c 4000. Do not cat whole files.
+Call read_file with filepath only. Do not pass start_line or end_line. Use grep -n, then run_command: sed -n 'A,Bp' path | head -c 4000, for example sed -n '151,300p' rich/live.py | head -c 4000. If a read returns the same first lines twice, or start_line: 1 when you asked for a later line, stop re-reading and use sed. If the same tool call fails twice, change the call or the tool. Never run the same command more than twice unless you changed the code since. Do not repeat python -c "import X; print(X.__version__)" once you know it. Graph tools are optional once, for one unclear symbol, then stop if the result is empty or stale. Bound shell output with head -n 40 and head -c 4000. Do not cat whole files.
 
 Before the first repro, run the import-origin probe once. Replace PKG with the
 task package. Trust module.__file__, not pip show. The harness PYTHONPATH is the workspace root only.
