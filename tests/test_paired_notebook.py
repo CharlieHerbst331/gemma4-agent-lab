@@ -541,7 +541,8 @@ def test_pair_pins_wheelhouse_version_and_harness(tmp_path, monkeypatch, capsys)
     )
     assert "def start_model_server" not in first
     assert any("start_model_server(server_instance)" in cell for cell in cells[1:])
-    assert "{'swegemma': '0.2.10', 'adk-submission': '0.2.13'}" in first
+    assert "('0.2.10', '0.2.13')" in first
+    assert "('0.2.11', '0.2.13')" in first
     metadata = json.loads((output / "kernel-metadata.json").read_text())
     assert metadata["dataset_sources"] == [
         "metric/gemma-4-developer-agent-wheelhouse/29",
@@ -551,16 +552,16 @@ def test_pair_pins_wheelhouse_version_and_harness(tmp_path, monkeypatch, capsys)
         record = json.loads((output / name).read_text())
         assert record["wheelhouse_version"] == 29
         assert record["wheelhouse_dataset"] == "metric/gemma-4-developer-agent-wheelhouse/29"
-        assert record["harness_pins"] == {"swegemma": "0.2.10", "adk-submission": "0.2.13"}
-    expected = {"swegemma": "0.2.10", "adk-submission": "0.2.13"}
-    _run_pin(first, expected, monkeypatch)
-    assert "Harness pins" in capsys.readouterr().out
-    with pytest.raises(RuntimeError, match="swegemma 0.2.9 != 0.2.10") as raised:
+        assert record["harness_verified_pairs"] == [
+            {"swegemma": "0.2.10", "adk-submission": "0.2.13"},
+            {"swegemma": "0.2.11", "adk-submission": "0.2.13"},
+        ]
+        assert "harness_pins" not in record
+    _run_pin(first, {"swegemma": "0.2.10", "adk-submission": "0.2.13"}, monkeypatch)
+    _run_pin(first, {"swegemma": "0.2.11", "adk-submission": "0.2.13"}, monkeypatch)
+    assert "Harness verified" in capsys.readouterr().out
+    with pytest.raises(RuntimeError, match=r"unverified harness \('0.2.9', '0.2.13'\)"):
         _run_pin(first, {"swegemma": "0.2.9", "adk-submission": "0.2.13"}, monkeypatch)
-    assert "Wheelhouse pin failed before model load" in str(raised.value)
-    assert "Refusing to start the model server." in str(raised.value)
-    with pytest.raises(RuntimeError, match="adk-submission 0.2.12 != 0.2.13"):
-        _run_pin(first, {"swegemma": "0.2.10", "adk-submission": "0.2.12"}, monkeypatch)
     with pytest.raises(RuntimeError, match="adk-submission is not installed"):
         _run_pin(first, {"swegemma": "0.2.10"}, monkeypatch)
     assert notebook["cells"][1]["cell_type"] == "code"

@@ -3,7 +3,12 @@
 Unevaluated copies of the frozen parents `agents/structured-v5` and
 `agents/single-v1`. Neither parent directory is edited. No score is claimed.
 
-On adk-submission 0.2.13 with swegemma 0.2.10, `include_thoughts: false` with
+Verified on swegemma 0.2.10 and 0.2.11 with adk-submission 0.2.13. Kaggle
+ignores the `/N` dataset pin and mounts the latest wheelhouse version, so the
+first-code-cell allow-list and the recorded installed versions are the real
+control. swegemma
+0.2.11 removed the `swegemma.models` discovery and registry helpers. On
+adk-submission 0.2.13 with swegemma 0.2.10, `include_thoughts: false` with
 no `thinking_budget` no longer turns thinking off. swegemma's default budget
 of 4096 overrides the missing budget (`generation.py` around lines 403-417),
 so both parents send `enable_thinking` true and `thinking_token_budget` 4096.
@@ -48,6 +53,7 @@ The eight existing archives repacked to their recorded hashes, including
 structured-v5 `6202ab26252df59061547e0fd7dbcc1e8ef62b5cb12c61c14c2b2e953865bbb5`
 and single-v1 `84b4b0f720493041704209dd175061c003be387fc49a826ebca0a13c0b5cf0f8`.
 
-swegemma 0.2.10 and adk-submission 0.2.13 are not on PyPI, and this VM has no
-Kaggle credentials for the competition wheelhouse. The stub-server capture
-against that harness was not run.
+Verified on swegemma 0.2.10 and 0.2.11 with adk-submission 0.2.13. Those wheels
+are not on PyPI, and this VM has no Kaggle credentials for the competition
+wheelhouse. The stub-server capture against that harness was not run. swegemma
+0.2.11 removed the `swegemma.models` discovery and registry helpers.

@@ -562,6 +562,50 @@ def test_abort_rules_validity_and_early_stop(tmp_path):
     assert early_stop_loser(loser_rows, 13) == "A"
 
 
+def test_session_records_installed_harness_on_post_run_manifests(tmp_path):
+    def run_evaluate(evaluator, task, dashboard, position, total):
+        return Result(resolved=False, patch="p\n")
+
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "run_manifest.json").write_text(
+        json.dumps(
+            {
+                "harness_verified": True,
+                "model_load_seconds": 9,
+                "task_ids": ["keep-me"],
+            }
+        )
+    )
+    run_session(
+        tmp_path,
+        ["t1"],
+        run_evaluate,
+        manifest={
+            "packages": {
+                "swegemma": "0.2.11",
+                "adk-submission": "0.2.13",
+                "vllm": "0.11.0",
+            }
+        },
+    )
+    pair = json.loads((run_dir / "pair_manifest.json").read_text())
+    assert pair["installed_harness"] == {"swegemma": "0.2.11", "adk-submission": "0.2.13"}
+    assert pair["packages"]["vllm"] == "0.11.0"
+    arm = json.loads((run_dir / "results" / "A" / "r1" / "run_manifest.json").read_text())
+    assert arm["installed_harness"] == {"swegemma": "0.2.11", "adk-submission": "0.2.13"}
+    assert arm["swegemma"] == "0.2.11"
+    assert arm["adk-submission"] == "0.2.13"
+    assert arm["harness_verified"] is True
+    assert arm["model_load_seconds"] is None
+    assert "task_ids" in arm
+    text = (run_dir / "pair_report.md").read_text()
+    assert "Harness: swegemma 0.2.11, adk-submission 0.2.13" in text
+    top = json.loads((run_dir / "run_manifest.json").read_text())
+    assert top["task_ids"] == ["keep-me"]
+    assert top["model_load_seconds"] == 9
+
+
 def test_budget_guard_lists_unrun_pairs(tmp_path):
     clock = Clock(0)
 

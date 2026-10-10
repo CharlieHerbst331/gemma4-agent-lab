@@ -1199,10 +1199,29 @@ def build_report(
     return report
 
 
+def _harness_report_lines(report):
+    versions = report.get("harness_versions") or []
+    distinct = []
+    for item in versions:
+        pair = (item.get("swegemma"), item.get("adk-submission"))
+        if pair not in distinct and pair != (None, None):
+            distinct.append(pair)
+    if not distinct:
+        return ["Harness: not recorded"]
+    shown = "; ".join(f"swegemma {sw}, adk-submission {adk}" for sw, adk in distinct)
+    lines = [f"Harness: {shown}"]
+    if report.get("harness_mixed"):
+        lines.append(
+            "WARNING: mixed harness versions across joined sessions, repeats, or prior runs."
+        )
+    return lines
+
+
 def render_report_md(report):
     lines = ["# Paired evaluation report", ""]
     lines.append(f"Protocol sha256: `{report.get('protocol_sha256')}`")
     lines.append(f"Schedule sha256: `{report.get('schedule_sha256')}`")
+    lines.extend(_harness_report_lines(report))
     lines.append("")
     lines.append("## Raw totals")
     for label, stats in (report.get("raw_totals") or {}).items():
@@ -1417,6 +1436,42 @@ def record_startup_health(server, events_path, attempts=STARTUP_HEALTH_POLLS, ti
             return
 
 
+def _read_json_dict(path):
+    if not _Path(path).is_file():
+        return None
+    try:
+        loaded = _json.loads(_Path(path).read_text())
+    except (OSError, ValueError):
+        return None
+    return loaded if isinstance(loaded, dict) else None
+
+
+def _pair_from_record(data):
+    """Installed swegemma and adk-submission versions, when a record has them."""
+    if not isinstance(data, dict):
+        return None
+    installed = data.get("installed_harness")
+    if isinstance(installed, dict) and (
+        installed.get("swegemma") or installed.get("adk-submission")
+    ):
+        return {
+            "swegemma": installed.get("swegemma"),
+            "adk-submission": installed.get("adk-submission"),
+        }
+    packages = data.get("packages")
+    if isinstance(packages, dict) and (packages.get("swegemma") or packages.get("adk-submission")):
+        return {
+            "swegemma": packages.get("swegemma"),
+            "adk-submission": packages.get("adk-submission"),
+        }
+    if data.get("swegemma") or data.get("adk-submission"):
+        return {
+            "swegemma": data.get("swegemma"),
+            "adk-submission": data.get("adk-submission"),
+        }
+    return None
+
+
 def execute_session(
     *,
     schedule,
@@ -1590,6 +1645,11 @@ def execute_session(
             for item in unrun
         ]
         manifest["restarts"] = restarts
+        installed = _pair_from_record(manifest) or _pair_from_record(
+            _read_json_dict(output_dir / "run_manifest.json")
+        )
+        if installed:
+            manifest["installed_harness"] = installed
         write_json_fsync(output_dir / "pair_manifest.json", manifest)
 
     def arm_dir(label, repeat):
@@ -1601,16 +1661,25 @@ def execute_session(
             for row in rows
             if row.get("arm") == label and row.get("repeat") == repeat
         ]
-        write_json_fsync(
-            arm_dir(label, repeat) / "run_manifest.json",
-            {
-                "sha256": arms[label]["sha256"],
-                "task_ids": attempted,
-                "arm": label,
-                "repeat": repeat,
-                "model_load_seconds": model_load_seconds,
-            },
-        )
+        recorded = {
+            "sha256": arms[label]["sha256"],
+            "task_ids": attempted,
+            "arm": label,
+            "repeat": repeat,
+            "model_load_seconds": model_load_seconds,
+        }
+        packages = manifest.get("packages")
+        if isinstance(packages, dict):
+            recorded["packages"] = packages
+        prior = _read_json_dict(output_dir / "run_manifest.json")
+        if isinstance(prior, dict) and "harness_verified" in prior:
+            recorded["harness_verified"] = prior["harness_verified"]
+        installed = _pair_from_record(manifest) or _pair_from_record(prior)
+        if installed:
+            recorded["swegemma"] = installed["swegemma"]
+            recorded["adk-submission"] = installed["adk-submission"]
+            recorded["installed_harness"] = installed
+        write_json_fsync(arm_dir(label, repeat) / "run_manifest.json", recorded)
 
     index = 0
     while index < len(schedule):
@@ -1919,6 +1988,15 @@ def execute_session(
         protocol_sha256=protocol_sha256,
         schedule_sha256=schedule_sha256,
     )
+    installed = _pair_from_record(manifest) or _pair_from_record(
+        _read_json_dict(output_dir / "run_manifest.json")
+    )
+    if installed:
+        manifest["installed_harness"] = installed
+        report["harness_versions"] = [dict(installed)]
+    else:
+        report["harness_versions"] = []
+    report["harness_mixed"] = False
     write_json_fsync(output_dir / "projection.json", projection)
     write_json_fsync(output_dir / "pair_report.json", report)
     (output_dir / "pair_report.md").write_text(render_report_md(report))
@@ -2070,6 +2148,7 @@ def start_model_server(server):
     ``inspect.getattr_static`` so a lazy namespace such as ``torch.classes``
     cannot run ``__getattr__``. The notebook does not star-import this name.
     """
+    import inspect
     import subprocess
     import sys
     import types
@@ -2780,6 +2859,7 @@ def _render_smoke_report(report):
         "",
         f"Protocol sha256: `{report.get('protocol_sha256')}`",
         f"Schedule sha256: `{report.get('schedule_sha256')}`",
+        *_harness_report_lines(report),
         "",
         "Arm order for the 5 tasks is AB, BA, AB, BA, AB, so A goes first on 3 tasks "
         "and B on 2, an odd count that one repeat cannot balance.",
@@ -3304,6 +3384,36 @@ def combine_pair_reports(run_dirs, protocol):
         protocol_sha256=protocol.get("_sha256"),
         schedule_sha256=protocol.get("_schedule_sha256"),
     )
+    versions = _collect_harness_versions(run_dirs)
+    report["harness_versions"] = versions
+    distinct = {(item.get("swegemma"), item.get("adk-submission")) for item in versions}
+    report["harness_mixed"] = len(distinct) > 1
     if protocol.get("purpose") == "smoke":
         return _apply_smoke_report(report, run_dirs)
     return report
+
+
+def _collect_harness_versions(run_dirs):
+    rows = []
+    for run_dir in run_dirs:
+        pair = _harness_pair_for_run(Path(run_dir))
+        if pair is not None:
+            rows.append({"run": str(Path(run_dir)), **pair})
+    return rows
+
+
+def _harness_pair_for_run(root):
+    """Installed versions from a finished run.
+
+    Generation-time ``pair_manifest.json`` lists ``harness_verified_pairs`` and
+    has no installed versions. After the kernel runs, the versions are on
+    ``run_manifest.json`` (top-level and ``results/<arm>/r<k>/``) and on the
+    post-run ``pair_manifest.json`` as ``installed_harness``.
+    """
+    paths = [root / "pair_manifest.json", root / "run_manifest.json"]
+    paths.extend(sorted(root.glob("results/*/*/run_manifest.json")))
+    for path in paths:
+        pair = _pair_from_record(_read_json_dict(path))
+        if pair is not None:
+            return pair
+    return None
