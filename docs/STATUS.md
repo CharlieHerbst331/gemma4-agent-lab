@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: October 8, 2026 (Pacific).
+Last updated: October 10, 2026.
 
 ## Unevaluated structured-v5 candidate
 
@@ -329,3 +329,23 @@ Which file holds what:
   `pair_report.json` `harness_versions` read that post-run record.
 
 Real 0.2.10 and 0.2.11 wheels were not installed here.
+
+## single-v3, no skills
+
+`agents/single-v3` is a new unevaluated candidate copied from `agents/single-v2`
+with the skills directory removed. Verification is a short `run_command` recipe
+under `/tmp`. `thinking.yaml` and `eval_config.yaml` are byte-identical to
+single-v2. The prompt is 6679 characters; single-v2's is 7980. Archive SHA256
+`253794f68346b3e4af7e739efced748d9e067f0d5d15f893459b28d7f28f4e61`. Hygiene gate
+pass. Not submitted. The twelve previous archive hashes are unchanged.
+
+`configs/protocols/v6-vs-single-v3.yaml` is dev-13, one repeat, arm A
+structured-v6 and arm B single-v3. It is not a matched pair. Schedule
+`629000fccc9d9da5bfeab9823fb0e216d8c044b3a8753f320f0561223d5d24ed`.
+`configs/protocols/single-v2-vs-single-v3-toolcall-smoke.yaml` is the five
+tool-call tasks in reverse schedule order, one repeat, arm A single-v2 and arm
+B single-v3. Schedule
+`0c4e0c31473075ab9cfed9cf305a3ed988e274c9da1d684630136b2b16d18704`. It is smoke
+and not promotion eligible. `matched_pair: false` skips only the shared-file
+identity check. Existing protocols omit the flag and keep the check. No Kaggle
+push and no GPU run.
