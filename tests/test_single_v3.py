@@ -45,6 +45,10 @@ def test_single_v3_drops_skills_and_keeps_the_other_files():
     parent = (V2 / "prompts" / "system.md").read_text()
     assert len(prompt) <= len(parent)
     for banned in BANNED:
+        if banned == "check.py":
+            assert prompt.count("check.py") == prompt.count("repro_check.py")
+            assert "scripts/check.py" not in prompt
+            continue
         assert banned not in prompt
     for phrase in (
         "about 12 counted calls or about 95 seconds",
@@ -56,17 +60,34 @@ def test_single_v3_drops_skills_and_keeps_the_other_files():
         "stop editing and call submit_patch with the current diff",
         "If the same tool call fails twice, change the call or the tool",
         "never write repro*.py in /workspace or the repo",
-        "python - <<'EOF'",
+        "cat > /tmp/repro_check.py <<'EOF'",
+        "import <module>  # replace this line with an assert on the issue behavior",
+        "before it counts as a repro",
+        "python /tmp/repro_check.py",
         "Do not nest quotes",
         "unquoted heredoc",
         "python -m pytest <path>::<test> -x -q -p no:cacheprovider",
         "git status --short",
         "git diff --stat",
+        "Skip that git step when fewer than 60 s remain",
+        "issue-number-only UNCERTAIN path",
+        "A conftest.py",
+        "A pytest.ini",
+        "empty diff",
         "Fix #3104",
         "Do not search",
         "module.__file__",
     ):
         assert phrase in prompt
+    assert len(prompt) <= 6679
+    for gone in (
+        "assert 1 == 2",
+        "put the real failing assert here",
+        "empty changed_paths",
+        "python - <<'EOF'",
+        "rerun that script",
+    ):
+        assert gone not in prompt
     left = load_yaml(V2 / "agent.yaml", V2)
     right = load_yaml(V3 / "agent.yaml", V3)
     assert right["tools"] == left["tools"]
@@ -189,7 +210,7 @@ def test_report_banners_and_skill_table_without_skills(tmp_path):
     head = "\n".join(text.splitlines()[:8])
     assert UNMATCHED in head
     assert "skill removal and the run_command recipe" in head
-    assert "Arm B has no skills. Skill calls for that arm are 0." in text
+    assert "\n\nArm B has no skills. Skill calls for that arm are 0.\n" in text
     assert "| B | r1 | fastapi_14786 | 0 | 0 | 0 | True | 1 | empty |" in text
     assert "| A | r1 | fastapi_14786 | 1 |" in text
 

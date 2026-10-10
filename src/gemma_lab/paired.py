@@ -2941,7 +2941,10 @@ def _render_smoke_report(report):
         lines.append(f"- {label}: resolved {stats.get('resolved')} / {stats.get('rows')}")
     lines.append("")
     lines.extend(tool_failure_lines(report.get("tool_failures") or []))
-    for label in report.get("arms_without_skills") or []:
+    missing_skills = report.get("arms_without_skills") or []
+    if missing_skills:
+        lines.append("")
+    for label in missing_skills:
         lines.append(f"Arm {label} has no skills. Skill calls for that arm are 0.")
     lines.extend(["", "## Projection", note, "", "## Decision rule", note])
     lines.append("rule_winner: null")

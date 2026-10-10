@@ -335,8 +335,10 @@ Real 0.2.10 and 0.2.11 wheels were not installed here.
 `agents/single-v3` is a new unevaluated candidate copied from `agents/single-v2`
 with the skills directory removed. Verification is a short `run_command` recipe
 under `/tmp`. `thinking.yaml` and `eval_config.yaml` are byte-identical to
-single-v2. The prompt is 6679 characters; single-v2's is 7980. Archive SHA256
-`253794f68346b3e4af7e739efced748d9e067f0d5d15f893459b28d7f28f4e61`. Hygiene gate
+single-v2. The prompt is 6656 characters; single-v2's is 7980. The repro example
+is an import under `/tmp/repro_check.py`, not a failing placeholder assert.
+Archive SHA256
+`37abebce49c490d5cdc6abf41b92067aa480929e508084098e883ab9c1938ffc`. Hygiene gate
 pass. Not submitted. The twelve previous archive hashes are unchanged.
 
 `configs/protocols/v6-vs-single-v3.yaml` is dev-13, one repeat, arm A
