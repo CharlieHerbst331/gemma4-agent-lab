@@ -3,9 +3,11 @@ import io
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -382,6 +384,59 @@ def check_evaluation(archive, evaluation, scorer_overhead_seconds=DEFAULT_SCORER
     return result
 
 
+_TIMEOUT_NOTE = (
+    "Upload timed out and may have been received. Check Kaggle's submissions list before retrying."
+)
+
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)\bBearer\s+\S+"),
+    re.compile(
+        r"(?i)\b(?:Authorization|Proxy-Authorization|Cookie|Set-Cookie|X-Api-Key)\s*:\s*\S+"
+    ),
+    re.compile(
+        r"(?im)^[ \t]*(?:authorization|proxy-authorization|cookie|set-cookie"
+        r"|x-api-key)\s*:.*$"
+    ),
+    re.compile(
+        r"(?i)\b(?:KAGGLE_(?:API_)?(?:TOKEN|KEY|SECRET)|KAGGLE_USERNAME|"
+        r"(?:api[_-]?)?(?:access[_-]?)?token|api[_-]?key|secret|password|"
+        r"refresh[_-]?token)\s*[=:]\s*\S+"
+    ),
+    re.compile(r"(?i)[?&](?:token|access_token|api_key|key)=[^&\s]+"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
+)
+
+
+def _scrub_secrets(text: str) -> str:
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub("[REDACTED]", text)
+    return text
+
+
+def _failure_text(exc: BaseException) -> str:
+    """Scrubbed submit error, including an HTTP body when the client exposes one."""
+    parts = [str(exc).strip()]
+    response = getattr(exc, "response", None)
+    body = getattr(response, "text", None) if response is not None else None
+    if isinstance(body, str) and body.strip() and body.strip() not in parts[0]:
+        parts.append(body.strip())
+    return _scrub_secrets("\n".join(part for part in parts if part)) or "submit failed"
+
+
+def _append_ledger(ledger: Path, row: dict) -> None:
+    with ledger.open("a") as handle:
+        handle.write(json.dumps(row) + "\n")
+
+
+def _replace_last_ledger_row(ledger: Path, row: dict) -> None:
+    lines = ledger.read_text().splitlines()
+    if lines:
+        lines[-1] = json.dumps(row)
+    else:
+        lines = [json.dumps(row)]
+    ledger.write_text("\n".join(lines) + "\n")
+
+
 def submit(
     archive,
     message,
@@ -406,8 +461,10 @@ def submit(
     plan["evaluation"] = check_evaluation(
         archive, evaluation, scorer_overhead_seconds=scorer_overhead_seconds
     )
-    # Reserve before upload so an interrupted upload cannot cause an automatic duplicate.
-    # The local lock serializes this user's processes; Kaggle remains authoritative for team usage.
+    # Reserve before upload so a timeout, where the file may already have been received,
+    # cannot cause an automatic duplicate. A definite submit error is recorded as failed
+    # and does not consume the local daily slot. The local lock serializes this user's
+    # processes; Kaggle remains authoritative for team usage.
     import fcntl
 
     ledger.parent.mkdir(parents=True, exist_ok=True)
@@ -429,13 +486,38 @@ def submit(
             raise ValueError("Local daily slot reserved/used; reconcile history before retrying")
         if any(r.get("sha256") == digest and r["status"] == "submitted" for r in previous):
             raise ValueError("Identical archive already submitted")
-        plan["status"] = "reserved"
-        with ledger.open("a") as handle:
-            handle.write(json.dumps(plan) + "\n")
-        output = kaggle(
-            "competitions", "submit", COMPETITION, "-f", archive, "-m", message, timeout=600
-        )
-        plan = {**plan, "status": "submitted", "response": output}
-        with ledger.open("a") as handle:
-            handle.write(json.dumps(plan) + "\n")
+        # Kaggle CreateSubmission rejects uploads whose file name is not submission.zip.
+        with tempfile.TemporaryDirectory(prefix="gemma-lab-submit-") as temp_name:
+            staged = Path(temp_name) / "submission.zip"
+            try:
+                os.link(archive, staged)
+            except OSError:
+                shutil.copyfile(archive, staged)
+            if sha256(staged) != digest:
+                raise RuntimeError("staged submission.zip hash does not match the source archive")
+            plan["status"] = "reserved"
+            _append_ledger(ledger, plan)
+            try:
+                output = kaggle(
+                    "competitions",
+                    "submit",
+                    COMPETITION,
+                    "-f",
+                    staged,
+                    "-m",
+                    message,
+                    timeout=600,
+                )
+            except subprocess.TimeoutExpired as exc:
+                note = _scrub_secrets(f"{_TIMEOUT_NOTE} {exc}")
+                plan = {**plan, "status": "reserved", "error": note}
+                _replace_last_ledger_row(ledger, plan)
+                raise RuntimeError(note) from exc
+            except Exception as exc:
+                text = _failure_text(exc)
+                plan = {**plan, "status": "failed", "error": text}
+                _replace_last_ledger_row(ledger, plan)
+                raise RuntimeError(text) from exc
+            plan = {**plan, "status": "submitted", "response": output}
+            _append_ledger(ledger, plan)
     return plan

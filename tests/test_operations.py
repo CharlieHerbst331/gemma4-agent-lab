@@ -1,4 +1,5 @@
 import json
+import subprocess
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -7,6 +8,7 @@ import pytest
 
 from gemma_lab import operations
 from gemma_lab.bundle import pack
+from gemma_lab.common import sha256
 from gemma_lab.operations import check_evaluation, submissions_today
 
 
@@ -46,27 +48,210 @@ def test_history_parser():
         submissions_today("ref,status\n42,complete\n")
 
 
-def test_submission_reservation_blocks_retry_after_network_failure(tmp_path, monkeypatch):
-    archive, ledger = tmp_path / "submission.zip", tmp_path / "ledger.jsonl"
-    pack(Path("agents/baseline"), archive)
-    evaluation = evidence(tmp_path, archive)
+def _ledger_rows(ledger):
+    if not ledger.exists():
+        return []
+    return [json.loads(line) for line in ledger.read_text().splitlines() if line]
+
+
+def _install_kaggle(monkeypatch, on_submit):
     calls = []
 
     def api(*args, **kwargs):
         calls.append(args)
         if "submissions" in args:
             return "No submissions found\n"
-        raise RuntimeError("connection interrupted during upload")
+        return on_submit(*args, **kwargs)
 
     monkeypatch.setattr(operations, "kaggle", api)
-    with pytest.raises(RuntimeError):
-        operations.submit(archive, "test", ledger, execute=True, evaluation=evaluation)
-    row = json.loads(ledger.read_text())
-    assert row["status"] == "reserved"
-    assert row["created_at"].startswith(datetime.now(UTC).date().isoformat())
+    return calls
+
+
+def _submit_calls(calls):
+    return [args for args in calls if "submit" in args]
+
+
+class _UploadError(RuntimeError):
+    def __init__(self):
+        super().__init__(
+            "400 Client Error: Bad Request for url: "
+            "https://api.kaggle.com/v1/competitions.CompetitionApiService/CreateSubmission "
+            "KAGGLE_API_TOKEN=kg_live_abcdef0123 Authorization: Bearer supersecretvalue"
+        )
+        self.response = type(
+            "Response",
+            (),
+            {
+                "text": '{"message":"file must be named submission.zip"}',
+                "headers": {"Authorization": "Bearer kgat_fromheader"},
+            },
+        )()
+
+
+def test_execute_uploads_submission_zip_with_source_bytes(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    seen = {}
+
+    def on_submit(*args, **kwargs):
+        path = Path(args[args.index("-f") + 1])
+        seen["path"] = path
+        seen["name"] = path.name
+        seen["bytes"] = path.read_bytes()
+        seen["timeout"] = kwargs.get("timeout")
+        return "Successfully submitted"
+
+    _install_kaggle(monkeypatch, on_submit)
+    plan = operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert seen["name"] == "submission.zip"
+    assert seen["bytes"] == archive.read_bytes()
+    assert seen["timeout"] == 600
+    assert not seen["path"].exists()
+    assert plan["status"] == "submitted"
+    assert plan["sha256"] == sha256(archive)
+    assert plan["response"] == "Successfully submitted"
+    assert plan["archive"] == str(archive.resolve())
+    rows = _ledger_rows(ledger)
+    assert [row["status"] for row in rows] == ["reserved", "submitted"]
+    assert rows[0]["sha256"] == rows[1]["sha256"] == sha256(archive)
+    assert "error" not in rows[1]
+
+
+def test_submit_failure_records_failed_and_allows_same_day_retry(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    state = {"n": 0}
+    seen = {}
+
+    def on_submit(*args, **kwargs):
+        path = Path(args[args.index("-f") + 1])
+        seen["path"] = path
+        seen["name"] = path.name
+        seen["bytes"] = path.read_bytes()
+        state["n"] += 1
+        if state["n"] == 1:
+            raise _UploadError()
+        return "Successfully submitted"
+
+    calls = _install_kaggle(monkeypatch, on_submit)
+    with pytest.raises(RuntimeError, match="400 Client Error") as raised:
+        operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert "file must be named submission.zip" in str(raised.value)
+    assert not seen["path"].exists()
+    failed = _ledger_rows(ledger)
+    assert [row["status"] for row in failed] == ["failed"]
+    assert failed[0]["sha256"] == sha256(archive)
+    assert "400 Client Error" in failed[0]["error"]
+    assert "file must be named submission.zip" in failed[0]["error"]
+    assert failed[0]["created_at"].startswith(datetime.now(UTC).date().isoformat())
+    recorded = ledger.read_text()
+    for secret in ("kg_live_abcdef0123", "supersecretvalue", "kgat_fromheader"):
+        assert secret not in recorded
+        assert secret not in str(raised.value)
+    plan = operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert plan["status"] == "submitted"
+    assert len(_submit_calls(calls)) == 2
+    assert seen["name"] == "submission.zip"
+    assert seen["bytes"] == archive.read_bytes()
+
+
+def test_submit_timeout_stays_reserved_and_blocks_retry(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    seen = {}
+
+    def on_submit(*args, **kwargs):
+        path = Path(args[args.index("-f") + 1])
+        seen["path"] = path
+        seen["name"] = path.name
+        raise subprocess.TimeoutExpired(cmd=["kaggle", "competitions", "submit"], timeout=600)
+
+    calls = _install_kaggle(monkeypatch, on_submit)
+    with pytest.raises(RuntimeError, match="submissions list") as raised:
+        operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert "may have been received" in str(raised.value)
+    assert not seen["path"].exists()
+    assert seen["name"] == "submission.zip"
+    rows = _ledger_rows(ledger)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "reserved"
+    assert "submissions list" in rows[0]["error"]
+    assert "may have been received" in rows[0]["error"]
     with pytest.raises(ValueError, match="reserved"):
-        operations.submit(archive, "test", ledger, execute=True, evaluation=evaluation)
-    assert sum("submit" in args for args in calls) == 1
+        operations.submit(archive, "retry", ledger, execute=True, evaluation=evaluation)
+    assert len(_submit_calls(calls)) == 1
+
+
+def test_staged_hash_mismatch_does_not_upload(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+
+    def refuse_link(*args, **kwargs):
+        raise OSError("cross device")
+
+    def bad_copy(src, dst, *args, **kwargs):
+        Path(dst).write_bytes(b"not the archive")
+
+    monkeypatch.setattr(operations.os, "link", refuse_link)
+    monkeypatch.setattr(operations.shutil, "copyfile", bad_copy)
+    calls = _install_kaggle(monkeypatch, lambda *args, **kwargs: pytest.fail("upload attempted"))
+    with pytest.raises(RuntimeError, match="does not match"):
+        operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert _submit_calls(calls) == []
+    assert _ledger_rows(ledger) == []
+
+
+def test_legacy_submitted_row_without_error_still_blocks(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    day = datetime.now(UTC).date().isoformat()
+    ledger.write_text(
+        json.dumps(
+            {
+                "created_at": f"{day}T00:00:00+00:00",
+                "status": "submitted",
+                "sha256": sha256(archive),
+            }
+        )
+        + "\n"
+    )
+    calls = _install_kaggle(monkeypatch, lambda *args, **kwargs: pytest.fail("upload attempted"))
+    with pytest.raises(ValueError, match="reserved"):
+        operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert _submit_calls(calls) == []
+
+
+def test_legacy_failed_row_without_error_does_not_block(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    day = datetime.now(UTC).date().isoformat()
+    ledger.write_text(
+        json.dumps(
+            {
+                "created_at": f"{day}T00:00:00+00:00",
+                "status": "failed",
+                "sha256": "older-attempt",
+            }
+        )
+        + "\n"
+    )
+
+    def on_submit(*args, **kwargs):
+        path = Path(args[args.index("-f") + 1])
+        assert path.name == "submission.zip"
+        return "Successfully submitted"
+
+    _install_kaggle(monkeypatch, on_submit)
+    plan = operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert plan["status"] == "submitted"
+    assert _ledger_rows(ledger)[0]["status"] == "failed"
+    assert "error" not in _ledger_rows(ledger)[0]
 
 
 def test_plan_has_no_network_side_effects(tmp_path, monkeypatch):
