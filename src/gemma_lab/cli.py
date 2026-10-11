@@ -86,6 +86,17 @@ def main(argv=None):
     pair_report.add_argument("runs", nargs="+", type=Path)
     pair_report.add_argument("--protocol", type=Path, required=True)
     pair_report.add_argument("--output", type=Path, required=True)
+    pair_report.add_argument(
+        "--allow-protocol-mismatch",
+        action="store_true",
+        help=(
+            "When pair_manifest protocol_sha256 differs from the protocol file, "
+            "print both hashes and continue. The warning is on stderr and in the "
+            "report header. Without this flag the command exits 1 and writes nothing. "
+            "The hash is the raw protocol file, so a comment, trailing newline, or "
+            "CRLF change is a mismatch."
+        ),
+    )
     push = sub.add_parser("push-notebook", help="Upload and run a prepared private notebook")
     push.add_argument("folder", type=Path)
     push.add_argument("--execute", action="store_true")
@@ -222,7 +233,12 @@ def main(argv=None):
             case "pair-report":
                 from gemma_lab.paired import report_from_runs
 
-                result = report_from_runs(args.runs, args.protocol, args.output)
+                result = report_from_runs(
+                    args.runs,
+                    args.protocol,
+                    args.output,
+                    allow_protocol_mismatch=args.allow_protocol_mismatch,
+                )
             case "upload-bundle":
                 result = operations.upload_bundle(
                     args.archive, args.owner, args.slug, args.output, args.execute, args.version

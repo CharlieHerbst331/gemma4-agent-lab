@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import warnings
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -2954,22 +2955,37 @@ def _render_smoke_report(report):
     return "\n".join(lines) + "\n"
 
 
+def _protocol_mismatch_prefix(report):
+    notes = report.get("protocol_mismatch_warning") or []
+    if isinstance(notes, str):
+        notes = [notes]
+    notes = [note for note in notes if note]
+    if not notes:
+        return ""
+    return "\n".join(notes) + "\n\n"
+
+
 def _pair_report_render_report_md(report):
     if report.get("purpose") == "smoke":
-        return _render_smoke_report(report)
-    text = _NOTEBOOK_RENDER_REPORT_MD(report)
-    lines = text.splitlines()
-    rendered = []
-    banner = report.get("notes")
-    if isinstance(banner, str) and banner.strip():
-        rendered.append(banner.strip())
-        rendered.append("")
-    for line in lines:
-        if line.startswith("Hygiene: "):
-            rendered.extend(_compact_hygiene_lines(report.get("hygiene")))
-        else:
-            rendered.append(line)
-    return "\n".join(rendered) + "\n"
+        text = _render_smoke_report(report)
+    else:
+        text = _NOTEBOOK_RENDER_REPORT_MD(report)
+        lines = text.splitlines()
+        rendered = []
+        banner = report.get("notes")
+        if isinstance(banner, str) and banner.strip():
+            rendered.append(banner.strip())
+            rendered.append("")
+        for line in lines:
+            if line.startswith("Hygiene: "):
+                rendered.extend(_compact_hygiene_lines(report.get("hygiene")))
+            else:
+                rendered.append(line)
+        text = "\n".join(rendered) + "\n"
+    prefix = _protocol_mismatch_prefix(report)
+    if prefix:
+        text = prefix + text
+    return text
 
 
 def _hygiene_group_ready(path):
@@ -3422,7 +3438,7 @@ def summarize_pair_run(output_dir):
     }
 
 
-def report_from_runs(run_dirs, protocol_path, output):
+def report_from_runs(run_dirs, protocol_path, output, allow_protocol_mismatch=False):
     """Regenerate pair_report.json and pair_report.md for one or more sessions."""
     from gemma_lab.common import write_json
 
@@ -3451,7 +3467,9 @@ def report_from_runs(run_dirs, protocol_path, output):
                 cap = float(meta["budgets"]["max_time_minutes"]) * 60.0
     protocol["_cap_seconds"] = 0 if cap is None else cap
     protocol["_arm_meta"] = arm_meta
-    report = combine_pair_reports(run_dirs, protocol)
+    report = combine_pair_reports(
+        run_dirs, protocol, allow_protocol_mismatch=allow_protocol_mismatch
+    )
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     write_json(output / "pair_report.json", report)
@@ -3460,10 +3478,46 @@ def report_from_runs(run_dirs, protocol_path, output):
     return {"output": str(output), "promotion": report.get("promotion"), "blocked": blocked}
 
 
-def combine_pair_reports(run_dirs, protocol):
+def _check_manifest_protocol(manifest, protocol, run_dir, allow_mismatch=False):
+    """Refuse a manifest recorded for a different protocol file.
+
+    Several protocols share one schedule hash, so the schedule check does not
+    catch a run fed to the wrong protocol. The compared hash is the raw protocol
+    file, so a comment, trailing newline, or CRLF change is a mismatch.
+    ``allow_mismatch`` turns that into a warning instead of a refusal. Older
+    stored runs and the test fixtures omit protocol_sha256; those still report,
+    with a warning. Returns the mismatch warning text, or None.
+    """
+    recorded = manifest.get("protocol_sha256") if isinstance(manifest, dict) else None
+    expected = protocol.get("_sha256")
+    if not isinstance(recorded, str) or not recorded.strip():
+        warnings.warn(
+            f"{run_dir} pair_manifest.json has no protocol_sha256; "
+            "older runs are accepted without that check",
+            UserWarning,
+            stacklevel=2,
+        )
+        return None
+    if recorded == expected:
+        return None
+    message = (
+        f"{run_dir}: pair_manifest protocol_sha256 {recorded} does not match protocol {expected}"
+    )
+    if not allow_mismatch:
+        raise ValueError(message)
+    import sys
+
+    note = f"WARNING: protocol hash mismatch allowed. {message}"
+    print(note, file=sys.stderr, flush=True)
+    warnings.warn(note, UserWarning, stacklevel=2)
+    return note
+
+
+def combine_pair_reports(run_dirs, protocol, allow_protocol_mismatch=False):
     rows = []
     loads = []
     overheads = []
+    mismatch_notes = []
     for run_dir in run_dirs:
         path = Path(run_dir) / "pair_results.jsonl"
         if not path.exists():
@@ -3474,6 +3528,14 @@ def combine_pair_reports(run_dirs, protocol):
         manifest_path = Path(run_dir) / "pair_manifest.json"
         if manifest_path.exists():
             manifest = json.loads(manifest_path.read_text())
+            note = _check_manifest_protocol(
+                manifest,
+                protocol,
+                run_dir,
+                allow_mismatch=allow_protocol_mismatch,
+            )
+            if note:
+                mismatch_notes.append(note)
             for session in manifest.get("session") or []:
                 if session.get("model_load_seconds") is not None:
                     loads.append(session["model_load_seconds"])
@@ -3518,6 +3580,8 @@ def combine_pair_reports(run_dirs, protocol):
         report["notes"] = notes.strip()
     if protocol.get("matched_pair") is False:
         report["matched_pair"] = False
+    if mismatch_notes:
+        report["protocol_mismatch_warning"] = mismatch_notes
     return report
 
 

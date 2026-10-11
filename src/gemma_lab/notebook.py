@@ -27,6 +27,7 @@ DATA_WAIT_TIMEOUT_SECONDS = 300
 DATA_WAIT_LOG_EVERY_SECONDS = 30
 DATA_PROBE_TIMEOUT_SECONDS = 30
 DATA_PROBE_PATH = "/kaggle/working/data_mount_probe.txt"
+DATA_READ_TIMEOUT_SECONDS = 10
 
 
 def wait_for_tasks_jsonl(
@@ -37,16 +38,28 @@ def wait_for_tasks_jsonl(
     log_every=DATA_WAIT_LOG_EVERY_SECONDS,
     probe_timeout=DATA_PROBE_TIMEOUT_SECONDS,
     probe_path=DATA_PROBE_PATH,
+    read_timeout=DATA_READ_TIMEOUT_SECONDS,
     clock=None,
     sleep=None,
     runner=None,
 ):
-    """Poll until ``path`` is a non-empty readable file.
+    """Poll until ``path`` looks like a finished tasks file.
 
-    A file that is already ready returns without sleeping. The first miss is
-    logged, then again about every ``log_every`` seconds. After ``timeout``,
-    print mount diagnostics and raise FileNotFoundError.
+    Blank and whitespace-only lines are ignored, and a final newline is not
+    required, matching ``load_tasks``. Every other line must parse as a JSON
+    object. The file is ready only when that is true and its size is unchanged
+    across two polls, so a half-written file whose last line happens to parse
+    is not accepted at once. A file that is already valid therefore waits one
+    interval. The returned wait is rounded to one decimal.
+
+    The first miss is logged with the reason (missing, empty, still changing,
+    truncated, or unparseable), then again about every ``log_every`` seconds.
+    After ``timeout``, print mount diagnostics and raise FileNotFoundError.
+    ``stat`` and the read run on a daemon thread. If they are still going after
+    ``read_timeout``, that poll counts as not ready. Any other exception does too.
     """
+    import json
+    import threading
     import time
     from pathlib import Path
 
@@ -59,26 +72,79 @@ def wait_for_tasks_jsonl(
     deadline = start + timeout
     next_log = start
     logged = False
+    reason = "missing"
+    seen_size = None
 
-    def ready():
-        try:
-            if not path.is_file() or path.stat().st_size <= 0:
-                return False
-            with path.open("rb") as handle:
-                return bool(handle.read(1))
-        except OSError:
-            return False
+    def classify_text(text):
+        records = [line for line in text.splitlines() if line.strip()]
+        if not records:
+            return "empty"
+        last = len(records) - 1
+        for index, line in enumerate(records):
+            try:
+                value = json.loads(line)
+            except Exception:
+                return "truncated" if index == last else "unparseable"
+            if not isinstance(value, dict):
+                return "unparseable"
+        return None
+
+    def snapshot():
+        # A hung mount must not block the poll. join returns and the thread is
+        # a daemon, so this call gives up after read_timeout.
+        box = {}
+
+        def work():
+            try:
+                if not path.exists() or not path.is_file():
+                    box["state"] = "missing"
+                    return
+                size = path.stat().st_size
+                if size <= 0:
+                    box["state"] = "empty"
+                    return
+                text = path.read_text(encoding="utf-8")
+            except Exception:
+                try:
+                    if not path.exists():
+                        box["state"] = "missing"
+                        return
+                except Exception:
+                    box["state"] = "unreadable"
+                    return
+                box["state"] = "unreadable"
+                return
+            box["size"] = size
+            box["state"] = classify_text(text)
+
+        worker = threading.Thread(target=work, daemon=True)
+        worker.start()
+        worker.join(read_timeout)
+        if worker.is_alive() or "state" not in box:
+            return "unreadable", None
+        return box["state"], box.get("size")
 
     while True:
         now = clock()
-        if ready():
-            waited = now - start
+        try:
+            state, size = snapshot()
+        except Exception:
+            state, size = "unreadable", None
+        if state is None and size is not None and seen_size is not None and size == seen_size:
+            waited = round(now - start, 1)
             print(f"tasks.jsonl ready after {waited:.1f}s: {path}", flush=True)
             return waited
+        if state is None:
+            reason = "still changing"
+            seen_size = size
+        else:
+            reason = state
+            seen_size = None
         if now >= deadline:
             break
         if not logged or now + 1e-9 >= next_log:
-            print(f"waiting for {path} ({now - start:.0f}s elapsed)", flush=True)
+            elapsed = now - start
+            print(f"waiting for {path} ({reason}, {elapsed:.0f}s elapsed)", flush=True)
             logged = True
             next_log = now + log_every
         remaining = deadline - now
@@ -126,7 +192,8 @@ def wait_for_tasks_jsonl(
     except OSError as exc:
         print(f"could not write probe to {dest}: {exc}", flush=True)
     raise FileNotFoundError(
-        f"{path} was not ready after {waited:.0f}s (limit {timeout:g}s). Probe output: {dest}"
+        f"{path} was not ready after {waited:.0f}s (limit {timeout:g}s); "
+        f"last check: {reason}. Probe output: {dest}"
     )
 
 
@@ -142,6 +209,7 @@ def data_wait_prelude():
             ("DATA_WAIT_LOG_EVERY_SECONDS", DATA_WAIT_LOG_EVERY_SECONDS),
             ("DATA_PROBE_TIMEOUT_SECONDS", DATA_PROBE_TIMEOUT_SECONDS),
             ("DATA_PROBE_PATH", DATA_PROBE_PATH),
+            ("DATA_READ_TIMEOUT_SECONDS", DATA_READ_TIMEOUT_SECONDS),
         )
     )
     return constants + "\n\n" + inspect.getsource(wait_for_tasks_jsonl).rstrip() + "\n"
