@@ -38,6 +38,7 @@ def kaggle(*args, timeout=120):
         [sys.executable, "-m", "kaggle", *map(str, args)],
         capture_output=True,
         text=True,
+        errors="replace",
         timeout=timeout,
     )
     stdout = proc.stdout or ""
