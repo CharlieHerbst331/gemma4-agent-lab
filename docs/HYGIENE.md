@@ -63,6 +63,27 @@ reset is one `git checkout` that names files a normal workspace lacks
 edits survive into grading. This is inferred from the package source. The
 hosted scorer has not been re-run to confirm it. Do not weaken H2.
 
+## H3 and read-only shell commands
+
+`H3.edit_after_submit` warns when a call after the last `submit_patch` can change files. `edit_file` and `write_file` always count. A `run_command` counts only when the command can modify files. `get_status` and `read_file` do not.
+
+A compound command is read-only only when every part is. Separators are `&&`, `||`, `;`, `|`, a bare `&`, and newlines. The executable must be a bare name with no `/`, so `./git`, `./cat`, and `/tmp/x/git` count. A leading `NAME=value` prefix counts, including `GIT_EXTERNAL_DIFF=` and `GIT_PAGER=`. An empty command counts. `python` and `python3` count in every form, including `python -c` and `python -m`.
+
+The allow-list is:
+
+- `git status`, `git diff`, `git log`, and `git show` only. No option may appear before the subcommand, so `-c`, `-C`, `--git-dir`, `--work-tree`, `--namespace`, and `--exec-path` count. After the subcommand, a flag is read-only only when it is one of `--stat`, `--shortstat`, `--numstat`, `--name-only`, `--name-status`, `--cached`, `--staged`, `--exit-code`, `-p`, `--patch`, `--color`, `--no-color`, `--word-diff`, `--ignore-space-change`, `--ignore-all-space`, `--ignore-blank-lines`, `-w`, `-b`, `--minimal`, `--raw`, `--summary`, `--short`, `-s`, `--porcelain`, `--branch`, `-z`, `--null`, `--oneline`, `--graph`, `--decorate`, `--all`, `--follow`, `--abbrev-commit`, `--reverse`, `--check`, `--no-prefix`, `--full-index`, `--no-ext-diff`, `--renames`, `--no-renames`, `--ahead-behind`, `--no-ahead-behind`, `-v`, `--verbose`, `--long`, `--column`, `--no-column`, `--show-stash`, `--first-parent`, `--compact-summary`, or a valued flag `-U`, `--unified`, `-n`, `--max-count`, `--pretty`, `--format`, `--abbrev`, `-u`, `--untracked-files`, `--diff-filter`, or `--ignore-submodules`. Only `-U`, `-n`, `--max-count`, and `--diff-filter` take the next word as a value: that word must not start with `-`, and for `-U`, `-n`, and `--max-count` it must be digits only. `--unified`, `--pretty`, `--format`, `--abbrev`, `-u`, `--untracked-files`, and `--ignore-submodules` are flags by themselves, and take a value only as `=value`. A bare `--abbrev`, `--pretty`, `--format`, `--unified`, `-u`, or `--untracked-files` does not consume the next word. A single token `-<digits>` such as `-5`, or `-U<digits>` such as `-U3`, is allowed. `--output` (any `--output*`), `--ext-diff`, `--textconv` (any `--textconv*`), `-c`, and `-C` count even after the subcommand. Anything after `--` is a path. Any other subcommand counts, including `apply`, `checkout`, `reset`, `stash`, `commit`, `add`, and `blame`. A repo-configured `core.fsmonitor`, textconv driver, or hook can run a program under plain `git status` or `git diff`. That needs an earlier config write, which itself counts.
+- `grep` and `rg`, except any option whose name starts with `--pre` (including `--pre` and `--pre-glob`) and `--hostname-bin` (with or without `=`). `rg -z` and `rg --search-zip` count, including a short cluster that contains `z`.
+- `sed` only as `sed -n '<script>' [file...]`, or the same with `--quiet` or `--silent`. The script must be a print command: a line address or range, or a `/re/` address, ending in `p`, such as `1,40p`, `151,300p`, or `/re/p`. `sed` without that quiet flag counts. So do `-i`, `--in-place`, `-f`, `-e`, `w`, `e`, `r`, `W`, and `s///w`.
+- `find` except `-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`, `-fprint0`, `-fprintf`, and `-fls`.
+- `ls`, `cat`, `head`, `wc`, `pwd`, `echo`, `printf`, `stat`, `cut`, and `tr`, with any arguments.
+- `tail` with any arguments except `-f`, `-F`, and `--follow` (with or without `=`), including a short cluster that contains `f` or `F`. Those forms block until timeout, so they count.
+- `sort`, `uniq`, and `diff` with limited arguments. `sort` allows only the short flags `-n`, `-r`, `-u`, `-k`, `-t`, `-f`, `-b`, `-c`, `-s`, and `-z`, which may be bundled, plus input files. `-k` and `-t` take a value: the rest of that cluster, or the next word when it does not start with `-`. `-o` (including `-oout` and a bundled `o` such as `-no`), `--output`, `--compress-program`, `-T`, `--temporary-directory`, `--random-source`, `--files0-from`, and any other long option count. `uniq` allows only `-c`, `-d`, `-u`, `-i`, and `-z`, which may be bundled, and at most one positional operand. A second positional is an output file (`uniq in.txt out`) and counts. `diff` compares the files it is given; it has no option that writes a file or runs a program, so its arguments are accepted.
+- `cd` with a directory, `--`, `-`, `-L`, or `-P`.
+
+`>`, `>>`, and `&>` onto a file count. The same operators onto `/dev/null` do not, and neither does an fd copy such as `2>&1` or `>&2`. `tee`, `mv`, `cp`, `rm`, `touch`, `mkdir`, and `patch` count because they are not on the list.
+
+These count wherever they appear: `$(...)`, `${...}`, backticks, `<(...)`, `>(...)`, a here-doc (`<<`), a backslash, and `{` or `}`. An unterminated quote counts. The classifier does not interpret backslash escapes.
+
 ## Rule index
 
 | Rule | Severity | Meaning |
@@ -76,7 +97,7 @@ hosted scorer has not been re-run to confirm it. Do not weaken H2.
 | H3.unknown | warn | Trace missing or unrecognized. Finalization is not inferred from the patch. An empty patch with no submit is not a block |
 | H3.fallback | warn | Recognized trace, nonempty patch, no `submit_patch` |
 | H3.submit_count | info | `submit_patch` called more than once |
-| H3.edit_after_submit | warn | `edit_file`, `write_file`, or `run_command` after the last `submit_patch` (harness discards those edits, `agent_runner.py:758`). `get_status` and `read_file` do not warn |
+| H3.edit_after_submit | warn | `edit_file` or `write_file` after the last `submit_patch`, or a `run_command` that can modify files (harness discards those edits, `agent_runner.py:758`). `get_status`, `read_file`, and a read-only `run_command` do not warn |
 | H4.debug | block | `breakpoint`, `pdb`/`ipdb`/`pudb`, `code.interact`, `__import__` / `importlib.import_module` of those debuggers, and `getattr(builtins, "breakpoint")`. Import aliases are tracked. `def breakpoint` is not a debugger |
 | H4.print | warn | Bare `print` call |
 | H5a.import_hook | block | `*.pth`, `sitecustomize.py`, `usercustomize.py`, `_swegemma_stubs.py`, before H1 |
