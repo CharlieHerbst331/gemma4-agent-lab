@@ -4,7 +4,7 @@ Reviewed October 6, 2026 using the [overview](https://www.kaggle.com/competition
 
 | Constraint | Current requirement |
 | --- | --- |
-| Submission | `submission.zip`, `agent.yaml` at archive root |
+| Submission | `submission.zip`, `agent.yaml` at archive root. `gemma-lab submit` uploads a copy named `submission.zip`; CreateSubmission returns HTTP 400 for any other file name |
 | Evaluation | Fraction of issues whose generated patches pass fresh verification |
 | Model | `gemma-4-31b-it-qat-w4a16-ct` for every evaluated agent |
 | Runtime | Offline, four NVIDIA L4s, 96 GB aggregate GPU memory |

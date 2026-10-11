@@ -3,9 +3,12 @@ import io
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
+import warnings
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -382,6 +385,177 @@ def check_evaluation(archive, evaluation, scorer_overhead_seconds=DEFAULT_SCORER
     return result
 
 
+_TIMEOUT_NOTE = (
+    "Upload timed out and may have been received. Check Kaggle's submissions list before retrying."
+)
+_AMBIGUOUS_NOTE = (
+    "Upload error is ambiguous and the file may have been received. "
+    "Check Kaggle's submissions list before retrying."
+)
+_MAX_RECORDED_CHARS = 4000
+_ENV_LITERAL_NAMES = ("KAGGLE_KEY", "KAGGLE_API_TOKEN", "KAGGLE_USERNAME")
+_KGAT_TOKEN = re.compile(r"KGAT_[A-Za-z0-9_-]+")
+_URL_QUERY = re.compile(r"(https?://[^\s?#]+)\?[^\s#]*")
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)\bBearer\s+\S+"),
+    re.compile(r"(?i)\bBasic\s+[A-Za-z0-9+/=_-]+"),
+    re.compile(r"(?i)['\"]Authorization['\"]\s*:\s*['\"](?:Basic\s+)?[^'\"]+['\"]"),
+    re.compile(r"(?i)\b(?:Authorization|Proxy-Authorization)\s*:\s*(?:Basic\s+)?\S+"),
+    re.compile(r"(?i)\b(?:Cookie|Set-Cookie|X-Api-Key)\s*:\s*\S+"),
+    re.compile(
+        r"(?im)^[ \t]*(?:authorization|proxy-authorization|cookie|set-cookie"
+        r"|x-api-key)\s*:.*$"
+    ),
+    re.compile(r"KGAT_[A-Za-z0-9_-]+"),
+    re.compile(r"ya29\.\S+"),
+    re.compile(
+        r"""(?i)["'](?:key|api_key|token|access_token|client_secret|password)["']"""
+        r"""\s*:\s*["'][^"']*["']"""
+    ),
+    re.compile(r"(?i)\bclient_secret\s*[=:]\s*\S+"),
+    re.compile(r"\b[A-Za-z0-9_.-]{1,64}:[0-9a-fA-F]{32}\b"),
+    re.compile(
+        r"(?i)\b(?:KAGGLE_(?:API_)?(?:TOKEN|KEY|SECRET)|KAGGLE_USERNAME|"
+        r"(?:api[_-]?)?(?:access[_-]?)?token|api[_-]?key|secret|password|"
+        r"refresh[_-]?token)\s*[=:]\s*\S+"
+    ),
+    re.compile(r"(?i)X-Goog-(?:Signature|Credential|Algorithm|Date|Expires|SignedHeaders)=\S+"),
+    re.compile(r"(?i)[?&](?:token|access_token|api_key|key|signature|expires)=[^&\s]+"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b"),
+    re.compile(r"\b[0-9a-fA-F]{32}\b"),
+)
+
+
+def _env_literals() -> list[str]:
+    """Secret strings currently in the environment. Values under 4 characters are ignored."""
+    found: list[str] = []
+    for name in _ENV_LITERAL_NAMES:
+        value = os.environ.get(name) or ""
+        if len(value) >= 4:
+            found.append(value)
+    for value in os.environ.values():
+        if not value:
+            continue
+        found.extend(match for match in _KGAT_TOKEN.findall(value) if len(match) >= 4)
+    return sorted(set(found), key=len, reverse=True)
+
+
+def _cap_text(text: str) -> str:
+    if len(text) <= _MAX_RECORDED_CHARS:
+        return text
+    omitted = len(text) - _MAX_RECORDED_CHARS
+    return text[:_MAX_RECORDED_CHARS] + f"[truncated {omitted} chars]"
+
+
+def _scrub_secrets(text: str) -> str:
+    if not isinstance(text, str):
+        text = str(text)
+    for literal in _env_literals():
+        text = text.replace(literal, "[REDACTED]")
+    text = _URL_QUERY.sub(r"\1?[REDACTED]", text)
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub("[REDACTED]", text)
+    return _cap_text(text)
+
+
+def _failure_text(exc: BaseException) -> str:
+    """Scrubbed submit error, including an HTTP body when the client exposes one."""
+    parts = [str(exc).strip()]
+    response = getattr(exc, "response", None)
+    body = getattr(response, "text", None) if response is not None else None
+    if isinstance(body, str) and body.strip() and body.strip() not in parts[0]:
+        parts.append(body.strip())
+    return _scrub_secrets("\n".join(part for part in parts if part)) or "submit failed"
+
+
+def _definite_submit_failure(exc: BaseException) -> bool:
+    """True only for a non-zero CLI exit or an HTTP error response.
+
+    Timeouts, connection failures, and decode errors stay reserved: the upload
+    may already have been received.
+    """
+    if isinstance(
+        exc, (subprocess.TimeoutExpired, UnicodeDecodeError, ConnectionError, TimeoutError)
+    ):
+        return False
+    if isinstance(exc, requests.RequestException) and not isinstance(exc, requests.HTTPError):
+        return False
+    if isinstance(exc, (RuntimeError, subprocess.CalledProcessError, requests.HTTPError)):
+        return True
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return isinstance(status, int) and status >= 400
+
+
+def _ambiguous_note(exc: BaseException) -> str:
+    prefix = _TIMEOUT_NOTE if isinstance(exc, subprocess.TimeoutExpired) else _AMBIGUOUS_NOTE
+    return _scrub_secrets(f"{prefix} {exc}")
+
+
+def _read_ledger(ledger: Path) -> list[dict]:
+    """Parse the ledger. One trailing unparseable line is skipped with a warning."""
+    if not ledger.exists():
+        return []
+    lines = ledger.read_text().splitlines()
+    rows = []
+    last = len(lines) - 1
+    for index, line in enumerate(lines):
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            if index == last:
+                warnings.warn(
+                    f"Skipping unparseable trailing ledger line in {ledger}",
+                    stacklevel=2,
+                )
+                continue
+            raise
+        if isinstance(item, dict):
+            rows.append(item)
+    return rows
+
+
+def _append_ledger(ledger: Path, row: dict) -> None:
+    with ledger.open("a") as handle:
+        handle.write(json.dumps(row) + "\n")
+
+
+def _atomic_write(path: Path, text: str) -> None:
+    """Write ``text`` via a same-directory temp file, then replace the target."""
+    directory = path.parent
+    directory.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=directory)
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    try:
+        dir_fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def _replace_last_ledger_row(ledger: Path, row: dict) -> None:
+    lines = ledger.read_text().splitlines() if ledger.exists() else []
+    if lines:
+        lines[-1] = json.dumps(row)
+    else:
+        lines = [json.dumps(row)]
+    _atomic_write(ledger, "\n".join(lines) + "\n")
+
+
 def submit(
     archive,
     message,
@@ -406,8 +580,10 @@ def submit(
     plan["evaluation"] = check_evaluation(
         archive, evaluation, scorer_overhead_seconds=scorer_overhead_seconds
     )
-    # Reserve before upload so an interrupted upload cannot cause an automatic duplicate.
-    # The local lock serializes this user's processes; Kaggle remains authoritative for team usage.
+    # Reserve before upload so a timeout, where the file may already have been received,
+    # cannot cause an automatic duplicate. A definite submit error is recorded as failed
+    # and does not consume the local daily slot. The local lock serializes this user's
+    # processes; Kaggle remains authoritative for team usage.
     import fcntl
 
     ledger.parent.mkdir(parents=True, exist_ok=True)
@@ -416,11 +592,7 @@ def submit(
         history = kaggle("competitions", "submissions", COMPETITION, "--csv")
         if submissions_today(history):
             raise ValueError("Kaggle daily submission slot already used")
-        previous = (
-            [json.loads(line) for line in ledger.read_text().splitlines()]
-            if ledger.exists()
-            else []
-        )
+        previous = _read_ledger(ledger)
         day = datetime.now(UTC).date().isoformat()
         if any(
             r["created_at"].startswith(day) and r["status"] in {"reserved", "submitted"}
@@ -429,13 +601,38 @@ def submit(
             raise ValueError("Local daily slot reserved/used; reconcile history before retrying")
         if any(r.get("sha256") == digest and r["status"] == "submitted" for r in previous):
             raise ValueError("Identical archive already submitted")
-        plan["status"] = "reserved"
-        with ledger.open("a") as handle:
-            handle.write(json.dumps(plan) + "\n")
-        output = kaggle(
-            "competitions", "submit", COMPETITION, "-f", archive, "-m", message, timeout=600
-        )
-        plan = {**plan, "status": "submitted", "response": output}
-        with ledger.open("a") as handle:
-            handle.write(json.dumps(plan) + "\n")
+        # Kaggle CreateSubmission rejects uploads whose file name is not submission.zip.
+        with tempfile.TemporaryDirectory(prefix="gemma-lab-submit-") as temp_name:
+            staged = Path(temp_name) / "submission.zip"
+            try:
+                os.link(archive, staged)
+            except OSError:
+                shutil.copyfile(archive, staged)
+            if sha256(staged) != digest:
+                raise RuntimeError("staged submission.zip hash does not match the source archive")
+            plan["status"] = "reserved"
+            _append_ledger(ledger, plan)
+            try:
+                output = kaggle(
+                    "competitions",
+                    "submit",
+                    COMPETITION,
+                    "-f",
+                    staged,
+                    "-m",
+                    message,
+                    timeout=600,
+                )
+            except Exception as exc:
+                if _definite_submit_failure(exc):
+                    text = _failure_text(exc)
+                    plan = {**plan, "status": "failed", "error": text}
+                    _replace_last_ledger_row(ledger, plan)
+                    raise RuntimeError(text) from exc
+                note = _ambiguous_note(exc)
+                plan = {**plan, "status": "reserved", "error": note}
+                _replace_last_ledger_row(ledger, plan)
+                raise RuntimeError(note) from exc
+            plan = {**plan, "status": "submitted", "response": _scrub_secrets(output or "")}
+            _append_ledger(ledger, plan)
     return plan

@@ -373,7 +373,7 @@ def test_report_reads_installed_harness_from_run_manifest(tmp_path):
 def test_kaggle_dataset_source_warning_with_exit_zero_is_success(monkeypatch):
     import subprocess
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, timeout, errors="strict"):
         return subprocess.CompletedProcess(
             cmd,
             0,
@@ -396,7 +396,7 @@ def test_kaggle_dataset_source_warning_with_exit_zero_is_success(monkeypatch):
 def test_kaggle_dataset_source_warning_with_successful_push_is_success(monkeypatch):
     import subprocess
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, timeout, errors="strict"):
         return subprocess.CompletedProcess(
             cmd,
             1,
@@ -417,7 +417,7 @@ def test_kaggle_dataset_source_warning_with_successful_push_is_success(monkeypat
 def test_kaggle_nonzero_without_successful_push_still_raises(monkeypatch):
     import subprocess
 
-    def fake_run(cmd, capture_output, text, timeout):
+    def fake_run(cmd, capture_output, text, timeout, errors="strict"):
         return subprocess.CompletedProcess(
             cmd,
             1,
