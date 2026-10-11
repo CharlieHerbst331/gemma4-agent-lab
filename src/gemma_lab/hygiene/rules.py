@@ -997,15 +997,12 @@ _SIMPLE_READ_ONLY = {
     "ls",
     "cat",
     "head",
-    "tail",
     "wc",
     "pwd",
     "echo",
     "printf",
     "stat",
     "diff",
-    "sort",
-    "uniq",
     "cut",
     "tr",
 }
@@ -1062,27 +1059,29 @@ _GIT_FLAGS = {
     "--first-parent",
     "--compact-summary",
 }
-_GIT_VALUED = {
-    "-U",
+# Next argv is the value. -U, -n, and --max-count require digits.
+_GIT_SEPARATE_VALUE = {"-U", "-n", "--max-count", "--diff-filter"}
+_GIT_DIGIT_VALUE = {"-U", "-n", "--max-count"}
+# A bare flag, or an attached =value. The next argv is not consumed.
+_GIT_EQ_VALUE = {
     "--unified",
-    "-n",
-    "--max-count",
     "--pretty",
     "--format",
     "--abbrev",
     "-u",
     "--untracked-files",
-    "--diff-filter",
     "--ignore-submodules",
 }
+_SORT_SHORT = set("nruktfbcsz")
+_SORT_VALUED = set("kt")
+_UNIQ_SHORT = set("cduiz")
 _FIND_EXEC = {"-delete", "-exec", "-execdir", "-ok", "-okdir"}
 _FIND_OUTPUT = {"-fprint", "-fprint0", "-fprintf", "-fls"}
-_GREP_EXEC = {"--pre", "--pre-glob", "--hostname-bin"}
 _SED_QUIET = {"-n", "--quiet", "--silent"}
 _SED_PRINT = re.compile(
     r"\s*(?:(?:\d+|/(?:\\.|[^/\\])*/)(?:\s*,\s*(?:\d+|/(?:\\.|[^/\\])*/))?|\d*,\d*)?p\s*\Z"
 )
-_UNTRUSTED_SHELL = ("$(", "${", "`", "<(", ">(", "<<", "\\")
+_UNTRUSTED_SHELL = ("$(", "${", "`", "<(", ">(", "<<", "\\", "{", "}")
 
 
 def _command_can_mutate(command: str) -> bool:
@@ -1090,8 +1089,8 @@ def _command_can_mutate(command: str) -> bool:
 
     Separators are ``&&``, ``||``, ``;``, ``|``, a bare ``&``, and newlines.
     The executable must be a bare name. Unknown commands, python, env-var
-    prefixes, command substitution, here-docs, process substitution, and
-    anything the tokenizer cannot parse count as edits. A redirect to
+    prefixes, command substitution, here-docs, process substitution, braces,
+    and anything the tokenizer cannot parse count as edits. A redirect to
     ``/dev/null`` and an fd copy such as ``2>&1`` do not.
     """
     if not isinstance(command, str):
@@ -1126,9 +1125,15 @@ def _segment_can_mutate(segment: str) -> bool:
     if name == "find":
         return _find_mutates(rest)
     if name in {"grep", "rg"}:
-        return _grep_mutates(rest)
+        return _grep_mutates(name, rest)
     if name == "cd":
         return _cd_mutates(rest)
+    if name == "sort":
+        return _sort_mutates(rest)
+    if name == "uniq":
+        return _uniq_mutates(rest)
+    if name == "tail":
+        return _tail_mutates(rest)
     return name not in _SIMPLE_READ_ONLY
 
 
@@ -1160,9 +1165,11 @@ def _git_mutates(args: list[str]) -> bool:
             continue
         if _git_flag_denied(token) or not _git_flag_allowed(token):
             return True
-        base = token.split("=", 1)[0]
-        if "=" not in token and base in _GIT_VALUED:
+        base, sep, _value = token.partition("=")
+        if sep == "" and base in _GIT_SEPARATE_VALUE:
             if index + 1 >= len(args):
+                return True
+            if not _git_separate_value_ok(base, args[index + 1]):
                 return True
             index += 2
             continue
@@ -1170,11 +1177,25 @@ def _git_mutates(args: list[str]) -> bool:
     return False
 
 
+def _git_separate_value_ok(base: str, value: str) -> bool:
+    if not value or value.startswith("-"):
+        return False
+    if base in _GIT_DIGIT_VALUE:
+        return value.isdigit()
+    return True
+
+
 def _git_flag_allowed(token: str) -> bool:
     if re.fullmatch(r"-\d+", token) or re.fullmatch(r"-U\d+", token):
         return True
-    base = token.split("=", 1)[0]
-    return base in _GIT_FLAGS or base in _GIT_VALUED
+    base, sep, value = token.partition("=")
+    if sep:
+        if base in _GIT_FLAGS or base in _GIT_EQ_VALUE:
+            return True
+        if base in _GIT_SEPARATE_VALUE:
+            return _git_separate_value_ok(base, value)
+        return False
+    return base in _GIT_FLAGS or base in _GIT_EQ_VALUE or base in _GIT_SEPARATE_VALUE
 
 
 def _sed_mutates(args: list[str]) -> bool:
@@ -1209,11 +1230,78 @@ def _find_mutates(args: list[str]) -> bool:
     return False
 
 
-def _grep_mutates(args: list[str]) -> bool:
+def _grep_mutates(name: str, args: list[str]) -> bool:
     for token in args:
         base = token.split("=", 1)[0]
-        if base in _GREP_EXEC:
+        if base.startswith("--pre") or base == "--hostname-bin":
             return True
+        short = token.startswith("-") and not token.startswith("--") and token != "-"
+        if name == "rg" and (base == "--search-zip" or (short and "z" in token[1:])):
+            return True
+    return False
+
+
+def _sort_mutates(args: list[str]) -> bool:
+    """Allow only -n -r -u -k -t -f -b -c -s -z. -k and -t take a value."""
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--":
+            return False
+        if token == "-" or not token.startswith("-"):
+            index += 1
+            continue
+        if token.startswith("--"):
+            return True
+        body = token[1:]
+        cursor = 0
+        while cursor < len(body):
+            letter = body[cursor]
+            if letter not in _SORT_SHORT:
+                return True
+            cursor += 1
+            if letter not in _SORT_VALUED:
+                continue
+            if cursor < len(body):
+                break
+            if index + 1 >= len(args) or args[index + 1].startswith("-"):
+                return True
+            index += 1
+            break
+        index += 1
+    return False
+
+
+def _uniq_mutates(args: list[str]) -> bool:
+    """Allow only -c -d -u -i -z and at most one positional."""
+    positionals = 0
+    ended = False
+    for token in args:
+        if not ended and token == "--":
+            ended = True
+            continue
+        if not ended and token.startswith("--"):
+            return True
+        if not ended and token.startswith("-") and token != "-":
+            body = token[1:]
+            if not body or any(letter not in _UNIQ_SHORT for letter in body):
+                return True
+            continue
+        positionals += 1
+        if positionals > 1:
+            return True
+    return False
+
+
+def _tail_mutates(args: list[str]) -> bool:
+    """-f, -F, and --follow block until timeout."""
+    for token in args:
+        base = token.split("=", 1)[0]
+        if base.startswith("--follow"):
+            return True
+        if token.startswith("-") and not token.startswith("--") and token != "-":
+            if "f" in token[1:] or "F" in token[1:]:
+                return True
     return False
 
 
