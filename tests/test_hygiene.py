@@ -578,6 +578,118 @@ def test_read_after_submit_is_clean(tool):
     assert report["gate"] == "pass"
 
 
+def test_git_status_and_diff_after_submit_are_not_edits():
+    """submit_patch, then git status and git diff, is not an H3 edit."""
+    payload = atif_trace(
+        "single",
+        [
+            (
+                "edit_file",
+                {"path": "rich/pretty.py", "old_string": "a", "new_string": "b"},
+                "ok",
+            ),
+            ("submit_patch", {}, "ok"),
+            ("run_command", {"command": "git status --short"}, ""),
+            ("run_command", {"command": "git diff -- rich/pretty.py"}, ""),
+        ],
+    )
+    report = audit_patch(modified("rich/pretty.py"), payload)
+    assert report["trace_schema"] == "atif"
+    assert report["finalization"] == "explicit"
+    assert not rules(report, "H3.edit_after_submit")
+    assert report["gate"] == "pass"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "git status && git diff",
+        "git log -5 --oneline; git show HEAD",
+        "sed -n '151,300p' rich/live.py | head -c 4000",
+        "ls -la pkg",
+        "cat rich/pretty.py",
+        "grep -n VALUE rich/pretty.py",
+        "rg VALUE rich",
+        "head -n 40 rich/pretty.py",
+        "tail -n 20 rich/pretty.py",
+        "wc -l rich/pretty.py",
+        "pwd",
+        "echo ok",
+        "echo 'a > b stays quoted'",
+        "find . -name '*.py'",
+        "ls 2>&1",
+    ],
+)
+def test_readonly_shell_after_submit_is_clean(text):
+    report = audit_patch(modified("pkg/core.py"), _atif_after_submit([text]))
+    assert not rules(report, "H3.edit_after_submit")
+    assert report["gate"] == "pass"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "sed -i 's/a/b/' rich/pretty.py",
+        "sed -n -i 's/a/b/' rich/pretty.py",
+        "python -c \"open('rich/pretty.py','w').write('x')\"",
+        "python3 -c \"from pathlib import Path; Path('rich/pretty.py').write_text('x')\"",
+        "python -c \"import os; os.remove('rich/pretty.py')\"",
+        "echo x > /tmp/out.txt",
+        "echo x >> /tmp/out.txt",
+        "ls > /tmp/listing.txt",
+        "cat rich/pretty.py | tee /tmp/out.txt",
+        "git status && sed -i 's/a/b/' rich/pretty.py",
+        "mv a.py b.py",
+        "cp a.py b.py",
+        "rm a.py",
+        "touch a.py",
+        "mkdir out",
+        "git apply fix.patch",
+        "git checkout -- rich/pretty.py",
+        "git reset --hard HEAD",
+        "git stash",
+        "git commit -m update",
+        "git add rich/pretty.py",
+        "patch -p1",
+        "find . -name '*.pyc' -delete",
+        "find . -exec rm {} +",
+        "python repair.py",
+        "make test",
+        "git blame rich/pretty.py",
+    ],
+)
+def test_mutating_shell_after_submit_warns(text):
+    report = audit_patch(modified("pkg/core.py"), _atif_after_submit([text]))
+    found = rules(report, "H3.edit_after_submit")
+    assert found and found[0]["severity"] == "warn"
+    assert "agent_runner.py:758" in found[0]["evidence"]
+    assert report["gate"] == "warn"
+
+
+def test_edit_file_after_submit_still_warns_in_an_atif_trace():
+    payload = atif_trace(
+        "single",
+        [
+            ("submit_patch", {}, "ok"),
+            (
+                "edit_file",
+                {"path": "rich/pretty.py", "old_string": "a", "new_string": "b"},
+                "ok",
+            ),
+        ],
+    )
+    report = audit_patch(modified("pkg/core.py"), payload)
+    assert rules(report, "H3.edit_after_submit")
+    assert report["gate"] == "warn"
+
+
+def _atif_after_submit(commands):
+    steps = [("submit_patch", {}, "ok")]
+    for text in commands:
+        steps.append(("run_command", {"command": text}, ""))
+    return atif_trace("single", steps)
+
+
 def test_single_v1_submit_is_not_a_block():
     events = [
         {"agent": "single_v1", "tool": "edit_file", "args": {}, "output": ""},

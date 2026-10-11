@@ -63,6 +63,22 @@ reset is one `git checkout` that names files a normal workspace lacks
 edits survive into grading. This is inferred from the package source. The
 hosted scorer has not been re-run to confirm it. Do not weaken H2.
 
+## H3 and read-only shell commands
+
+`H3.edit_after_submit` warns when a call after the last `submit_patch` can change files. `edit_file` and `write_file` always count. A `run_command` counts only when the command can modify files. `get_status` and `read_file` do not.
+
+A compound command is read-only only when every part is. Separators are `&&`, `||`, `;`, `|`, a bare `&`, and newlines. A part is read-only when the program is one of:
+
+- `git status`, `git diff`, `git log`, `git show` (global options such as `-C` are skipped; any other git subcommand counts, including `apply`, `checkout`, `reset`, `stash`, `commit`, and `add`)
+- `ls`, `cat`, `grep`, `rg`, `head`, `tail`, `wc`, `pwd`
+- `echo` with no file redirect
+- `sed` with `-n`, `--quiet`, or `--silent`, and without `-i` or `--in-place`. Other sed forms count, because a script can use the `w` write command
+- `find` without `-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`, `-fprintf`, or `-fls`
+
+`>`, `>>`, and `&>` onto a file count as edits. `2>&1` does not. `tee`, `mv`, `cp`, `rm`, `touch`, `mkdir`, and `patch` count because they are not on the read-only list. A leading `NAME=value` assignment is ignored.
+
+`python` or `python3 -c` counts when the snippet contains `open(`, `write_text`, `write_bytes`, `os.remove` / `unlink` / `rename` / `replace` / `mkdir` / `makedirs`, a `shutil` copy or remove, `.unlink` / `.mkdir` / `.touch`, or `exec` / `eval` / `subprocess` / `importlib`. A `-c` snippet with none of those is read-only. Python that runs a file still counts. Command substitution (`$(...)`) and backticks count. An empty command counts. Backslash escapes are not interpreted.
+
 ## Rule index
 
 | Rule | Severity | Meaning |
@@ -76,7 +92,7 @@ hosted scorer has not been re-run to confirm it. Do not weaken H2.
 | H3.unknown | warn | Trace missing or unrecognized. Finalization is not inferred from the patch. An empty patch with no submit is not a block |
 | H3.fallback | warn | Recognized trace, nonempty patch, no `submit_patch` |
 | H3.submit_count | info | `submit_patch` called more than once |
-| H3.edit_after_submit | warn | `edit_file`, `write_file`, or `run_command` after the last `submit_patch` (harness discards those edits, `agent_runner.py:758`). `get_status` and `read_file` do not warn |
+| H3.edit_after_submit | warn | `edit_file` or `write_file` after the last `submit_patch`, or a `run_command` that can modify files (harness discards those edits, `agent_runner.py:758`). `get_status`, `read_file`, and a read-only `run_command` do not warn |
 | H4.debug | block | `breakpoint`, `pdb`/`ipdb`/`pudb`, `code.interact`, `__import__` / `importlib.import_module` of those debuggers, and `getattr(builtins, "breakpoint")`. Import aliases are tracked. `def breakpoint` is not a debugger |
 | H4.print | warn | Bare `print` call |
 | H5a.import_hook | block | `*.pth`, `sitecustomize.py`, `usercustomize.py`, `_swegemma_stubs.py`, before H1 |
