@@ -3,7 +3,10 @@
 import ast
 import importlib.util
 import json
+import os
 import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -34,21 +37,26 @@ class _Clock:
         self.now += seconds
 
 
-def test_ready_file_returns_immediately_without_sleep(tmp_path, capsys):
+def test_present_valid_file_waits_one_interval(tmp_path, capsys):
     path = tmp_path / "tasks.jsonl"
     path.write_text('{"instance_id": "t"}\n')
     clock = _Clock()
     slept = []
 
+    def sleep(seconds):
+        slept.append(seconds)
+        clock.advance(seconds)
+
     waited = wait_for_tasks_jsonl(
-        path, interval=5, timeout=300, log_every=30, clock=clock, sleep=slept.append
+        path, interval=5, timeout=300, log_every=30, clock=clock, sleep=sleep
     )
 
-    assert waited == 0
-    assert slept == []
+    assert waited == 5.0
+    assert slept == [5]
     text = capsys.readouterr().out
-    assert "tasks.jsonl ready after 0.0s" in text
-    assert "waiting for" not in text
+    assert "waiting for" in text
+    assert "still changing, 0s elapsed" in text
+    assert "tasks.jsonl ready after 5.0s" in text
 
 
 def test_empty_file_is_not_ready(tmp_path):
@@ -87,12 +95,12 @@ def test_waits_until_a_delayed_file_appears(tmp_path, capsys):
         path, interval=5, timeout=300, log_every=30, clock=clock, sleep=sleep
     )
 
-    assert waited == 10
-    assert sleeps == [5, 5]
+    assert waited == 15.0
+    assert sleeps == [5, 5, 5]
     text = capsys.readouterr().out
     assert "waiting for" in text
-    assert "0s elapsed" in text
-    assert "tasks.jsonl ready after 10.0s" in text
+    assert "missing, 0s elapsed" in text
+    assert "tasks.jsonl ready after 15.0s" in text
 
 
 def test_timeout_runs_mount_diagnostics(tmp_path, monkeypatch, capsys):
@@ -179,6 +187,8 @@ def test_generated_payload_cell_compiles_and_names_resolve(tmp_path, monkeypatch
     assert "tasks.jsonl" not in cells[1]
     assert "MODEL_PATH" not in payload
     assert 'return "truncated"' in payload
+    assert "still changing" in payload
+    assert "DATA_READ_TIMEOUT_SECONDS = 10" in payload
     assert "round(now - start, 1)" in payload
 
 
@@ -189,27 +199,47 @@ def _advance(clock):
     return sleep
 
 
-def test_partial_line_retries_until_it_is_complete_jsonl(tmp_path, capsys):
+def test_half_written_last_line_retries_until_the_size_is_stable(tmp_path, capsys):
     path = tmp_path / "tasks.jsonl"
-    path.write_text('{"instance_id": "t"}')
+    path.write_text('{"a": 1}\n{"b":')
     clock = _Clock()
     sleeps = []
 
     def sleep(seconds):
         sleeps.append(seconds)
         clock.advance(seconds)
-        if clock.now >= 5:
-            path.write_text('{"instance_id": "t"}\n')
+        if clock.now == 5:
+            path.write_text('{"a": 1}\n{"b": 2}')
 
     waited = wait_for_tasks_jsonl(
         path, interval=5, timeout=300, log_every=30, clock=clock, sleep=sleep
     )
 
-    assert waited == 5.0
-    assert sleeps == [5]
+    assert waited == 10.0
+    assert sleeps == [5, 5]
     text = capsys.readouterr().out
-    assert "waiting for" in text
-    assert "tasks.jsonl ready after 5.0s" in text
+    assert "truncated, 0s elapsed" in text
+    assert "tasks.jsonl ready after 10.0s" in text
+
+
+def test_parsed_but_growing_file_is_not_accepted_at_once(tmp_path):
+    path = tmp_path / "tasks.jsonl"
+    path.write_text('{"a": 1}')
+    clock = _Clock()
+    sleeps = []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock.advance(seconds)
+        if clock.now == 5:
+            path.write_text('{"a": 1}\n{"b": 2}\n')
+
+    waited = wait_for_tasks_jsonl(
+        path, interval=5, timeout=300, log_every=30, clock=clock, sleep=sleep
+    )
+
+    assert waited == 10.0
+    assert sleeps == [5, 5]
 
 
 def test_blank_only_file_is_not_ready(tmp_path):
@@ -231,13 +261,32 @@ def test_blank_only_file_is_not_ready(tmp_path):
             )
 
 
+def test_load_tasks_shapes_are_ready_after_one_stable_poll(tmp_path):
+    path = tmp_path / "tasks.jsonl"
+    shapes = (
+        '{"a": 1}',
+        '{"a": 1}\n\n',
+        '{"a": 1}\n\n{"b": 2}\n',
+        '{"a": 1}\n   \n',
+    )
+    for text in shapes:
+        path.write_text(text)
+        clock = _Clock()
+        waited = wait_for_tasks_jsonl(
+            path, interval=5, timeout=300, log_every=30, clock=clock, sleep=_advance(clock)
+        )
+        assert waited == 5.0
+
+
 def test_stuck_partial_and_bad_json_name_the_reason(tmp_path):
     path = tmp_path / "tasks.jsonl"
     clock = _Clock()
     cases = (
-        ('{"instance_id": "t"}', "truncated"),
-        ("{not-json}\n", "unparseable"),
-        ('{"instance_id": "t"}\n\n', "unparseable"),
+        ('{"a":', "truncated"),
+        ('not-json\n{"a": 1}\n', "unparseable"),
+        ("1\n", "unparseable"),
+        ("[1, 2]\n", "unparseable"),
+        ('{"a": 1}\n"x"\n', "unparseable"),
     )
     for text, reason in cases:
         path.write_text(text)
@@ -277,25 +326,24 @@ def test_read_error_counts_as_not_ready(tmp_path, monkeypatch):
         )
 
 
-def test_present_file_rounds_tiny_wait_to_zero(tmp_path, capsys):
+def test_present_file_rounds_the_stability_wait(tmp_path, capsys):
     path = tmp_path / "tasks.jsonl"
     path.write_text('{"instance_id": "t"}\n')
-    ticks = iter((0.0, 1.2e-6))
+    ticks = iter((0.0, 1.2e-6, 5.0000004))
 
     def clock():
         return next(ticks)
 
-    def sleep(seconds):
-        raise AssertionError("slept")
-
-    waited = wait_for_tasks_jsonl(path, interval=5, timeout=300, clock=clock, sleep=sleep)
-    assert waited == 0.0
-    assert "tasks.jsonl ready after 0.0s" in capsys.readouterr().out
+    waited = wait_for_tasks_jsonl(
+        path, interval=5, timeout=300, clock=clock, sleep=lambda seconds: None
+    )
+    assert waited == 5.0
+    assert "tasks.jsonl ready after 5.0s" in capsys.readouterr().out
 
 
 def test_late_valid_file_rounds_wait_to_one_decimal(tmp_path):
     path = tmp_path / "tasks.jsonl"
-    ticks = iter((0.0, 0.0, 10.06))
+    ticks = iter((0.0, 0.0, 10.04, 10.06))
 
     def sleep(seconds):
         path.write_text('{"instance_id": "t"}\n')
@@ -304,6 +352,32 @@ def test_late_valid_file_rounds_wait_to_one_decimal(tmp_path):
         path, interval=5, timeout=300, clock=lambda: next(ticks), sleep=sleep
     )
     assert waited == 10.1
+
+
+def test_hung_stat_counts_as_not_ready(tmp_path, monkeypatch):
+    path = tmp_path / "tasks.jsonl"
+    path.write_text('{"a": 1}\n')
+
+    def hang(self, *args, **kwargs):
+        if self.name == "tasks.jsonl":
+            time.sleep(2)
+            raise TimeoutError("still hung")
+        return os.stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", hang)
+    clock = _Clock()
+    with pytest.raises(FileNotFoundError, match="last check: unreadable"):
+        wait_for_tasks_jsonl(
+            path,
+            interval=1,
+            timeout=2,
+            log_every=30,
+            read_timeout=0.05,
+            clock=clock,
+            sleep=_advance(clock),
+            runner=lambda cmd, timeout: subprocess.CompletedProcess(cmd, 0, "", ""),
+            probe_path=tmp_path / "probe.txt",
+        )
 
 
 def _stored_run(root):
@@ -384,3 +458,116 @@ def test_report_warns_when_an_older_manifest_omits_protocol_hash(tmp_path):
     )
     with pytest.warns(UserWarning, match="no protocol_sha256"):
         report_from_runs([blank], SMOKE, tmp_path / "blank-out")
+
+
+def _mismatch_run(tmp_path):
+    smoke = load_protocol(SMOKE)
+    think = load_protocol(THINK)
+    root = tmp_path / "run"
+    _stored_run(root)
+    (root / "pair_manifest.json").write_text(
+        json.dumps(
+            {
+                "protocol_sha256": think["_sha256"],
+                "schedule_sha256": protocol_schedule(think)["sha256"],
+            }
+        )
+    )
+    return smoke, think, root
+
+
+def test_pair_report_cli_refuses_mismatch_without_output(tmp_path, capsys, monkeypatch):
+    smoke, think, root = _mismatch_run(tmp_path)
+    output = tmp_path / "out"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "gemma-lab",
+            "pair-report",
+            str(root),
+            "--protocol",
+            str(SMOKE),
+            "--output",
+            str(output),
+        ],
+    )
+    from gemma_lab.cli import main
+
+    with pytest.raises(SystemExit) as raised:
+        main()
+    assert raised.value.code == 1
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    assert "Traceback" not in captured.out
+    assert smoke["_sha256"] in captured.err
+    assert think["_sha256"] in captured.err
+    assert not (output / "pair_report.md").exists()
+    assert not (output / "pair_report.json").exists()
+
+
+def test_pair_report_cli_allow_mismatch_warns_in_header(tmp_path, capsys, monkeypatch):
+    smoke, think, root = _mismatch_run(tmp_path)
+    output = tmp_path / "out"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "gemma-lab",
+            "pair-report",
+            str(root),
+            "--protocol",
+            str(SMOKE),
+            "--output",
+            str(output),
+            "--allow-protocol-mismatch",
+        ],
+    )
+    from gemma_lab.cli import main
+
+    with pytest.warns(UserWarning, match="protocol hash mismatch allowed"):
+        main()
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    assert smoke["_sha256"] in captured.err
+    assert think["_sha256"] in captured.err
+    text = (output / "pair_report.md").read_text()
+    assert text.startswith("WARNING: protocol hash mismatch allowed.")
+    assert smoke["_sha256"] in text
+    assert think["_sha256"] in text
+    saved = json.loads((output / "pair_report.json").read_text())
+    assert smoke["_sha256"] in saved["protocol_mismatch_warning"][0]
+    assert think["_sha256"] in saved["protocol_mismatch_warning"][0]
+
+
+def test_protocol_newline_change_is_a_mismatch_unless_allowed(tmp_path, capsys):
+    original = load_protocol(SMOKE)
+    edited_path = tmp_path / "protocol.yaml"
+    edited_path.write_bytes(SMOKE.read_bytes() + b"\n")
+    edited = load_protocol(edited_path)
+    assert original["_sha256"] != edited["_sha256"]
+    assert protocol_schedule(original)["sha256"] == protocol_schedule(edited)["sha256"]
+    root = tmp_path / "run"
+    _stored_run(root)
+    (root / "pair_manifest.json").write_text(
+        json.dumps(
+            {
+                "protocol_sha256": original["_sha256"],
+                "schedule_sha256": protocol_schedule(original)["sha256"],
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="does not match protocol") as raised:
+        report_from_runs([root], edited_path, tmp_path / "refused")
+    assert original["_sha256"] in str(raised.value)
+    assert edited["_sha256"] in str(raised.value)
+    assert not (tmp_path / "refused" / "pair_report.md").exists()
+    output = tmp_path / "allowed"
+    with pytest.warns(UserWarning, match="protocol hash mismatch allowed"):
+        report_from_runs([root], edited_path, output, allow_protocol_mismatch=True)
+    text = (output / "pair_report.md").read_text()
+    err = capsys.readouterr().err
+    assert original["_sha256"] in text
+    assert edited["_sha256"] in text
+    assert original["_sha256"] in err
+    assert edited["_sha256"] in err
