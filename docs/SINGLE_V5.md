@@ -12,25 +12,32 @@ file says the think256 candidate has thinking off.
 off (`include_thoughts: false`, `thinking_budget: 0`) and the budgets stay
 270 seconds and 48 counted calls. Only `prompts/system.md` changes.
 
-The prompt is 7097 characters. single-v4's is 6699. Unrelated sentences were
+The prompt is 6984 characters. single-v4's is 6699. Unrelated sentences were
 not trimmed. Three rules were added, and the old call-30 backstop was replaced
 so the prompt does not keep two backstops:
 
 - 12 counted calls or about 95 seconds remains the primary edit.
 - Call 24 is the hard rule: by call 24 the agent must have edited a source file,
-  and if it has not, it stops reading and makes the most plausible minimal edit.
-  The old "about 30 counted calls" and "about 18 remaining" wording is gone.
+  and if it has not, it stops reading and makes the most plausible minimal edit,
+  then verifies it. The old "about 30 counted calls" and "about 18 remaining"
+  wording is gone.
 - A repro assert is not weakened, deleted, or loosened to make it pass. Output
   that contradicts the issue, such as a stray newline, is the bug.
-- UNCERTAIN and an empty diff stay only for an issue with no behavior clue
-  (only a number such as Fix #3104, or a title with no description of behavior).
-  If the issue describes any behavior, UNCERTAIN, "not a bug", and "already
-  fixed" are not allowed.
-- The under-20-second submit rule, the under-60-second submit rule, and the
-  pre-submit `git status` step are the same sentences as single-v4.
+- UNCERTAIN and an empty diff stay only when the issue text is a bare issue
+  number, such as Fix #3104. A short title that names a symptom counts as a
+  behavior clue. `rich_3934` ("empty live") and `rich_3938` ("fix background
+  style with soft wrap") are behavior clues, not empty submits. If the issue
+  describes any behavior, UNCERTAIN, "not a bug", and "already fixed" are not
+  allowed.
+- The under-20-second submit rule and the pre-submit `git status` step are the
+  same sentences as single-v4. Under 60 seconds, a source edit that already
+  exists is submitted immediately, also the same sentence as single-v4. If the
+  diff is still empty, the prompt says make the minimal edit, then submit.
+  That late path does not add a verify step, because a verify does not fit in
+  the time left.
 
 Archive SHA256
-`e72f329884171ca40e12cff6a9b092209da6b8dd1f35de766179a413164a6c68`.
+`618766eaab2f191f6f6a9960ce0b79641512a3647a3af6d6adab0f98f8c84d59`.
 
 ## single-v5-think256
 
@@ -45,16 +52,23 @@ and `thinking_budget: 256`. Both fields are explicit because adk-submission
 2.05 seconds plus 26 ms per completion token, so 256 adds at most about 6.7
 seconds per call. 512 adds about 13 seconds and does not fit the 270 second cap.
 
-`docs/STRUCTURED_V5.md` says the completion tokens are not shared with a
-thinking budget while thinking is off, and `docs/THINKING_OFF_T0.md` says a
-4096 budget is above every role's `max_output_tokens`. That is the lab's
-evidence that thinking tokens count inside `max_output_tokens`. 2048 minus 256
-leaves 1792 tokens for the visible answer. The prompt ceiling stays
-32768 − 2048 = 30720. `max_output_tokens` was not raised. The real wheel was
-not in this VM, so this is the documented harness behavior, not a new capture.
+With `include_thoughts: true`, the reasoning is re-sent in history each turn,
+about 6k tokens by call 25. That pulls compaction earlier than the thinking-off
+arm.
+
+Whether thinking tokens count inside `max_output_tokens` is an assumption.
+`docs/STRUCTURED_V5.md` says completion tokens are not shared with a thinking
+budget while thinking is off, and `docs/THINKING_OFF_T0.md` says a 4096 budget
+is above every role's `max_output_tokens`. If that reading is right, 2048 minus
+256 leaves 1792 tokens for the visible answer and the prompt ceiling stays
+32768 − 2048 = 30720. Confirming it needs a GPU capture. `max_output_tokens`
+was not raised.
+
+At full use of 256 thinking tokens per call, the 270 second cap binds around
+call 28, and the 95 second primary rule lands at about call 10.
 
 Archive SHA256
-`3bbf624b0201d45ffcfe37986b3a2e669699e5f283297bb94f8d15c49345affa`.
+`2c2e7b3ba4a900e62c563fb28748e2687cd6c82ec6265e12a033daef73e69b89`.
 
 Hygiene `candidate` on both directories returned gate pass with no findings.
 Output was written under `/tmp`, outside the repo. No H-rule or test asserts

@@ -64,7 +64,7 @@ def test_single_v5_changes_only_the_prompt():
     parent = (V4 / "prompts" / "system.md").read_text()
     assert prompt != parent
     assert len(parent) == 6699
-    assert len(prompt) == 7097
+    assert len(prompt) == 6984
     for phrase in (
         CALL_24,
         "The call-24 line above is the hard rule.",
@@ -73,7 +73,9 @@ def test_single_v5_changes_only_the_prompt():
         "Never weaken, delete or loosen an assert in a repro to make it pass.",
         "stray newline in output",
         "The failing assert stays until the code fix makes it pass.",
-        "title with no description of behavior",
+        "A short title that names a symptom counts as a behavior clue.",
+        "only a bare issue number, such as Fix #3104",
+        "make the minimal edit, then submit.",
         "If the issue text describes any behavior, UNCERTAIN, 'not a bug', and 'already fixed'",
         "UNCERTAIN is only the no-behavior-clue path above.",
         "Call read_file with filepath only",
@@ -82,7 +84,13 @@ def test_single_v5_changes_only_the_prompt():
         UNDER_60,
     ):
         assert phrase in prompt
-    for gone in ("about 30 counted calls", "about 18", "backstop"):
+    for gone in (
+        "about 30 counted calls",
+        "about 18",
+        "backstop",
+        "title with no description of behavior",
+        "then verify it, then submit",
+    ):
         assert gone not in prompt
     report = lint_candidate(V5)
     assert report["gate"] == "pass", report["findings"]
