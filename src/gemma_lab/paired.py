@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import warnings
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -3460,6 +3461,30 @@ def report_from_runs(run_dirs, protocol_path, output):
     return {"output": str(output), "promotion": report.get("promotion"), "blocked": blocked}
 
 
+def _check_manifest_protocol(manifest, protocol, run_dir):
+    """Refuse a manifest recorded for a different protocol file.
+
+    Several protocols share one schedule hash, so the schedule check does not
+    catch a run fed to the wrong protocol. Older stored runs and the test
+    fixtures omit protocol_sha256; those still report, with a warning.
+    """
+    recorded = manifest.get("protocol_sha256") if isinstance(manifest, dict) else None
+    expected = protocol.get("_sha256")
+    if not isinstance(recorded, str) or not recorded.strip():
+        warnings.warn(
+            f"{run_dir} pair_manifest.json has no protocol_sha256; "
+            "older runs are accepted without that check",
+            UserWarning,
+            stacklevel=2,
+        )
+        return
+    if recorded != expected:
+        raise ValueError(
+            f"{run_dir}: pair_manifest protocol_sha256 {recorded} "
+            f"does not match protocol {expected}"
+        )
+
+
 def combine_pair_reports(run_dirs, protocol):
     rows = []
     loads = []
@@ -3474,6 +3499,7 @@ def combine_pair_reports(run_dirs, protocol):
         manifest_path = Path(run_dir) / "pair_manifest.json"
         if manifest_path.exists():
             manifest = json.loads(manifest_path.read_text())
+            _check_manifest_protocol(manifest, protocol, run_dir)
             for session in manifest.get("session") or []:
                 if session.get("model_load_seconds") is not None:
                     loads.append(session["model_load_seconds"])

@@ -41,12 +41,16 @@ def wait_for_tasks_jsonl(
     sleep=None,
     runner=None,
 ):
-    """Poll until ``path`` is a non-empty readable file.
+    """Poll until ``path`` is complete JSONL.
 
-    A file that is already ready returns without sleeping. The first miss is
-    logged, then again about every ``log_every`` seconds. After ``timeout``,
-    print mount diagnostics and raise FileNotFoundError.
+    Ready means non-empty, a trailing newline, and every line parses as JSON.
+    A blank line does not count as a record. A file that is already ready
+    returns without sleeping. The first miss is logged, then again about every
+    ``log_every`` seconds. After ``timeout``, print mount diagnostics and raise
+    FileNotFoundError. ``stat`` and the read have no timeout; any exception
+    counts as not ready.
     """
+    import json
     import time
     from pathlib import Path
 
@@ -59,22 +63,48 @@ def wait_for_tasks_jsonl(
     deadline = start + timeout
     next_log = start
     logged = False
+    reason = "missing"
 
-    def ready():
+    def classify():
+        # path.stat has no timeout. A hung mount blocks this call.
         try:
-            if not path.is_file() or path.stat().st_size <= 0:
-                return False
-            with path.open("rb") as handle:
-                return bool(handle.read(1))
-        except OSError:
-            return False
+            if not path.exists() or not path.is_file():
+                return "missing"
+            if path.stat().st_size <= 0:
+                return "empty"
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            try:
+                if not path.exists():
+                    return "missing"
+            except Exception:
+                return "unreadable"
+            return "unreadable"
+        if not text.endswith("\n"):
+            return "truncated"
+        lines = text.splitlines()
+        if not lines or all(not line.strip() for line in lines):
+            return "empty"
+        for line in lines:
+            if not line.strip():
+                return "unparseable"
+            try:
+                json.loads(line)
+            except Exception:
+                return "unparseable"
+        return None
 
     while True:
         now = clock()
-        if ready():
-            waited = now - start
+        try:
+            state = classify()
+        except Exception:
+            state = "unreadable"
+        if state is None:
+            waited = round(now - start, 1)
             print(f"tasks.jsonl ready after {waited:.1f}s: {path}", flush=True)
             return waited
+        reason = state
         if now >= deadline:
             break
         if not logged or now + 1e-9 >= next_log:
@@ -126,7 +156,8 @@ def wait_for_tasks_jsonl(
     except OSError as exc:
         print(f"could not write probe to {dest}: {exc}", flush=True)
     raise FileNotFoundError(
-        f"{path} was not ready after {waited:.0f}s (limit {timeout:g}s). Probe output: {dest}"
+        f"{path} was not ready after {waited:.0f}s (limit {timeout:g}s); "
+        f"last check: {reason}. Probe output: {dest}"
     )
 
 
