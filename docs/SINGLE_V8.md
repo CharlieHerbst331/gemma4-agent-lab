@@ -13,9 +13,12 @@ copy of single-v7 (`include_thoughts: false`, `thinking_budget: 0`).
 There is no custom editor, so the agent writes `/tmp/line_fix.py` itself with
 a quoted heredoc, runs it, and prints `git diff`. The snippet reads and writes
 bytes, asserts `s.count(old) == 1` before `str.replace`, and asserts the new
-bytes are present after. `read_text` and `write_text` are forbidden because
-they turn a CRLF file into LF. `edit_file` stays secondary, for a short
-one-line change. The single-v7 second-error rule still applies to that
+bytes are present after. `OLD` and `NEW` are triple-quoted byte strings
+(`b'''...'''`). They must not contain a backslash or `'''`. A line break can
+be `\n` inside `b"..."`. Non-ASCII bytes need `\xNN`. `read_text` and
+`write_text` are forbidden because they turn a CRLF file into LF. `edit_file`
+stays secondary, for a short one-line change, and that path still forbids
+`\n` escapes. The single-v7 second-error rule still applies to that
 secondary path: one missing-parameter retry, never the same failing call more
 than once, and after the second `edit_file` error of any kind on that file
 (`mandatory input parameters are not present`, `Failed to replace: old_string
@@ -34,11 +37,15 @@ untested. It needs a GPU run.
 `max_tool_calls: 150`, `max_turns: 200`, and `timeout_seconds: 300`. The
 harness reads `max_time_minutes`. The per-command ceiling stays 300 seconds.
 The prompt's first edit is by about 90 seconds or about 38 counted calls. The
-hard edit point is about 165 seconds or about 75 counted calls. The last 60
-seconds submit the current diff. Under 20 seconds, if the diff is still empty,
-make one minimal edit and then submit. An empty diff is never submitted,
-including for a bare issue number. `not reproducible`, `already fixed`, and
-`not a bug` do not end the task. Call counts are not a reason to stop.
+hard edit point is about 165 seconds or about 75 counted calls. Call
+`get_status` about every 5 calls, and again before `submit_patch`, so those
+clocks stay current. Keep editing only while the check has not passed and
+more than 60 seconds remain. After a passing check, run `git diff` and call
+`submit_patch`. The last 60 seconds submit the current diff. Under 20
+seconds, if the diff is still empty, make one minimal edit and then submit.
+Do not submit an empty diff, including for a bare issue number. `not
+reproducible`, `already fixed`, and `not a bug` do not end the task. Call
+counts are not a reason to stop.
 
 ## Runtime gate
 
@@ -86,27 +93,48 @@ Thinking still has to match unless `thinking.yaml` is listed too.
 `matched_pair: false` still skips only the shared-file check. A budget change
 is refused unless the pair is unmatched and `eval_config.yaml` is listed.
 Each half of that rule was already tested on its own, so neither half was
-loosened. `notebook.py` was not edited. The new helpers sit after the
-notebook runtime marker, so existing notebook cells stay the same.
+loosened. The pair-checker helpers sit after the notebook runtime marker.
+
+The session-level cap in a generated notebook, and in `report_from_runs`, is
+the larger of the two arm caps. That number feeds the abort check
+(`wall > cap + 120`), `hit_cap.wall`, and the report. Per-arm evaluator
+limits stay on each arm: single-v7 is 270 seconds, 48 calls, and 64 turns;
+single-v8 is 330 seconds, 150 calls, and 200 turns. The unmatched dev-13
+notebook therefore uses 330 seconds as the session cap. When both arms share
+a cap, the embedded literal is unchanged, so notebooks for the older
+protocols stay byte-identical.
 
 ## Check skill
 
 `agents/single-v8-check/skills/check/` has `SKILL.md` and `scripts/run.py`.
 The only call is `{"skill_name":"check","file_path":"scripts/run.py"}` with
-no args. The prompt adds that one sentence. The script pins
-`/tmp/repro_check.py`, reruns it, prints `git status --short` with scratch
-and protected flags, prints `git diff --stat`, and runs at most one mapped
-pytest for 15 seconds. It does not edit. Whether the model emits that
-constant call is untested. `/tmp` versus `TEST_TMPDIR` on the hosted sandbox
-is unverified. A Docker pytest stub can exit 1.
+no args. The prompt adds that one sentence. The script pins the repro, reruns
+it, prints `git status --short` with scratch and protected flags, prints
+`git diff --stat`, and runs at most one mapped pytest for 15 seconds. It
+does not edit.
+
+The subprocess sandbox used by the dev and smoke notebooks rewrites `/tmp`
+and `/workspace` only inside command strings, and ADK runs the script from a
+temp directory. Hardcoded `/tmp` and `/workspace` paths in the script itself
+pointed at the host, so the report stayed `before: PASS (repro does not fail
+yet...)`, `not a git repository`, and an empty diff stat. The script now
+reads the repro and the pin from `tempfile.gettempdir()` (the sandbox
+`TMPDIR`) and finds the repo from `GEMMA_CHECK_ROOT`, then `/workspace`, then
+a `PYTHONPATH` entry that contains `.git`. The agent still writes the repro
+with `run_command` to `/tmp/repro_check.py`, because that command string is
+what the sandbox rewrites. Harness-staged `conftest.py` and `pytest.ini` are
+not marked `[protected]` when they are the only changes. A Docker sandbox
+with a real `/workspace` was not tested. Whether the model emits the constant
+call is untested.
 
 ## Archives and protocols
 
-- single-v8 sha256 `814b91ce842e02b482750f10c334a761b471725471970b91fa1febe8f4e087fa`
-- single-v8-check sha256 `6257722c4a9825fb3819b097c56a9f527fba145b31937fd9cc317896e6ed7763`
-- Prompt sizes: single-v7 8024 characters, single-v8 8043, single-v8-check 8284.
+- single-v8 sha256 `6f44de6401910907b6c65f89549727d2c4492a54c3ed13743033623d81dfdc22`
+- single-v8-check sha256 `64dc727d78c4189c1db1184e74129290574c7b97816dd91f91d2baa7defe0fb0`
+- Prompt sizes: single-v7 8024 characters, single-v8 8283, single-v8-check 8524.
   The ceiling is 30720 tokens inside a 32768 context after the 2048 completion
-  reservation.
+  reservation. 8524 characters is about 2131 tokens at four characters per
+  token, not a Gemma tokenizer count.
 - `configs/protocols/single-v7-vs-single-v8-dev13.yaml` schedule
   `629000fccc9d9da5bfeab9823fb0e216d8c044b3a8753f320f0561223d5d24ed`
   (same as the other one-repeat dev-13 protocols; the schedule hash does not
@@ -122,5 +150,5 @@ is unverified. A Docker pytest stub can exit 1.
 
 The eighteen previous archive hashes are unchanged, including single-v7
 `f62c8c0b92bc5bd1fb1015f20e7cbd7a5599d5518d2d59097bf2b40d9f3412b0`.
-Hygiene output is under `/tmp`. `notebook.py` and the hygiene code were not
-edited.
+Hygiene output is under `/tmp`. The hygiene rules were not edited on this
+branch. `notebook.py` changes only the session-cap literal for unequal arms.

@@ -1,7 +1,11 @@
 """Zero-argument check. The only call is skill_name plus file_path.
 
 The harness has no custom edit tool. This script does not edit. It pins the
-repro the agent already wrote under /tmp, reruns it, and prints git status.
+repro the agent already wrote, reruns it, and prints git status.
+
+The subprocess sandbox rewrites /tmp and /workspace only inside command
+strings. The script therefore uses the process temp directory (TMPDIR) and
+finds the repo from GEMMA_CHECK_ROOT, then /workspace, then PYTHONPATH.
 """
 
 from __future__ import annotations
@@ -10,11 +14,23 @@ import hashlib
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
-ROOT = Path(os.environ.get("GEMMA_CHECK_ROOT", "/workspace"))
-REPRO = Path(os.environ.get("GEMMA_CHECK_REPRO", "/tmp/repro_check.py"))
-PIN = Path(os.environ.get("GEMMA_CHECK_PIN", "/tmp/gemma_check_pin.txt"))
+
+def _root():
+    candidates = [os.environ.get("GEMMA_CHECK_ROOT"), "/workspace"]
+    candidates.extend(os.environ.get("PYTHONPATH", "").split(os.pathsep))
+    for cand in candidates:
+        if cand and (Path(cand) / ".git").exists():
+            return Path(cand)
+    return Path("/workspace")
+
+
+ROOT = _root()
+TMP = Path(tempfile.gettempdir())
+REPRO = Path(os.environ.get("GEMMA_CHECK_REPRO") or TMP / "repro_check.py")
+PIN = Path(os.environ.get("GEMMA_CHECK_PIN") or TMP / "gemma_check_pin.txt")
 SCRATCH_NAMES = {"repro.py", "fix.py", "repro_check.py"}
 PROTECTED_NAMES = {
     "conftest.py",
@@ -24,6 +40,9 @@ PROTECTED_NAMES = {
     "setup.cfg",
     ".pytest.ini",
 }
+# The harness stages these before any agent edit. Do not call them protected
+# when they are the only changes.
+HARNESS_STAGED = {"conftest.py", "pytest.ini"}
 
 
 def _text(value):
@@ -98,6 +117,22 @@ def _flag(path):
     return flags
 
 
+def _status_path(line):
+    raw = line.rstrip()
+    if len(raw) >= 4 and raw[2] == " ":
+        path = raw[3:]
+    else:
+        path = raw.strip()
+    if " -> " in path:
+        path = path.split(" -> ", 1)[1]
+    return path.strip().strip('"')
+
+
+def _harness_only(paths):
+    cleaned = [path.lstrip("./") for path in paths if path.strip()]
+    return bool(cleaned) and all(path in HARNESS_STAGED for path in cleaned)
+
+
 def _pytest_line(names):
     for name in names:
         path = Path(name)
@@ -117,25 +152,33 @@ def _pytest_line(names):
     return "pytest: no mapped test"
 
 
+def _visible_flags(path, harness_only):
+    flags = _flag(path)
+    if harness_only and path.lstrip("./") in HARNESS_STAGED:
+        flags = [flag for flag in flags if flag != "protected"]
+    return flags
+
+
 def main():
     lines = _repro_lines()
     code, status, err = _run(["git", "status", "--short"], 10)
+    status_lines = []
+    if code == 0:
+        status_lines = [line for line in status.splitlines() if line.strip()]
+    names = _names()
+    harness_only = _harness_only([_status_path(line) for line in status_lines] + names)
     if code == 0:
         flagged = []
-        for line in status.splitlines():
+        for line in status_lines:
             text = line.strip()
-            if not text:
-                continue
-            path = text[3:] if len(text) > 3 else text
-            flags = _flag(path)
+            flags = _visible_flags(_status_path(line), harness_only)
             flagged.append(text + (" [" + ",".join(flags) + "]" if flags else ""))
         lines.append("git status:")
         lines.extend(flagged or ["clean"])
     else:
         lines.append("git status failed: " + err.strip())
-    names = _names()
     for name in names:
-        flags = _flag(name)
+        flags = _visible_flags(name, harness_only)
         if flags:
             lines.append(f"diff {name} [{','.join(flags)}]")
     _code, stat, _err = _run(["git", "diff", "--stat"], 10)

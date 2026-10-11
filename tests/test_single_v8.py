@@ -10,6 +10,7 @@ import pytest
 
 from gemma_lab.bundle import load_yaml
 from gemma_lab.hygiene import lint_candidate
+from gemma_lab.notebook import _pair_eval_cell
 from gemma_lab.operations import (
     DEFAULT_MODEL_LOAD_SECONDS,
     DEFAULT_SCORER_OVERHEAD_SECONDS,
@@ -81,7 +82,7 @@ def test_single_v8_is_a_prompt_and_budget_change():
     parent = (V7 / "prompts" / "system.md").read_text()
     assert prompt != parent
     assert len(parent) == 8024
-    assert len(prompt) == 8043
+    assert len(prompt) == 8283
     assert (V8 / "thinking.yaml").read_bytes() == (V7 / "thinking.yaml").read_bytes()
     assert "skills:" not in (V8 / "agent.yaml").read_text()
     sampling = load_yaml(V8 / "sampling.yaml", V8)
@@ -121,8 +122,18 @@ def test_single_v8_is_a_prompt_and_budget_change():
         "Call counts are not a reason to stop",
         "fewer than 60 seconds",
         "fewer than 20 seconds",
+        "Make the most plausible minimal edit; do not submit an empty diff.",
+        "Call get_status about every 5 calls, and before submit_patch",
+        "old = b'''OLD'''",
+        "new = b'''NEW'''",
+        "free of backslashes and triple quotes",
+        "Non-ASCII bytes need \\xNN",
+        "While the check has not passed and time_seconds_remaining is above 60, keep editing.",
+        "After a passing check, run git diff and call submit_patch.",
     ):
         assert phrase in prompt, phrase
+    assert "An empty diff is never allowed" not in prompt
+    assert "While time_seconds_remaining is above 60, keep editing" not in prompt
     assert "UNCERTAIN" not in prompt
     assert "call 24" not in prompt
     assert "95 seconds" not in prompt
@@ -147,7 +158,7 @@ def test_single_v8_check_adds_only_the_flat_skill():
         "top-level. If that call fails twice, stop using the skill and keep using "
         "run_command.\n\n"
     )
-    assert len(prompt) == 8284
+    assert len(prompt) == 8524
     assert sentence in prompt
     assert prompt.replace(sentence, "", 1) == parent
     agent = (CHECK / "agent.yaml").read_text()
@@ -284,7 +295,67 @@ def test_notebook_runtime_does_not_include_the_new_markers():
     assert "_card_sampling_difference_allowed" not in runtime
 
 
-def test_check_script_pins_the_repro_and_flags_protected_files(tmp_path):
+def _eval_source():
+    return (
+        "SAMPLE_TASKS = tasks[:2]\n"
+        "eval_config = EvalConfig(\n"
+        "    results_dir=WORKING_DIR / 'results',\n"
+        "    submission_dir=AGENT_DIR,\n"
+        "    sandbox='subprocess',\n"
+        ")\n"
+        "submission_df = None\n"
+    )
+
+
+def test_session_cap_uses_the_larger_arm():
+    unequal = _pair_eval_cell(
+        _eval_source(),
+        {},
+        {"A": {"max_time_minutes": 4.5}, "B": {"max_time_minutes": 5.5}},
+        None,
+    )
+    assert "cap_seconds=330.0" in unequal
+    assert "cap_seconds=270.0" not in unequal
+    assert "budgets = ARM_BUDGETS[label]" in unequal
+    swapped = _pair_eval_cell(
+        _eval_source(),
+        {},
+        {"A": {"max_time_minutes": 5.5}, "B": {"max_time_minutes": 4.5}},
+        None,
+    )
+    assert "cap_seconds=330.0" in swapped
+    equal = _pair_eval_cell(
+        _eval_source(),
+        {},
+        {"A": {"max_time_minutes": 4.5}, "B": {"max_time_minutes": 4.5}},
+        None,
+    )
+    assert "cap_seconds=270.0" in equal
+
+
+def test_report_cap_is_the_larger_arm_even_when_b_is_smaller(tmp_path):
+    swapped = tmp_path / "swapped.yaml"
+    text = DEV.read_text()
+    text = text.replace("source: agents/single-v7", "source: ARM_V7")
+    text = text.replace("source: agents/single-v8", "source: agents/single-v7")
+    text = text.replace("source: ARM_V7", "source: agents/single-v8")
+    swapped.write_text(text)
+    run = tmp_path / "run"
+    _arm_row(run, "A", "rich_4070", [("submit_patch", {}, "ok")])
+    _arm_row(run, "B", "rich_4070", [("submit_patch", {}, "ok")])
+    output = tmp_path / "report"
+    report_from_runs([run], swapped, output)
+    saved = json.loads((output / "pair_report.json").read_text())
+    assert saved["projection"]["arms"]["A"]["cap_seconds"] == 330
+    assert saved["projection"]["arms"]["B"]["cap_seconds"] == 330
+    sibling = tmp_path / "sibling-report"
+    report_from_runs([run], SIBLING, sibling)
+    matched = json.loads((sibling / "pair_report.json").read_text())
+    assert matched["projection"]["arms"]["A"]["cap_seconds"] == 270
+    assert matched["projection"]["arms"]["B"]["cap_seconds"] == 270
+
+
+def test_check_script_pins_the_repro_from_another_cwd(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
@@ -296,12 +367,21 @@ def test_check_script_pins_the_repro_and_flags_protected_files(tmp_path):
         check=True,
         capture_output=True,
     )
-    (repo / "pkg.py").write_text("x = 2\n")
     (repo / "conftest.py").write_text("a = 1\n")
+    (repo / "pytest.ini").write_text("[pytest]\n")
+    subprocess.run(
+        ["git", "add", "conftest.py", "pytest.ini"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
     repro = tmp_path / "repro_check.py"
     repro.write_text("raise SystemExit(1)\n")
     pin = tmp_path / "pin.txt"
-    script = CHECK / "skills" / "check" / "scripts" / "run.py"
+    script = (CHECK / "skills" / "check" / "scripts" / "run.py").resolve()
+    source = script.read_text()
+    assert "tempfile.gettempdir" in source
+    assert "GEMMA_CHECK_ROOT" in source
     env = os.environ.copy()
     env.update(
         {
@@ -310,18 +390,24 @@ def test_check_script_pins_the_repro_and_flags_protected_files(tmp_path):
             "GEMMA_CHECK_PIN": str(pin),
         }
     )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
     first = subprocess.run(
         [sys.executable, str(script)],
+        cwd=elsewhere,
         env=env,
         capture_output=True,
         text=True,
         check=True,
     )
     assert "before: FAIL exit=1" in first.stdout
-    assert "protected" in first.stdout
+    assert "[protected]" not in first.stdout
+    assert "not a git repository" not in first.stdout
     assert pin.read_text().strip()
+    (repo / "pkg.py").write_text("x = 2\n")
     second = subprocess.run(
         [sys.executable, str(script)],
+        cwd=elsewhere,
         env=env,
         capture_output=True,
         text=True,
@@ -329,9 +415,14 @@ def test_check_script_pins_the_repro_and_flags_protected_files(tmp_path):
     )
     assert "after: FAIL exit=1" in second.stdout
     assert "weakening" not in second.stdout
+    stat = second.stdout.split("git diff --stat:", 1)[1]
+    assert "pkg.py" in stat
+    assert "empty" not in stat.split("pytest", 1)[0]
+    assert "[protected]" in second.stdout
     repro.write_text("raise SystemExit(0)\n")
     third = subprocess.run(
         [sys.executable, str(script)],
+        cwd=elsewhere,
         env=env,
         capture_output=True,
         text=True,

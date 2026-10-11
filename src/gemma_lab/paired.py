@@ -3479,14 +3479,15 @@ def report_from_runs(run_dirs, protocol_path, output, allow_protocol_mismatch=Fa
     protocol = load_protocol(protocol_path)
     schedule = protocol_schedule(protocol)
     protocol["_schedule_sha256"] = schedule["sha256"]
-    cap = None
+    caps = []
     arm_meta = {"A": {"sha256": None}, "B": {"sha256": None}}
     for label, spec in protocol["arms"].items():
         source = Path(spec["source"])
         if source.is_dir():
             info = inspect_arm(source)
-            cap = float(info["budgets"]["max_time_minutes"]) * 60.0
+            caps.append(float(info["budgets"]["max_time_minutes"]) * 60.0)
             arm_meta[label]["sha256"] = None
+    cap = max(caps) if caps else None
     for run_dir in run_dirs:
         manifest_path = Path(run_dir) / "pair_manifest.json"
         if not manifest_path.exists():
