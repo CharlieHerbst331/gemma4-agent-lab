@@ -1,0 +1,56 @@
+# Dev-13 promotion protocol: single-v7 (A) vs single-v8 (B), one repeat.
+# Not a smoke. Arm B changes eval_config.yaml (330 s, 150 calls, 200 turns)
+# and sampling.yaml (temperature 1.0, top_k 64). matched_pair is false because
+# those files differ. The budget check still refuses a limit change unless the
+# pair is unmatched AND eval_config.yaml is listed. The sampling check still
+# refuses a temperature change unless sampling.yaml is listed. Thinking stays
+# off and is not listed, so a thinking change is still refused.
+# Task order is the dev-13 cohort file order. Repeats is 1. Schedule hashes
+# are not required to be unique, so this hash matches the other dev-13
+# one-repeat protocols.
+# expected_sha256 stays null until Verification pins the approved archives.
+arms:
+  A:
+    source: agents/single-v7
+    expected_sha256: null
+  B:
+    source: agents/single-v8
+    expected_sha256: null
+matched_pair: false
+notes: "Unmatched pair. Arm B changes the per-task cap, call limits, temperature, top_k, and the prompt. eval_config.yaml and sampling.yaml are the markers. Thinking stays off."
+allow_identical: false
+allowed_differences:
+  - agent.yaml
+  - sub_agents/*
+  - skills/*
+  - prompts/*
+  - eval_config.yaml
+  - sampling.yaml
+cohort:
+  path: configs/cohorts/dev-13-environment-screened.json
+  task_file_sha256: e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6
+repeats: 1
+order_rule: per_task_parity_v1
+shuffle_seed: null
+session_budget_seconds: 40200
+pair_start_pad_seconds: 60
+abort_policy: round2_v1
+early_stop: null
+budget_gate:
+  block:
+    - name: round2_load_plus_129_mean
+      formula: L + 129 * mean_wall
+      threshold_seconds: 38880
+    - name: coordinator_mean_times_120
+      formula: mean_wall * 120
+      threshold_seconds: 39600
+  warn:
+    - name: worst_case_12h
+      formula: L + n * (cap + p90_delta)
+      threshold_seconds: 43200
+      n_values: [120, 129]
+  L_default: 900
+  coordinator_hours: 11
+timing_tier: 2
+pins_mode: record
+exclude_import_origin_risk: true

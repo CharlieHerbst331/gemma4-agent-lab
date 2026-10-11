@@ -1,0 +1,60 @@
+# Smoke protocol: single-v8 (A) vs single-v8-check (B). Not promotion eligible.
+# One repeat. Budgets and sampling match. Arm B adds skills/check and one
+# prompt sentence. prompts/* and skills/* are allowed differences.
+#
+# Five tasks that previously produced bad tool calls or empty patches:
+# rich_4070 (the repeated missing-parameter edit_file loop), rich_3934
+# (empty patch and stray reads), fastapi_11194 (both arms gave up with no
+# edit), rich_3938 (both arms gave up; also in the older five-task smoke),
+# fastapi_14262 (stray start_line reads and merged edit_file calls).
+# fastapi_14786 is the usual solve, so it is not in this list.
+purpose: smoke
+arms:
+  A:
+    source: agents/single-v8
+    expected_sha256: null
+  B:
+    source: agents/single-v8-check
+    expected_sha256: null
+notes: "Smoke, not promotion eligible. Arm B adds the flat check skill. The five tasks are rich_4070, rich_3934, fastapi_11194, rich_3938, and fastapi_14262."
+matched_pair: true
+allow_identical: false
+allowed_differences:
+  - agent.yaml
+  - sub_agents/*
+  - skills/*
+  - prompts/*
+cohort:
+  path: configs/cohorts/dev-13-environment-screened.json
+  task_file_sha256: e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6
+task_ids:
+  - rich_4070
+  - rich_3934
+  - fastapi_11194
+  - rich_3938
+  - fastapi_14262
+repeats: 1
+order_rule: per_task_parity_v1
+shuffle_seed: null
+session_budget_seconds: 7200
+pair_start_pad_seconds: 60
+abort_policy: round2_v1
+early_stop: null
+budget_gate:
+  block:
+    - name: round2_load_plus_129_mean
+      formula: L + 129 * mean_wall
+      threshold_seconds: 38880
+    - name: coordinator_mean_times_120
+      formula: mean_wall * 120
+      threshold_seconds: 39600
+  warn:
+    - name: worst_case_12h
+      formula: L + n * (cap + p90_delta)
+      threshold_seconds: 43200
+      n_values: [120, 129]
+  L_default: 900
+  coordinator_hours: 11
+timing_tier: 2
+pins_mode: record
+exclude_import_origin_risk: true

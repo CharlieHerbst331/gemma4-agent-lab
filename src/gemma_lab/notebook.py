@@ -1181,7 +1181,9 @@ def _pair_eval_cell(source, protocol, budgets, skipped):
     if "sandbox='subprocess'" not in config and 'sandbox="subprocess"' not in config:
         raise ValueError("Official starter structure changed; missing subprocess sandbox")
     frame = source.index("submission_df =", end)
-    cap = float(budgets["A"]["max_time_minutes"]) * 60.0
+    # Unmatched pairs can use different per-task caps. The session abort and
+    # hit_cap.wall checks need the larger one. Equal caps keep the same literal.
+    cap = max(float(budgets[label]["max_time_minutes"]) * 60.0 for label in ("A", "B"))
     indented = "\n".join(("    " + line if line.strip() else line) for line in config.splitlines())
     safe_config = indented.replace("{", "{{").replace("}", "}}")
     skipped_literal = repr([] if not skipped else [skipped])

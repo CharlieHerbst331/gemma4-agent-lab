@@ -1,0 +1,17 @@
+agent_class: LlmAgent
+name: single_v1
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Single-agent control with a run_command edit path and a 330 second cap, with no skills.
+instruction: !include prompts/system.md
+generate_content_config: !include sampling.yaml
+# default keeps this agent's own tool history. v5 sets none on each LlmAgent.
+include_contents: default
+tools:
+- get_status
+- read_file
+- edit_file
+- run_command
+- search_similar_code
+- get_code_neighbors
+- get_code_subgraph
+- submit_patch
