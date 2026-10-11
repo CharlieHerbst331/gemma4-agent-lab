@@ -1,0 +1,50 @@
+# Dev-13 promotion protocol: single-v6 (A) vs single-v7 (B), one repeat.
+# Not a smoke. The arms differ only in prompts/system.md. prompts/* is an
+# allowed difference, so matched_pair stays true. thinking.yaml and
+# eval_config.yaml are byte-identical, so sampling and budgets match.
+# Task order is the dev-13 cohort file order. Repeats is 1, the same structure
+# as configs/protocols/single-v5-vs-single-v6-dev13.yaml. Schedule hashes are
+# not required to be unique, so this hash matches that protocol.
+# expected_sha256 stays null until Verification pins the approved archives.
+arms:
+  A:
+    source: agents/single-v6
+    expected_sha256: null
+  B:
+    source: agents/single-v7
+    expected_sha256: null
+matched_pair: true
+allow_identical: false
+allowed_differences:
+  - agent.yaml
+  - sub_agents/*
+  - skills/*
+  - prompts/*
+cohort:
+  path: configs/cohorts/dev-13-environment-screened.json
+  task_file_sha256: e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6
+repeats: 1
+order_rule: per_task_parity_v1
+shuffle_seed: null
+session_budget_seconds: 40200
+pair_start_pad_seconds: 60
+abort_policy: round2_v1
+early_stop: null
+budget_gate:
+  block:
+    - name: round2_load_plus_129_mean
+      formula: L + 129 * mean_wall
+      threshold_seconds: 38880
+    - name: coordinator_mean_times_120
+      formula: mean_wall * 120
+      threshold_seconds: 39600
+  warn:
+    - name: worst_case_12h
+      formula: L + n * (cap + p90_delta)
+      threshold_seconds: 43200
+      n_values: [120, 129]
+  L_default: 900
+  coordinator_hours: 11
+timing_tier: 2
+pins_mode: record
+exclude_import_origin_risk: true
