@@ -3235,6 +3235,34 @@ def _thinking_only_difference_allowed(left, right, allowed):
     return rest(left) == rest(right)
 
 
+def _budget_difference_allowed(allowed, matched_pair):
+    """True only for an unmatched pair that names ``eval_config.yaml``.
+
+    Listing ``eval_config.yaml`` on a matched pair does not loosen the budget
+    check. ``matched_pair`` false alone does not either. Both are required,
+    because existing tests refuse each half on its own.
+    """
+    return matched_pair is False and "eval_config.yaml" in (allowed or [])
+
+
+def _card_sampling_difference_allowed(left, right, allowed):
+    """Temperature and top_p may differ when the protocol lists ``sampling.yaml``.
+
+    Existing protocols do not list that marker. Thinking still has to match
+    unless ``thinking.yaml`` is listed too. ``top_k`` is not part of the
+    compared tuple.
+    """
+    if "sampling.yaml" not in (allowed or []):
+        return False
+
+    def thinking(rows):
+        return [(row[2], row[3]) for row in rows]
+
+    if "thinking.yaml" in (allowed or []):
+        return True
+    return thinking(left) == thinking(right)
+
+
 def assert_arms_compatible(
     arm_a,
     arm_b,
@@ -3248,10 +3276,11 @@ def assert_arms_compatible(
     """Refuse arms that are not a pair.
 
     ``matched_pair`` false skips only the shared-file identity check. Model,
-    budget, sampling, adapter, and identical-archive refusals still apply.
-    Omitting the flag keeps the shared-file check. A protocol that lists
-    ``thinking.yaml`` in ``allowed_differences`` may differ in thinking budget
-    and ``include_thoughts`` only. That does not loosen temperature or top_p.
+    adapter, and identical-archive refusals still apply. Budget differences
+    stay refused unless the pair is unmatched and lists ``eval_config.yaml``.
+    A protocol that lists ``thinking.yaml`` may differ in thinking budget and
+    ``include_thoughts`` only. A protocol that lists ``sampling.yaml`` may
+    differ in temperature and top_p. Neither marker is implied by ``agent.yaml``.
     """
     if not isinstance(matched_pair, bool):
         raise ValueError("matched_pair must be true or false")
@@ -3263,11 +3292,16 @@ def assert_arms_compatible(
         raise ValueError("LoRA adapters are refused in paired v1")
     if arm_a["models"] != arm_b["models"] or arm_a["models"] != [MODEL]:
         raise ValueError(f"Arms must declare the same single model {MODEL}")
-    if arm_a["budgets"] != arm_b["budgets"]:
-        raise ValueError(f"Arm budgets differ: {arm_a['budgets']} != {arm_b['budgets']}")
-    if arm_a["sampling"] != arm_b["sampling"] and not _thinking_only_difference_allowed(
-        arm_a["sampling"], arm_b["sampling"], allowed_differences
+    if arm_a["budgets"] != arm_b["budgets"] and not _budget_difference_allowed(
+        allowed_differences, matched_pair
     ):
+        raise ValueError(f"Arm budgets differ: {arm_a['budgets']} != {arm_b['budgets']}")
+    sampling_ok = _thinking_only_difference_allowed(
+        arm_a["sampling"], arm_b["sampling"], allowed_differences
+    ) or _card_sampling_difference_allowed(
+        arm_a["sampling"], arm_b["sampling"], allowed_differences
+    )
+    if arm_a["sampling"] != arm_b["sampling"] and not sampling_ok:
         raise ValueError(
             "Resolved generation settings differ in temperature, top_p, or thinking_budget: "
             f"{arm_a['sampling']} != {arm_b['sampling']}"
