@@ -3,14 +3,18 @@
 Events come from the existing trace parser (ATIF, the synthetic gemma-lab
 trace, or the small ADK-like shape). A failed skill call is ``run_skill_script``
 whose output is ``INVALID_ARGUMENTS`` or a check.py usage / corrected-example
-error. A failed edit is ``edit_file`` whose output contains the harness sentence
-``mandatory input parameters`` (``Invoking `edit_file()` failed as the following
-mandatory input parameters are not present``) or a ``missing-parameter`` error.
+error. A failed edit is ``edit_file`` whose output is one of:
+
+- missing parameters: ``Invoking `edit_file()` failed as the following
+  mandatory input parameters are not present``, or a ``missing-parameter`` error
+- not found: ``Failed to replace: old_string not found``
+- ambiguous: ``Target string occurs <N> times``
 """
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from gemma_lab.hygiene.diffparse import parse_diff
@@ -34,13 +38,35 @@ def is_failed_skill(event) -> bool:
     return False
 
 
-def is_failed_edit(event) -> bool:
+_NOT_FOUND_EDIT = "failed to replace: old_string not found"
+_AMBIGUOUS_EDIT = re.compile(r"Target string occurs \d+ times")
+
+
+def edit_failure_kind(event) -> str | None:
+    """``missing_parameter``, ``not_found``, ``ambiguous``, or None.
+
+    A call matches at most one kind. Missing parameters win when a result
+    mentions more than one of these sentences.
+    """
     if getattr(event, "tool", "") != "edit_file":
-        return False
-    lowered = str(getattr(event, "output", "") or "").lower()
-    if "mandatory input parameters" in lowered:
-        return True
-    return "missing-parameter" in lowered or "missing parameter" in lowered
+        return None
+    text = str(getattr(event, "output", "") or "")
+    lowered = text.lower()
+    if (
+        "mandatory input parameters" in lowered
+        or "missing-parameter" in lowered
+        or "missing parameter" in lowered
+    ):
+        return "missing_parameter"
+    if _NOT_FOUND_EDIT in lowered:
+        return "not_found"
+    if _AMBIGUOUS_EDIT.search(text):
+        return "ambiguous"
+    return None
+
+
+def is_failed_edit(event) -> bool:
+    return edit_failure_kind(event) is not None
 
 
 def _failed(event) -> bool:
@@ -56,6 +82,7 @@ def summarize_events(events) -> dict:
     """
     failed_skill = 0
     failed_edit = 0
+    kinds = {"missing_parameter": 0, "not_found": 0, "ambiguous": 0}
     submit_patch = 0
     streak = 0
     max_streak = 0
@@ -64,8 +91,10 @@ def summarize_events(events) -> dict:
             submit_patch += 1
         if is_failed_skill(event):
             failed_skill += 1
-        if is_failed_edit(event):
+        kind = edit_failure_kind(event)
+        if kind is not None:
             failed_edit += 1
+            kinds[kind] += 1
         if _failed(event):
             streak += 1
             if streak > max_streak:
@@ -80,6 +109,9 @@ def summarize_events(events) -> dict:
     return {
         "failed_skill_calls": failed_skill,
         "failed_edit_calls": failed_edit,
+        "failed_edit_missing_parameter": kinds["missing_parameter"],
+        "failed_edit_not_found": kinds["not_found"],
+        "failed_edit_ambiguous": kinds["ambiguous"],
         "max_consecutive_failures": max_streak,
         "tail_streak": tail,
         "submit_patch_count": submit_patch,
@@ -89,10 +121,13 @@ def summarize_events(events) -> dict:
 def unrecovered_loop(summary, patch, hit_cap) -> bool:
     """True when the tool-failure loop was not recovered.
 
-    A later successful skill or edit call does not clear the flag. The run
-    is unrecovered when it hit the cap (timed out, or it never called
+    A later successful skill or edit call does not shrink the max streak.
+    The run is unrecovered when it hit the cap (timed out, or it never called
     ``submit_patch``), when the saved patch is empty or scratch-only, or
-    when the tail streak is at least 3. The streak column stays the max.
+    when the tail streak is at least 3. The tail counts failed skill calls
+    and repeated failing ``edit_file`` calls of every kind: missing
+    parameters, ``old_string`` not found, and a target string that occurs
+    N times. Identical repeats of any of those kinds count.
     """
     if hit_cap or summary["submit_patch_count"] == 0:
         return True
@@ -156,20 +191,26 @@ def tool_failure_lines(rows) -> list[str]:
         "unrecovered loop is true when the run hit the cap (timed out or never "
         "called submit_patch), or the saved patch is empty or scratch-only, or "
         "the tail streak of failed skill or edit_file calls at the end of the "
-        "run is at least 3. max streak is the longest adjacent failure streak.",
+        "run is at least 3. Failed edit_file calls are missing parameters, "
+        "old_string not found, or a target string that occurs N times. "
+        "Repeated identical calls of any of those kinds count. max streak is "
+        "the longest adjacent failure streak. failed edit_file is the total; "
+        "the last three columns split that total.",
         "",
         "| arm | repeat | task | failed skill | failed edit_file | "
-        "max streak | unrecovered loop | submit_patch | patch |",
-        "| --- | --- | --- | ---: | ---: | ---: | --- | ---: | --- |",
+        "max streak | unrecovered loop | submit_patch | patch | "
+        "missing_parameter | not_found | ambiguous |",
+        "| --- | --- | --- | ---: | ---: | ---: | --- | ---: | --- | ---: | ---: | ---: |",
     ]
     if not rows:
-        lines.append("| | | | | | | | | |")
+        lines.append("| | | | | | | | | | | | |")
         return lines
     for row in rows:
         lines.append(
             "| {arm} | {repeat} | {task_id} | {failed_skill_calls} | {failed_edit_calls} | "
             "{max_consecutive_failures} | {unrecovered_loop} | {submit_patch_count} | "
-            "{patch} |".format(**row)
+            "{patch} | {failed_edit_missing_parameter} | {failed_edit_not_found} | "
+            "{failed_edit_ambiguous} |".format(**row)
         )
     return lines
 

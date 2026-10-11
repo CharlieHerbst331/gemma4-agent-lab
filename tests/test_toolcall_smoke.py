@@ -119,6 +119,9 @@ def test_smoke_report_banner_and_stub_tool_failures(tmp_path):
     summary = summarize_trace(atif("repair", steps, content=True))
     assert summary["failed_skill_calls"] == 4
     assert summary["failed_edit_calls"] == 2
+    assert summary["failed_edit_missing_parameter"] == 2
+    assert summary["failed_edit_not_found"] == 0
+    assert summary["failed_edit_ambiguous"] == 0
     assert summary["max_consecutive_failures"] == 6
     assert summary["tail_streak"] == 0
     assert summary["submit_patch_count"] == 1
@@ -163,8 +166,8 @@ def test_smoke_report_banner_and_stub_tool_failures(tmp_path):
     assert "AB, BA, AB, BA, AB" in text
     assert "gemma-lab pair-report" in text
     assert "projection.json" in text
-    assert "| A | r1 | fastapi_14786 | 4 | 2 | 6 | True | 1 | scratch-only |" in text
-    assert "| B | r1 | fastapi_14786 | 0 | 0 | 0 | True | 1 | empty |" in text
+    assert "| A | r1 | fastapi_14786 | 4 | 2 | 6 | True | 1 | scratch-only | 2 | 0 | 0 |" in text
+    assert "| B | r1 | fastapi_14786 | 0 | 0 | 0 | True | 1 | empty | 0 | 0 | 0 |" in text
     assert "Hygiene A/r1:" in text
     assert (run / "results" / "A" / "r1" / "hygiene.json").is_file()
     assert (run / "results" / "B" / "r1" / "hygiene.json").is_file()
@@ -252,6 +255,9 @@ def test_real_harness_edit_string_and_unrecovered_conditions(tmp_path):
     rich = rows[("B", "rich_3934")]
     assert rich["failed_skill_calls"] == 0
     assert rich["failed_edit_calls"] == 25
+    assert rich["failed_edit_missing_parameter"] == 25
+    assert rich["failed_edit_not_found"] == 0
+    assert rich["failed_edit_ambiguous"] == 0
     assert rich["max_consecutive_failures"] == 25
     assert rich["tail_streak"] == 0
     assert rich["unrecovered_loop"] is True
@@ -281,6 +287,110 @@ def test_real_harness_edit_string_and_unrecovered_conditions(tmp_path):
     assert tail["submit_patch_count"] == 1
     assert tail["patch"] == "other"
     assert tail["unrecovered_loop"] is True
+
+
+def test_edit_failure_kinds_count_not_found_and_ambiguous_loops(tmp_path):
+    """Realistic harness results. Identical missing-parameter calls loop.
+
+    A not-found streak that ends in a successful edit is counted and recovered.
+    """
+    from gemma_lab.hygiene.trace import parse_trace
+    from gemma_lab.tool_failures import collect_tool_failures, summarize_trace
+
+    missing = (
+        "Invoking `edit_file()` failed as the following mandatory input parameters "
+        "are not present: ['old_string']"
+    )
+    not_found = "Failed to replace: old_string not found"
+    ambiguous = "Target string occurs 3 times"
+    same = {"filepath": "pkg/core.py", "new_string": "value = 1"}
+    found_args = {"filepath": "pkg/core.py", "old_string": "a = 1", "new_string": "a = 2"}
+    mixed = summarize_trace(
+        atif(
+            "repair",
+            [
+                ("edit_file", same, missing),
+                ("edit_file", found_args, not_found),
+                (
+                    "edit_file",
+                    found_args,
+                    "Error: Target string occurs 12 times in the file.",
+                ),
+                ("edit_file", found_args, "Successfully replaced text."),
+                ("edit_file", found_args, "Target string occurs many times"),
+            ],
+            content=True,
+        )
+    )
+    assert mixed["failed_edit_calls"] == 3
+    assert mixed["failed_edit_missing_parameter"] == 1
+    assert mixed["failed_edit_not_found"] == 1
+    assert mixed["failed_edit_ambiguous"] == 1
+
+    loop_trace = atif(
+        "repair",
+        [("submit_patch", {}, "ok"), *(("edit_file", same, missing) for _ in range(6))],
+        content=True,
+    )
+    edits = [event for event in parse_trace(loop_trace).events if event.tool == "edit_file"]
+    assert len(edits) == 6
+    assert all(event.args == same for event in edits)
+    assert all("old_string" not in event.args for event in edits)
+
+    run = tmp_path / "run"
+    _write_task(run, "A", "missing_loop", loop_trace, CODE_PATCH)
+    _write_task(
+        run,
+        "A",
+        "not_found_then_success",
+        atif(
+            "repair",
+            [
+                ("edit_file", found_args, not_found),
+                ("edit_file", found_args, not_found),
+                ("edit_file", found_args, "Successfully replaced text."),
+                ("submit_patch", {}, "ok"),
+            ],
+            content=True,
+        ),
+        CODE_PATCH,
+    )
+    _write_task(
+        run,
+        "B",
+        "ambiguous_loop",
+        atif(
+            "single",
+            [("submit_patch", {}, "ok"), *(("edit_file", found_args, ambiguous) for _ in range(3))],
+            content=True,
+        ),
+        CODE_PATCH,
+    )
+    rows = {(row["arm"], row["task_id"]): row for row in collect_tool_failures(run)}
+    loop = rows[("A", "missing_loop")]
+    assert loop["failed_edit_calls"] == 6
+    assert loop["failed_edit_missing_parameter"] == 6
+    assert loop["failed_edit_not_found"] == 0
+    assert loop["failed_edit_ambiguous"] == 0
+    assert loop["tail_streak"] == 6
+    assert loop["patch"] == "other"
+    assert loop["submit_patch_count"] == 1
+    assert loop["unrecovered_loop"] is True
+    recovered = rows[("A", "not_found_then_success")]
+    assert recovered["failed_edit_calls"] == 2
+    assert recovered["failed_edit_not_found"] == 2
+    assert recovered["failed_edit_missing_parameter"] == 0
+    assert recovered["tail_streak"] == 0
+    assert recovered["max_consecutive_failures"] == 2
+    assert recovered["submit_patch_count"] == 1
+    assert recovered["patch"] == "other"
+    assert recovered["unrecovered_loop"] is False
+    ambiguous_row = rows[("B", "ambiguous_loop")]
+    assert ambiguous_row["failed_edit_calls"] == 3
+    assert ambiguous_row["failed_edit_ambiguous"] == 3
+    assert ambiguous_row["failed_edit_not_found"] == 0
+    assert ambiguous_row["tail_streak"] == 3
+    assert ambiguous_row["unrecovered_loop"] is True
 
 
 def _edits(count):
