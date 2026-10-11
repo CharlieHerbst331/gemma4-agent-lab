@@ -618,6 +618,35 @@ def test_git_status_and_diff_after_submit_are_not_edits():
         "echo 'a > b stays quoted'",
         "find . -name '*.py'",
         "ls 2>&1",
+        "git status",
+        "git diff",
+        "git diff --stat",
+        "git status --short",
+        "git diff rich/live.py",
+        "git log -p",
+        "git show HEAD",
+        "ls -la",
+        "cat file",
+        "grep -n x file",
+        "rg x",
+        "sed -n '1,40p' file",
+        "sed -n '/re/p' file",
+        "head -n 5 f",
+        "wc -l f",
+        "cd repo && git diff",
+        "git diff 2>/dev/null",
+        "git log | head",
+        "ls >/dev/null",
+        "printf ok",
+        "stat file",
+        "diff a b",
+        "sort file",
+        "uniq file",
+        "cut -c1 file",
+        "tr a b < file",
+        '"git" status',
+        "git diff > /dev/null 2>&1",
+        "ls > /dev/null 2>&1",
     ],
 )
 def test_readonly_shell_after_submit_is_clean(text):
@@ -656,6 +685,56 @@ def test_readonly_shell_after_submit_is_clean(text):
         "python repair.py",
         "make test",
         "git blame rich/pretty.py",
+        "sed -n 'w out' a.py",
+        "sed -n '1w x'",
+        "sed -n '/a/w out'",
+        "sed -n 's/a/b/w out'",
+        "sed -n 'e touch x'",
+        "sed -n 's/a/b/e'",
+        "sed -n -f script.sed",
+        "sed -n 'r x'",
+        "sed -n '1r x'",
+        "sed -n 'W out'",
+        "sed -n '1W out'",
+        "sed --expression '1,40p' file",
+        "sed -e '1,40p' file",
+        "sed '1,40p' file",
+        "git diff --output=f",
+        "git diff --output f",
+        "git log --output=f",
+        "git show --output=f",
+        "git diff --ext-diff",
+        "git diff --textconv",
+        "git --exec-path=/tmp log",
+        "git -c core.fsmonitor='touch x' status",
+        "git -c diff.external=helper diff --ext-diff",
+        "git -c core.pager=less log",
+        "GIT_EXTERNAL_DIFF=helper git diff",
+        "GIT_PAGER=less git log",
+        "rg --pre 'cmd' foo",
+        "rg --pre=./x.sh",
+        "rg --hostname-bin cmd",
+        "rg --pre-glob '*.py'",
+        "find . -fprint0 out",
+        "find . -fls out",
+        "python fix.py -c x",
+        "python -m pytest -c pytest.ini",
+        "python -c 'print(1)'",
+        "python3 -c 'print(1)'",
+        "python -c \"from os import remove; remove('x')\"",
+        "cat <(rm x)",
+        "./git status",
+        "./cat f",
+        "/tmp/x/git status",
+        'echo \\"; rm f; echo \\"',
+        'echo "abc',
+        "echo 'a; rm f",
+        "echo $(rm x)",
+        "echo `rm x`",
+        "echo ${HOME}",
+        "cat <<EOF",
+        "cat >(true)",
+        "ls >&f",
     ],
 )
 def test_mutating_shell_after_submit_warns(text):
@@ -664,6 +743,119 @@ def test_mutating_shell_after_submit_warns(text):
     assert found and found[0]["severity"] == "warn"
     assert "agent_runner.py:758" in found[0]["evidence"]
     assert report["gate"] == "warn"
+
+
+def test_readonly_shell_matrix_matches_the_allow_list():
+    """Fail closed: each false-negative class mutates, and the allow-list does not."""
+    from gemma_lab.hygiene.rules import _command_can_mutate
+
+    cases = {
+        "git status": False,
+        "git diff": False,
+        "git diff --stat": False,
+        "git status --short": False,
+        "git diff rich/live.py": False,
+        "git log -p": False,
+        "git log -5 --oneline": False,
+        "git show HEAD": False,
+        "ls -la": False,
+        "cat file": False,
+        "grep -n x file": False,
+        "rg x": False,
+        "sed -n '1,40p' file": False,
+        "sed -n '/re/p' file": False,
+        "sed -n '151,300p' rich/live.py | head -c 4000": False,
+        "head -n 5 f": False,
+        "wc -l f": False,
+        "cd repo && git diff": False,
+        "git diff 2>/dev/null": False,
+        "git log | head": False,
+        "ls >/dev/null": False,
+        "ls 2>&1": False,
+        "ls > /dev/null 2>&1": False,
+        "echo 'a > b stays quoted'": False,
+        '"git" status': False,
+        "find . -name '*.py'": False,
+        "sed -n 'w out' a.py": True,
+        "sed -n '1w x'": True,
+        "sed -n '/a/w out'": True,
+        "sed -n 's/a/b/w out'": True,
+        "sed -n 'e touch x'": True,
+        "sed -n 's/a/b/e'": True,
+        "sed -n -f script.sed": True,
+        "sed -n 'r x'": True,
+        "sed -n '1W out'": True,
+        "sed --expression '1,40p' file": True,
+        "sed '1,40p' file": True,
+        "git diff --output=f": True,
+        "git diff --output f": True,
+        "git log --output=f": True,
+        "git show --output=f": True,
+        "git diff --ext-diff": True,
+        "git diff --textconv": True,
+        "git --exec-path=/tmp log": True,
+        "git -c core.fsmonitor='touch x' status": True,
+        "git -c diff.external=helper diff": True,
+        "git -c core.pager=less log": True,
+        "GIT_EXTERNAL_DIFF=helper git diff": True,
+        "GIT_PAGER=less git log": True,
+        "rg --pre cmd foo": True,
+        "rg --pre=./x.sh": True,
+        "rg --hostname-bin cmd": True,
+        "find . -fprint0 out": True,
+        "find . -fprintf out %p": True,
+        "python -c 'print(1)'": True,
+        "python3 -c 'print(1)'": True,
+        "python fix.py": True,
+        "python fix.py -c x": True,
+        "python -m pytest -c pytest.ini": True,
+        "cat <(rm x)": True,
+        "./git status": True,
+        "./cat f": True,
+        "/tmp/x/git status": True,
+        'echo \\"; rm f; echo \\"': True,
+        'echo "abc': True,
+        "echo 'a; rm f": True,
+        "echo $(rm x)": True,
+        "echo `rm x`": True,
+        "cat <<EOF": True,
+        "ls >&f": True,
+        "git status; rm file": True,
+        "": True,
+    }
+    mismatches = [
+        text for text, mutates in cases.items() if _command_can_mutate(text) is not mutates
+    ]
+    assert mismatches == []
+
+
+def test_unproven_commands_count_as_edits():
+    """Odd argv shapes fail closed, and a joined git status list stays read-only."""
+    from gemma_lab.hygiene.rules import _counts_as_edit_after_submit
+    from gemma_lab.hygiene.trace import ToolEvent
+
+    def event(tool, args):
+        return ToolEvent("single", tool, args, "")
+
+    for args in (
+        None,
+        [],
+        ["git", "status"],
+        {"command": None},
+        {"command": 1},
+        {"command": b"git status"},
+        {"command": {"nested": 1}},
+        {},
+    ):
+        assert _counts_as_edit_after_submit(event("run_command", args)) is True
+    assert _counts_as_edit_after_submit(event("edit_file", {})) is True
+    assert _counts_as_edit_after_submit(event("write_file", {})) is True
+    joined = event("run_command", {"command": ["git", "status"]})
+    assert _counts_as_edit_after_submit(joined) is False
+    assert _counts_as_edit_after_submit(event("run_command", {"cmd": "git diff"})) is False
+    assert _counts_as_edit_after_submit(event("run_command", {"script": "ls"})) is False
+    for tool in ("get_status", "read_file", "submit_patch", "search_similar_code"):
+        assert _counts_as_edit_after_submit(event(tool, {})) is False
 
 
 def test_edit_file_after_submit_still_warns_in_an_atif_trace():

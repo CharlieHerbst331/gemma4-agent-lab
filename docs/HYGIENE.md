@@ -67,17 +67,20 @@ hosted scorer has not been re-run to confirm it. Do not weaken H2.
 
 `H3.edit_after_submit` warns when a call after the last `submit_patch` can change files. `edit_file` and `write_file` always count. A `run_command` counts only when the command can modify files. `get_status` and `read_file` do not.
 
-A compound command is read-only only when every part is. Separators are `&&`, `||`, `;`, `|`, a bare `&`, and newlines. A part is read-only when the program is one of:
+A compound command is read-only only when every part is. Separators are `&&`, `||`, `;`, `|`, a bare `&`, and newlines. The executable must be a bare name with no `/`, so `./git`, `./cat`, and `/tmp/x/git` count. A leading `NAME=value` prefix counts, including `GIT_EXTERNAL_DIFF=` and `GIT_PAGER=`. An empty command counts. `python` and `python3` count in every form, including `python -c` and `python -m`.
 
-- `git status`, `git diff`, `git log`, `git show` (global options such as `-C` are skipped; any other git subcommand counts, including `apply`, `checkout`, `reset`, `stash`, `commit`, and `add`)
-- `ls`, `cat`, `grep`, `rg`, `head`, `tail`, `wc`, `pwd`
-- `echo` with no file redirect
-- `sed` with `-n`, `--quiet`, or `--silent`, and without `-i` or `--in-place`. Other sed forms count, because a script can use the `w` write command
-- `find` without `-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`, `-fprintf`, or `-fls`
+The allow-list is:
 
-`>`, `>>`, and `&>` onto a file count as edits. `2>&1` does not. `tee`, `mv`, `cp`, `rm`, `touch`, `mkdir`, and `patch` count because they are not on the read-only list. A leading `NAME=value` assignment is ignored.
+- `git status`, `git diff`, `git log`, and `git show` only. No option may appear before the subcommand, so `-c`, `-C`, `--git-dir`, `--work-tree`, `--namespace`, and `--exec-path` count. After the subcommand, a flag is read-only only when it is one of `--stat`, `--shortstat`, `--numstat`, `--name-only`, `--name-status`, `--cached`, `--staged`, `--exit-code`, `-p`, `--patch`, `--color`, `--no-color`, `--word-diff`, `--ignore-space-change`, `--ignore-all-space`, `--ignore-blank-lines`, `-w`, `-b`, `--minimal`, `--raw`, `--summary`, `--short`, `-s`, `--porcelain`, `--branch`, `-z`, `--null`, `--oneline`, `--graph`, `--decorate`, `--all`, `--follow`, `--abbrev-commit`, `--reverse`, `--check`, `--no-prefix`, `--full-index`, `--no-ext-diff`, `--renames`, `--no-renames`, `--ahead-behind`, `--no-ahead-behind`, `-v`, `--verbose`, `--long`, `--column`, `--no-column`, `--show-stash`, `--first-parent`, `--compact-summary`, or a valued flag `-U` / `--unified`, `-n` / `--max-count`, `--pretty`, `--format`, `--abbrev`, `-u` / `--untracked-files`, `--diff-filter`, `--ignore-submodules` (the value is the next word, or the text after `=`). A single token `-<digits>` such as `-5`, or `-U<digits>` such as `-U3`, is allowed. `--output` (any `--output*`), `--ext-diff`, `--textconv` (any `--textconv*`), `-c`, and `-C` count even after the subcommand. Anything after `--` is a path. Any other subcommand counts, including `apply`, `checkout`, `reset`, `stash`, `commit`, `add`, and `blame`.
+- `grep` and `rg`, except `--pre`, `--pre-glob`, and `--hostname-bin` (with or without `=`).
+- `sed` only as `sed -n '<script>' [file...]`, or the same with `--quiet` or `--silent`. The script must be a print command: a line address or range, or a `/re/` address, ending in `p`, such as `1,40p`, `151,300p`, or `/re/p`. `sed` without that quiet flag counts. So do `-i`, `--in-place`, `-f`, `-e`, `w`, `e`, `r`, `W`, and `s///w`.
+- `find` except `-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`, `-fprint0`, `-fprintf`, and `-fls`.
+- `ls`, `cat`, `head`, `tail`, `wc`, `pwd`, `echo`, `printf`, `stat`, `diff`, `sort`, `uniq`, `cut`, and `tr`.
+- `cd` with a directory, `--`, `-`, `-L`, or `-P`.
 
-`python` or `python3 -c` counts when the snippet contains `open(`, `write_text`, `write_bytes`, `os.remove` / `unlink` / `rename` / `replace` / `mkdir` / `makedirs`, a `shutil` copy or remove, `.unlink` / `.mkdir` / `.touch`, or `exec` / `eval` / `subprocess` / `importlib`. A `-c` snippet with none of those is read-only. Python that runs a file still counts. Command substitution (`$(...)`) and backticks count. An empty command counts. Backslash escapes are not interpreted.
+`>`, `>>`, and `&>` onto a file count. The same operators onto `/dev/null` do not, and neither does an fd copy such as `2>&1` or `>&2`. `tee`, `mv`, `cp`, `rm`, `touch`, `mkdir`, and `patch` count because they are not on the list.
+
+These count wherever they appear: `$(...)`, `${...}`, backticks, `<(...)`, `>(...)`, a here-doc (`<<`), and a backslash. An unterminated quote counts. The classifier does not interpret backslash escapes.
 
 ## Rule index
 

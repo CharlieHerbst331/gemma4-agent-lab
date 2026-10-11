@@ -992,34 +992,112 @@ def _h3_command_text(args) -> str:
     return _command_text(args)
 
 
-_READ_ONLY_COMMANDS = {"ls", "cat", "grep", "rg", "head", "tail", "wc", "pwd", "echo"}
+# Bare names only. A path such as ./git or /tmp/x/git is a mutation.
+_SIMPLE_READ_ONLY = {
+    "ls",
+    "cat",
+    "head",
+    "tail",
+    "wc",
+    "pwd",
+    "echo",
+    "printf",
+    "stat",
+    "diff",
+    "sort",
+    "uniq",
+    "cut",
+    "tr",
+}
 _GIT_READ_ONLY = {"status", "diff", "log", "show"}
-_FIND_MUTATIONS = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls"}
-_PY_MUTATION = re.compile(
-    r"\bopen\s*\("
-    r"|\.write_text\s*\("
-    r"|\.write_bytes\s*\("
-    r"|\bos\.(?:remove|unlink|rmdir|removedirs|rename|replace|mkdir|makedirs)\s*\("
-    r"|\bshutil\.(?:rmtree|move|copy2?|copyfile|copytree)\s*\("
-    r"|\.(?:unlink|mkdir|touch)\s*\("
-    r"|\b(?:exec|eval|compile|subprocess)\b"
-    r"|\bos\.system\s*\("
-    r"|\b__import__\s*\("
-    r"|\bimportlib\b"
+_GIT_FLAGS = {
+    "--stat",
+    "--shortstat",
+    "--numstat",
+    "--name-only",
+    "--name-status",
+    "--cached",
+    "--staged",
+    "--exit-code",
+    "-p",
+    "--patch",
+    "--color",
+    "--no-color",
+    "--word-diff",
+    "--ignore-space-change",
+    "--ignore-all-space",
+    "--ignore-blank-lines",
+    "-w",
+    "-b",
+    "--minimal",
+    "--raw",
+    "--summary",
+    "--short",
+    "-s",
+    "--porcelain",
+    "--branch",
+    "-z",
+    "--null",
+    "--oneline",
+    "--graph",
+    "--decorate",
+    "--all",
+    "--follow",
+    "--abbrev-commit",
+    "--reverse",
+    "--check",
+    "--no-prefix",
+    "--full-index",
+    "--no-ext-diff",
+    "--renames",
+    "--no-renames",
+    "--ahead-behind",
+    "--no-ahead-behind",
+    "-v",
+    "--verbose",
+    "--long",
+    "--column",
+    "--no-column",
+    "--show-stash",
+    "--first-parent",
+    "--compact-summary",
+}
+_GIT_VALUED = {
+    "-U",
+    "--unified",
+    "-n",
+    "--max-count",
+    "--pretty",
+    "--format",
+    "--abbrev",
+    "-u",
+    "--untracked-files",
+    "--diff-filter",
+    "--ignore-submodules",
+}
+_FIND_EXEC = {"-delete", "-exec", "-execdir", "-ok", "-okdir"}
+_FIND_OUTPUT = {"-fprint", "-fprint0", "-fprintf", "-fls"}
+_GREP_EXEC = {"--pre", "--pre-glob", "--hostname-bin"}
+_SED_QUIET = {"-n", "--quiet", "--silent"}
+_SED_PRINT = re.compile(
+    r"\s*(?:(?:\d+|/(?:\\.|[^/\\])*/)(?:\s*,\s*(?:\d+|/(?:\\.|[^/\\])*/))?|\d*,\d*)?p\s*\Z"
 )
+_UNTRUSTED_SHELL = ("$(", "${", "`", "<(", ">(", "<<", "\\")
 
 
 def _command_can_mutate(command: str) -> bool:
-    """True unless every compound part is a known read-only command.
+    """True unless every compound part is on the read-only allow-list.
 
     Separators are ``&&``, ``||``, ``;``, ``|``, a bare ``&``, and newlines.
-    A part is read-only only for the allow-list below. Redirections onto a
-    file (``>``, ``>>``, ``&>``), command substitution, and backticks count as
-    edits. ``2>&1`` does not. Unknown commands, including unknown git
-    subcommands and python that is not an inspected ``-c`` snippet, count.
+    The executable must be a bare name. Unknown commands, python, env-var
+    prefixes, command substitution, here-docs, process substitution, and
+    anything the tokenizer cannot parse count as edits. A redirect to
+    ``/dev/null`` and an fd copy such as ``2>&1`` do not.
     """
+    if not isinstance(command, str):
+        return True
     text = command.strip()
-    if not text:
+    if not text or _shell_is_untrusted(text):
         return True
     parts = _split_compound(text)
     if not parts:
@@ -1027,81 +1105,123 @@ def _command_can_mutate(command: str) -> bool:
     return any(_segment_can_mutate(part) for part in parts)
 
 
+def _shell_is_untrusted(text: str) -> bool:
+    return any(mark in text for mark in _UNTRUSTED_SHELL)
+
+
 def _segment_can_mutate(segment: str) -> bool:
-    if _has_command_substitution(segment) or _has_file_redirect(segment):
+    if _has_mutating_redirect(segment):
         return True
     words = _shell_words(segment)
-    index = 0
-    while index < len(words) and _is_env_assignment(words[index]):
-        index += 1
-    if index >= len(words):
+    if not words:
         return True
-    name = PurePosixPath(words[index]).name
-    rest = words[index + 1 :]
-    if name in _READ_ONLY_COMMANDS:
-        return False
+    name = words[0]
+    if not name or "/" in name:
+        return True
+    rest = words[1:]
     if name == "git":
         return _git_mutates(rest)
     if name == "sed":
         return _sed_mutates(rest)
     if name == "find":
         return _find_mutates(rest)
-    if name in {"python", "python3"}:
-        return _python_mutates(rest)
-    return True
+    if name in {"grep", "rg"}:
+        return _grep_mutates(rest)
+    if name == "cd":
+        return _cd_mutates(rest)
+    return name not in _SIMPLE_READ_ONLY
+
+
+def _git_flag_denied(token: str) -> bool:
+    base = token.split("=", 1)[0]
+    if base in {"-c", "-C"}:
+        return True
+    if base.startswith("--output") or base.startswith("--textconv"):
+        return True
+    return base in {
+        "--ext-diff",
+        "--exec-path",
+        "--git-dir",
+        "--work-tree",
+        "--namespace",
+    }
 
 
 def _git_mutates(args: list[str]) -> bool:
-    index = 0
+    if not args or args[0].startswith("-") or args[0] not in _GIT_READ_ONLY:
+        return True
+    index = 1
     while index < len(args):
         token = args[index]
-        if token in {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}:
-            index += 2
-            continue
-        if token.startswith("-"):
+        if token == "--":
+            return False
+        if not token.startswith("-"):
             index += 1
             continue
-        return token not in _GIT_READ_ONLY
-    return True
+        if _git_flag_denied(token) or not _git_flag_allowed(token):
+            return True
+        base = token.split("=", 1)[0]
+        if "=" not in token and base in _GIT_VALUED:
+            if index + 1 >= len(args):
+                return True
+            index += 2
+            continue
+        index += 1
+    return False
+
+
+def _git_flag_allowed(token: str) -> bool:
+    if re.fullmatch(r"-\d+", token) or re.fullmatch(r"-U\d+", token):
+        return True
+    base = token.split("=", 1)[0]
+    return base in _GIT_FLAGS or base in _GIT_VALUED
 
 
 def _sed_mutates(args: list[str]) -> bool:
     quiet = False
-    for token in args:
+    script = None
+    index = 0
+    while index < len(args):
+        token = args[index]
         if token == "--":
+            index += 1
             break
-        if token in {"-i", "--in-place"} or token.startswith("--in-place="):
-            return True
-        if token.startswith("-") and not token.startswith("--") and "i" in token[1:]:
-            return True
-        if token in {"-n", "--quiet", "--silent"}:
+        if token in _SED_QUIET:
             quiet = True
-        elif token.startswith("-") and not token.startswith("--") and "n" in token[1:]:
-            quiet = True
-    return not quiet
+            index += 1
+            continue
+        if token.startswith("-"):
+            return True
+        script = token
+        index += 1
+        break
+    if not quiet or script is None or _SED_PRINT.fullmatch(script) is None:
+        return True
+    return any(token.startswith("-") and token != "-" for token in args[index:])
 
 
 def _find_mutates(args: list[str]) -> bool:
-    return any(token in _FIND_MUTATIONS for token in args)
+    for token in args:
+        if token in _FIND_EXEC or token in _FIND_OUTPUT:
+            return True
+        if token.startswith(("-fprint", "-fprintf", "-fls")):
+            return True
+    return False
 
 
-def _python_mutates(args: list[str]) -> bool:
-    if "-c" not in args:
-        return True
-    index = args.index("-c")
-    if index + 1 >= len(args):
-        return True
-    return _PY_MUTATION.search(args[index + 1]) is not None
+def _grep_mutates(args: list[str]) -> bool:
+    for token in args:
+        base = token.split("=", 1)[0]
+        if base in _GREP_EXEC:
+            return True
+    return False
 
 
-def _is_env_assignment(token: str) -> bool:
-    name, separator, _value = token.partition("=")
-    if not separator or not name or name[0].isdigit():
-        return False
-    return name.replace("_", "").isalnum()
+def _cd_mutates(args: list[str]) -> bool:
+    return any(token.startswith("-") and token not in {"--", "-", "-L", "-P"} for token in args)
 
 
-def _split_compound(command: str) -> list[str]:
+def _split_compound(command: str) -> list[str] | None:
     parts: list[str] = []
     buf: list[str] = []
     quote = ""
@@ -1151,6 +1271,8 @@ def _split_compound(command: str) -> list[str]:
             continue
         buf.append(char)
         index += 1
+    if quote:
+        return None
     parts.append("".join(buf))
     return [part.strip() for part in parts if part.strip()]
 
@@ -1187,6 +1309,8 @@ def _shell_words(segment: str) -> list[str]:
             continue
         buf.append(char)
         index += 1
+    if quote:
+        return []
     if buf:
         words.append("".join(buf))
     return words
@@ -1217,7 +1341,12 @@ def _skip_redirect(segment: str, index: int) -> int:
     return index
 
 
-def _has_file_redirect(segment: str) -> bool:
+def _has_mutating_redirect(segment: str) -> bool:
+    """True for a write redirect whose target is not ``/dev/null``.
+
+    Fd copies such as ``2>&1`` and ``>&2`` are not writes. Input redirects are
+    not writes. Process substitution and here-docs are rejected earlier.
+    """
     quote = ""
     index = 0
     while index < len(segment):
@@ -1231,45 +1360,65 @@ def _has_file_redirect(segment: str) -> bool:
             quote = char
             index += 1
             continue
-        if segment.startswith(">>", index):
+        if segment.startswith("<(", index) or segment.startswith(">(", index):
             return True
+        if segment.startswith("<<", index):
+            return True
+        if segment.startswith(">&", index) or segment.startswith("<&", index):
+            index += 2
+            target, index = _read_redirect_target(segment, index)
+            if target is None or not (target.isdigit() or target == "/dev/null"):
+                return True
+            continue
+        if segment.startswith("&>", index) or segment.startswith(">>", index):
+            index += 2
+            target, index = _read_redirect_target(segment, index)
+            if target != "/dev/null":
+                return True
+            continue
         if char == ">":
-            nxt = segment[index + 1] if index + 1 < len(segment) else ""
-            if nxt == "&":
-                after = segment[index + 2 :]
-                if after[:1].isdigit():
-                    index += 2
-                    continue
-            return True
+            index += 1
+            if index < len(segment) and segment[index] == "|":
+                index += 1
+            target, index = _read_redirect_target(segment, index)
+            if target != "/dev/null":
+                return True
+            continue
+        if char == "<":
+            index += 1
+            _target, index = _read_redirect_target(segment, index)
+            continue
         index += 1
     return False
 
 
-def _has_command_substitution(segment: str) -> bool:
+def _read_redirect_target(segment: str, index: int) -> tuple[str | None, int]:
+    while index < len(segment) and segment[index].isspace():
+        index += 1
+    if index >= len(segment):
+        return None, index
+    buf: list[str] = []
     quote = ""
-    index = 0
     while index < len(segment):
         char = segment[index]
-        if quote == "'":
-            if char == "'":
+        if quote:
+            if char == quote:
                 quote = ""
-            index += 1
-            continue
-        if quote == '"':
-            if char == '"':
-                quote = ""
-            elif segment.startswith("$(", index) or char == "`":
-                return True
+            else:
+                buf.append(char)
             index += 1
             continue
         if char in {"'", '"'}:
             quote = char
             index += 1
             continue
-        if segment.startswith("$(", index) or char == "`":
-            return True
+        if char.isspace() or char in {";", "|", "&", "<", ">"}:
+            break
+        buf.append(char)
         index += 1
-    return False
+    if quote or not buf:
+        return None, index
+    return "".join(buf), index
 
 
 def _command_text(args) -> str:
