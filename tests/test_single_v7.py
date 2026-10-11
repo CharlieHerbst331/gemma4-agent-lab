@@ -1,4 +1,4 @@
-"""single-v7 stops edit_file after one old_string miss. The dev-13 pair is matched."""
+"""single-v7 stops edit_file after the second error on a file. The dev-13 pair is matched."""
 
 import json
 from pathlib import Path
@@ -46,23 +46,30 @@ def test_single_v7_changes_only_the_prompt():
     parent = (V6 / "prompts" / "system.md").read_text()
     assert prompt != parent
     assert len(parent) == 7459
-    assert len(prompt) == 7619
+    assert len(prompt) == 8024
     for phrase in (
-        "After one missing-parameter error, retry a smaller edit.",
+        "After one missing-parameter error (mandatory input parameters are not present)",
+        "retry a smaller edit.",
         "Never repeat the same failing edit_file call more than once.",
-        "could not find old_string",
+        "The second identical failing call is the trigger, not a third.",
+        "After the second edit_file error of any kind on the same file",
+        "Failed to replace: old_string not found",
+        "Target string occurs N times",
         "stop using edit_file on that file",
-        "assert old in s",
-        "assert the old string was present before and the new string is present after",
+        "s.count(old) == 1",
+        "Read and write bytes, or open with newline=''.",
+        "Do not use read_text or write_text",
+        "Assert the new string is present after",
         "When adding a new parameter to an internal class",
         "Check where the public API constructs the class.",
         "If that rewrite fails too, stop editing and call submit_patch with the current diff.",
     ):
-        assert phrase in prompt
+        assert phrase in prompt, phrase
     wrapper = prompt.index("When adding a new parameter")
-    miss = prompt.index("could not find old_string")
+    second = prompt.index("second edit_file error of any kind")
     fallback = prompt.index("If that rewrite fails too")
-    assert wrapper < miss < fallback
+    assert wrapper < second < fallback
+    assert "could not find old_string" not in prompt
     assert "After two failed edit_file calls" not in prompt
     assert prompt.count("If the same tool call fails twice, change the call or the tool") == 1
     report = lint_candidate(V7)
