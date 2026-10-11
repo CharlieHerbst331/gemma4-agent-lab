@@ -254,6 +254,198 @@ def test_legacy_failed_row_without_error_does_not_block(tmp_path, monkeypatch):
     assert "error" not in _ledger_rows(ledger)[0]
 
 
+_HEX_KEY = "ab" * 16
+_SECRET_SAMPLES = [
+    "Authorization: Basic dXNlcjpwYXNz",
+    "{'Authorization': 'Basic dXNlcjpwYXNz'}",
+    "KGAT_fakeTokenValue12345",
+    _HEX_KEY,
+    f"fakeuser:{_HEX_KEY}",
+    '{"username":"fakeuser","key":"jsonkeysecretvalue"}',
+    '{"key":"jsonkeysecretvalue"}',
+    '{"api_key":"apikeysecretvalue1"}',
+    '{"token":"tokensecretvalue123"}',
+    '{"access_token":"accesstokensecret99"}',
+    "client_secret=clientsecretvalue99",
+    "ya29.faketokenvalue12345",
+    (
+        "PUT https://storage.googleapis.com/b/o?X-Goog-Signature=deadbeefcafe0123"
+        "&X-Goog-Credential=svc%40example.iam.gserviceaccount.com"
+    ),
+]
+_SECRET_FRAGMENTS = [
+    "dXNlcjpwYXNz",
+    "KGAT_fakeTokenValue12345",
+    _HEX_KEY,
+    "jsonkeysecretvalue",
+    "apikeysecretvalue1",
+    "tokensecretvalue123",
+    "accesstokensecret99",
+    "clientsecretvalue99",
+    "ya29.faketokenvalue12345",
+    "deadbeefcafe0123",
+    "svc%40example.iam.gserviceaccount.com",
+    "X-Goog-Signature=",
+    "X-Goog-Credential=",
+]
+
+
+def test_scrub_secrets_covers_realistic_token_formats():
+    text = "\n".join(_SECRET_SAMPLES)
+    scrubbed = operations._scrub_secrets(text)
+    for fragment in _SECRET_FRAGMENTS:
+        assert fragment not in scrubbed
+    assert "https://storage.googleapis.com/b/o?[REDACTED]" in scrubbed
+
+
+def test_scrub_secrets_removes_env_literals_and_ignores_short_values(monkeypatch):
+    monkeypatch.setenv("KAGGLE_KEY", "weirdkeyvalue99")
+    monkeypatch.setenv("KAGGLE_API_TOKEN", "KGAT_fromnamedenv123")
+    monkeypatch.setenv("KAGGLE_USERNAME", "ab")
+    monkeypatch.setenv("OTHER_TOKEN", "prefix KGAT_fromotherenv456")
+    text = "weird<<weirdkeyvalue99>> KGAT_fromnamedenv123 user ab stays KGAT_fromotherenv456"
+    scrubbed = operations._scrub_secrets(text)
+    assert "weirdkeyvalue99" not in scrubbed
+    assert "KGAT_fromnamedenv123" not in scrubbed
+    assert "KGAT_fromotherenv456" not in scrubbed
+    assert "ab" in scrubbed
+
+
+def test_scrub_secrets_caps_long_text_and_still_redacts():
+    secret = "KGAT_fakeTokenValue12345"
+    text = secret + " " + ("A" * 5000)
+    scrubbed = operations._scrub_secrets(text)
+    assert secret not in scrubbed
+    body, _, _note = scrubbed.rpartition("[truncated ")
+    assert len(body) == 4000
+    assert scrubbed.startswith("[REDACTED]")
+    assert scrubbed.endswith(" chars]")
+
+
+def test_success_response_is_scrubbed_before_it_is_stored_or_returned(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    leak = "uploaded KGAT_fakeTokenValue12345 Authorization: Basic dXNlcjpwYXNz"
+
+    def on_submit(*args, **kwargs):
+        return leak
+
+    _install_kaggle(monkeypatch, on_submit)
+    plan = operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert plan["status"] == "submitted"
+    assert "KGAT_fakeTokenValue12345" not in plan["response"]
+    assert "dXNlcjpwYXNz" not in plan["response"]
+    assert "KGAT_fakeTokenValue12345" not in ledger.read_text()
+    assert "dXNlcjpwYXNz" not in ledger.read_text()
+
+
+def test_failure_error_is_capped_in_the_ledger_and_the_raised_message(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    huge = "E" * 5000 + "KGAT_fakeTokenValue12345"
+
+    def on_submit(*args, **kwargs):
+        raise RuntimeError(huge)
+
+    _install_kaggle(monkeypatch, on_submit)
+    with pytest.raises(RuntimeError) as raised:
+        operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    message = str(raised.value)
+    assert "KGAT_fakeTokenValue12345" not in message
+    assert "KGAT_fakeTokenValue12345" not in ledger.read_text()
+    assert "[truncated " in message
+    assert len(message) < 4100
+    row = _ledger_rows(ledger)[-1]
+    assert row["status"] == "failed"
+    assert row["error"] == message
+    assert len(row["error"]) < 4100
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ConnectionResetError("connection reset by peer"),
+        UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+        TimeoutError("timed out"),
+    ],
+)
+def test_ambiguous_upload_errors_stay_reserved(tmp_path, monkeypatch, error):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+
+    def on_submit(*args, **kwargs):
+        raise error
+
+    calls = _install_kaggle(monkeypatch, on_submit)
+    with pytest.raises(RuntimeError, match="submissions list") as raised:
+        operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert "may have been received" in str(raised.value)
+    rows = _ledger_rows(ledger)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "reserved"
+    with pytest.raises(ValueError, match="reserved"):
+        operations.submit(archive, "retry", ledger, execute=True, evaluation=evaluation)
+    assert len(_submit_calls(calls)) == 1
+
+
+def test_ledger_replace_keeps_the_original_when_the_write_fails(tmp_path, monkeypatch):
+    ledger = tmp_path / "ledger.jsonl"
+    original = json.dumps({"status": "submitted", "sha256": "abc"}) + "\n"
+    ledger.write_text(original + json.dumps({"status": "reserved"}) + "\n")
+
+    def fail_replace(src, dst):
+        raise OSError("killed mid-write")
+
+    monkeypatch.setattr(operations.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="mid-write"):
+        operations._replace_last_ledger_row(ledger, {"status": "failed", "error": "nope"})
+    assert ledger.read_text() == original + json.dumps({"status": "reserved"}) + "\n"
+    leftovers = [path for path in tmp_path.iterdir() if path.name.startswith(".ledger.jsonl.")]
+    assert leftovers == []
+
+
+def test_trailing_unparseable_ledger_line_is_skipped(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    day = datetime.now(UTC).date().isoformat()
+    ledger.write_text(
+        json.dumps(
+            {
+                "created_at": f"{day}T00:00:00+00:00",
+                "status": "submitted",
+                "sha256": sha256(archive),
+            }
+        )
+        + '\n{"status": "submi'
+    )
+    calls = _install_kaggle(monkeypatch, lambda *args, **kwargs: pytest.fail("upload attempted"))
+    with pytest.warns(UserWarning, match="unparseable trailing"):
+        with pytest.raises(ValueError, match="reserved"):
+            operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert _submit_calls(calls) == []
+
+
+def test_kaggle_cli_capture_replaces_undecodable_bytes(monkeypatch):
+    import subprocess
+
+    from gemma_lab.common import kaggle
+
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(cmd, 0, stdout="ok \ufffd", stderr="")
+
+    monkeypatch.setattr("gemma_lab.common.subprocess.run", fake_run)
+    assert kaggle("competitions", "files") == "ok \ufffd"
+    assert seen["errors"] == "replace"
+    assert seen["text"] is True
+
+
 def test_plan_has_no_network_side_effects(tmp_path, monkeypatch):
     archive = tmp_path / "submission.zip"
     pack(Path("agents/baseline"), archive)
