@@ -20,6 +20,150 @@ def code_cell(source):
     }
 
 
+# Competition tasks.jsonl can appear after the kernel starts. Five seconds
+# apart, for about five minutes. Tests override the arguments.
+DATA_WAIT_INTERVAL_SECONDS = 5
+DATA_WAIT_TIMEOUT_SECONDS = 300
+DATA_WAIT_LOG_EVERY_SECONDS = 30
+DATA_PROBE_TIMEOUT_SECONDS = 30
+DATA_PROBE_PATH = "/kaggle/working/data_mount_probe.txt"
+
+
+def wait_for_tasks_jsonl(
+    path,
+    *,
+    interval=DATA_WAIT_INTERVAL_SECONDS,
+    timeout=DATA_WAIT_TIMEOUT_SECONDS,
+    log_every=DATA_WAIT_LOG_EVERY_SECONDS,
+    probe_timeout=DATA_PROBE_TIMEOUT_SECONDS,
+    probe_path=DATA_PROBE_PATH,
+    clock=None,
+    sleep=None,
+    runner=None,
+):
+    """Poll until ``path`` is a non-empty readable file.
+
+    A file that is already ready returns without sleeping. The first miss is
+    logged, then again about every ``log_every`` seconds. After ``timeout``,
+    print mount diagnostics and raise FileNotFoundError.
+    """
+    import time
+    from pathlib import Path
+
+    path = Path(path)
+    if clock is None:
+        clock = time.monotonic
+    if sleep is None:
+        sleep = time.sleep
+    start = clock()
+    deadline = start + timeout
+    next_log = start
+    logged = False
+
+    def ready():
+        try:
+            if not path.is_file() or path.stat().st_size <= 0:
+                return False
+            with path.open("rb") as handle:
+                return bool(handle.read(1))
+        except OSError:
+            return False
+
+    while True:
+        now = clock()
+        if ready():
+            waited = now - start
+            print(f"tasks.jsonl ready after {waited:.1f}s: {path}", flush=True)
+            return waited
+        if now >= deadline:
+            break
+        if not logged or now + 1e-9 >= next_log:
+            print(f"waiting for {path} ({now - start:.0f}s elapsed)", flush=True)
+            logged = True
+            next_log = now + log_every
+        remaining = deadline - now
+        if remaining <= 0:
+            break
+        sleep(min(interval, remaining))
+
+    def mount_probe():
+        import subprocess
+
+        commands = (
+            ["ls", "-la", "/kaggle/input", "/kaggle/input/competitions"],
+            ["find", "/kaggle/input", "-maxdepth", "4", "-name", "tasks.jsonl"],
+        )
+        chunks = []
+        for cmd in commands:
+            header = "$ " + " ".join(cmd) + "\n"
+            try:
+                if runner is None:
+                    proc = subprocess.run(
+                        cmd,
+                        capture_output=True,
+                        text=True,
+                        timeout=probe_timeout,
+                    )
+                else:
+                    proc = runner(cmd, probe_timeout)
+                out = getattr(proc, "stdout", "") or ""
+                err = getattr(proc, "stderr", "") or ""
+                body = f"{out}{err}"
+                if body and not body.endswith("\n"):
+                    body += "\n"
+                chunks.append(header + body)
+            except Exception as exc:
+                chunks.append(header + f"probe failed: {exc}\n")
+        return "\n".join(chunks)
+
+    waited = clock() - start
+    text = mount_probe()
+    print(text, end="" if text.endswith("\n") else "\n", flush=True)
+    dest = Path(probe_path)
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text)
+    except OSError as exc:
+        print(f"could not write probe to {dest}: {exc}", flush=True)
+    raise FileNotFoundError(
+        f"{path} was not ready after {waited:.0f}s (limit {timeout:g}s). Probe output: {dest}"
+    )
+
+
+def data_wait_prelude():
+    """Source pasted into the data-loading cell. The kernel has no gemma_lab import."""
+    import inspect
+
+    constants = "\n".join(
+        f"{name} = {value!r}"
+        for name, value in (
+            ("DATA_WAIT_INTERVAL_SECONDS", DATA_WAIT_INTERVAL_SECONDS),
+            ("DATA_WAIT_TIMEOUT_SECONDS", DATA_WAIT_TIMEOUT_SECONDS),
+            ("DATA_WAIT_LOG_EVERY_SECONDS", DATA_WAIT_LOG_EVERY_SECONDS),
+            ("DATA_PROBE_TIMEOUT_SECONDS", DATA_PROBE_TIMEOUT_SECONDS),
+            ("DATA_PROBE_PATH", DATA_PROBE_PATH),
+        )
+    )
+    return constants + "\n\n" + inspect.getsource(wait_for_tasks_jsonl).rstrip() + "\n"
+
+
+def _record_data_wait():
+    """Merge the wait into the kernel run manifest without dropping existing keys."""
+    return (
+        "try:\n"
+        "    _run_manifest_path = WORKING_DIR / 'run_manifest.json'\n"
+        "    _run_manifest = {}\n"
+        "    if _run_manifest_path.is_file():\n"
+        "        _loaded = json.loads(_run_manifest_path.read_text())\n"
+        "        if isinstance(_loaded, dict):\n"
+        "            _run_manifest = _loaded\n"
+        "    _run_manifest['data_wait_seconds'] = _data_wait_seconds\n"
+        "    _run_manifest_path.write_text(json.dumps(_run_manifest, indent=2) + '\\n')\n"
+        "except (OSError, ValueError):\n"
+        "    pass\n"
+    )
+
+
 def generate(source, owner, slug, output, task_ids=None, bundle_dataset=None):
     if not re.fullmatch(r"[a-zA-Z0-9_-]+", owner) or not re.fullmatch(r"[a-z0-9-]+", slug):
         raise ValueError("Invalid Kaggle owner or notebook slug")
@@ -78,8 +222,11 @@ def generate(source, owner, slug, output, task_ids=None, bundle_dataset=None):
         + f"assert hashlib.sha256(payload).hexdigest() == {provenance['sha256']!r}\n"
         "with zipfile.ZipFile(io.BytesIO(payload)) as zf:\n"
         "    zf.extractall(AGENT_DIR)  # Locally validated, hash-pinned payload\n"
-        "TASKS_PATH = DATA_DIR / 'tasks.jsonl'\n"
-        "tasks = load_tasks(TASKS_PATH)\n"
+        + data_wait_prelude()
+        + "TASKS_PATH = DATA_DIR / 'tasks.jsonl'\n"
+        "_data_wait_seconds = wait_for_tasks_jsonl(TASKS_PATH)\n"
+        + _record_data_wait()
+        + "tasks = load_tasks(TASKS_PATH)\n"
         f"TASK_IDS = {ids!r}\n"
         "if TASK_IDS is None:\n"
         "    TASK_IDS = [t.instance_id for t in tasks[:2]]\n"
@@ -89,6 +236,7 @@ def generate(source, owner, slug, output, task_ids=None, bundle_dataset=None):
         "RUN_PROVENANCE['packages'] = {name: importlib.metadata.version(name) "
         "for name in ['swegemma', 'adk-submission', 'adk-eval-core', 'vllm', 'google-adk']}\n"
         "RUN_PROVENANCE['task_file_sha256'] = hashlib.sha256(TASKS_PATH.read_bytes()).hexdigest()\n"
+        "RUN_PROVENANCE['data_wait_seconds'] = _data_wait_seconds\n"
         "(WORKING_DIR / 'run_manifest.json').write_text(json.dumps(RUN_PROVENANCE, indent=2))\n"
         "print(f'Loaded {len(tasks)} tasks; evaluating {len(TASK_IDS)} selected tasks')\n"
     )
@@ -793,8 +941,11 @@ def _pair_payload_cell(protocol, packed, cohort_ids, schedule, session_repeats, 
         "    _zip = WORKING_DIR / 'arms' / _label / 'submission.zip'\n"
         "    _zip.parent.mkdir(parents=True, exist_ok=True)\n"
         "    _zip.write_bytes(globals()[f'payload_{_label}'])\n"
-        "TASKS_PATH = DATA_DIR / 'tasks.jsonl'\n"
-        "tasks = load_tasks(TASKS_PATH)\n"
+        + data_wait_prelude()
+        + "TASKS_PATH = DATA_DIR / 'tasks.jsonl'\n"
+        "_data_wait_seconds = wait_for_tasks_jsonl(TASKS_PATH)\n"
+        + _record_data_wait()
+        + "tasks = load_tasks(TASKS_PATH)\n"
         f"TASK_IDS = {cohort_ids!r}\n"
         "assert set(TASK_IDS) <= {t.instance_id for t in tasks}, 'Unknown task IDs'\n"
         f"REPEATS = {int(protocol['repeats'])!r}\n"
@@ -845,6 +996,7 @@ def _pair_payload_cell(protocol, packed, cohort_ids, schedule, session_repeats, 
         "    'packages': {name: importlib.metadata.version(name) for name in "
         "['swegemma', 'adk-submission', 'adk-eval-core', 'vllm', 'google-adk']},\n"
         "    'adk_submission_version': _ADK_SUBMISSION_VERSION,\n"
+        "    'data_wait_seconds': _data_wait_seconds,\n"
         "    'status': 'loaded',\n"
         "}\n"
         "(WORKING_DIR / 'schedule.json').write_text("
