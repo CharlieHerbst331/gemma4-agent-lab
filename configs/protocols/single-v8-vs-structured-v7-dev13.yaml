@@ -1,0 +1,58 @@
+# Dev-13 promotion protocol: single-v8 (A) vs structured-v7 (B), one repeat.
+# Not a smoke. Arm B is a multi-agent loop. It changes eval_config.yaml
+# (360 s, same 150 calls and 200 turns), thinking (repair only, budget 256),
+# and temperature is already 1.0 on both arms. matched_pair is false.
+# The budget check still refuses a limit change unless the pair is unmatched
+# AND eval_config.yaml is listed. Sampling lists differ in length because
+# repair's thinking tuple is extra, so both sampling.yaml and thinking.yaml
+# are listed. sub_agents/* does not allow a thinking change by itself.
+# Task order is the dev-13 cohort file order. Repeats is 1. Schedule hashes
+# are not required to be unique, so this hash matches the other one-repeat
+# dev-13 protocols.
+# expected_sha256 stays null until Verification pins the approved archives.
+arms:
+  A:
+    source: agents/single-v8
+    expected_sha256: null
+  B:
+    source: agents/structured-v7
+    expected_sha256: null
+matched_pair: false
+notes: "Unmatched pair. Arm B is triage plus a repair/verify loop, with thinking on for repair only, a 360 second cap, and a flat check skill. eval_config.yaml, sampling.yaml, and thinking.yaml are the markers."
+allow_identical: false
+allowed_differences:
+  - agent.yaml
+  - sub_agents/*
+  - skills/*
+  - prompts/*
+  - eval_config.yaml
+  - sampling.yaml
+  - thinking.yaml
+cohort:
+  path: configs/cohorts/dev-13-environment-screened.json
+  task_file_sha256: e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6
+repeats: 1
+order_rule: per_task_parity_v1
+shuffle_seed: null
+session_budget_seconds: 40200
+pair_start_pad_seconds: 60
+abort_policy: round2_v1
+early_stop: null
+budget_gate:
+  block:
+    - name: round2_load_plus_129_mean
+      formula: L + 129 * mean_wall
+      threshold_seconds: 38880
+    - name: coordinator_mean_times_120
+      formula: mean_wall * 120
+      threshold_seconds: 39600
+  warn:
+    - name: worst_case_12h
+      formula: L + n * (cap + p90_delta)
+      threshold_seconds: 43200
+      n_values: [120, 129]
+  L_default: 900
+  coordinator_hours: 11
+timing_tier: 2
+pins_mode: record
+exclude_import_origin_risk: true

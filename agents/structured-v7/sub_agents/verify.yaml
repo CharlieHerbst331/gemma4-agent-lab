@@ -1,0 +1,21 @@
+agent_class: LlmAgent
+name: verify
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Check the workspace copy, reject an empty diff, and submit.
+instruction: !include verify.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  # 2048 completion tokens leaves a 30720-token prompt ceiling inside 32768.
+  max_output_tokens: 2048
+  thinking_config: !include thinking.yaml
+tools:
+- get_status
+- read_file
+- edit_file
+- run_command
+- submit_patch
+include_contents: default
+skills:
+- skills/check
