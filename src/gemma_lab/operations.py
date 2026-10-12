@@ -471,7 +471,7 @@ def _failure_text(exc: BaseException) -> str:
 
 
 _HTTP_CODE = r"[45]\d{2}"
-# Anchored to an HTTP status. A code followed by any capitalised word is not a status.
+# Code in an HTTP-error shape. A reason phrase alone is not a status.
 _HTTP_STATUS_PATTERNS = (
     re.compile(rf"\b({_HTTP_CODE})\s+(?:Client|Server)\s+Error\b"),
     re.compile(rf"\bHTTP/1\.[0-9]\s+({_HTTP_CODE})\b"),
@@ -479,41 +479,77 @@ _HTTP_STATUS_PATTERNS = (
     re.compile(rf"""["']code["']\s*:\s*({_HTTP_CODE})\b"""),
     re.compile(rf"\(({_HTTP_CODE})\)\s*Reason\s*:"),
 )
-# Official 4xx reason phrases. The pattern tries the longest phrase first.
-_CLIENT_REASON_CODE = {
-    "Request Header Fields Too Large": 431,
-    "Unavailable For Legal Reasons": 451,
-    "Proxy Authentication Required": 407,
-    "Unsupported Media Type": 415,
-    "Range Not Satisfiable": 416,
-    "Precondition Required": 428,
-    "Unprocessable Entity": 422,
-    "Method Not Allowed": 405,
-    "Precondition Failed": 412,
-    "Misdirected Request": 421,
-    "Expectation Failed": 417,
-    "Failed Dependency": 424,
-    "Too Many Requests": 429,
-    "Payload Too Large": 413,
-    "Payment Required": 402,
-    "Upgrade Required": 426,
-    "Request Timeout": 408,
-    "Length Required": 411,
-    "Not Acceptable": 406,
-    "URI Too Long": 414,
-    "Unauthorized": 401,
-    "Bad Request": 400,
-    "Not Found": 404,
-    "Forbidden": 403,
-    "Too Early": 425,
-    "Conflict": 409,
-    "Locked": 423,
-    "Gone": 410,
-}
-_CLIENT_REASON = re.compile(
-    r"\b("
-    + "|".join(re.escape(phrase) for phrase in sorted(_CLIENT_REASON_CODE, key=len, reverse=True))
-    + r")\b"
+# One phrase per code for 400-431 and 451, skipping unassigned codes. 29 in all.
+_CLIENT_REASONS: tuple[tuple[int, str], ...] = (
+    (400, "Bad Request"),
+    (401, "Unauthorized"),
+    (402, "Payment Required"),
+    (403, "Forbidden"),
+    (404, "Not Found"),
+    (405, "Method Not Allowed"),
+    (406, "Not Acceptable"),
+    (407, "Proxy Authentication Required"),
+    (408, "Request Timeout"),
+    (409, "Conflict"),
+    (410, "Gone"),
+    (411, "Length Required"),
+    (412, "Precondition Failed"),
+    (413, "Payload Too Large"),
+    (414, "URI Too Long"),
+    (415, "Unsupported Media Type"),
+    (416, "Range Not Satisfiable"),
+    (417, "Expectation Failed"),
+    (418, "I'm a Teapot"),
+    (421, "Misdirected Request"),
+    (422, "Unprocessable Entity"),
+    (423, "Locked"),
+    (424, "Failed Dependency"),
+    (425, "Too Early"),
+    (426, "Upgrade Required"),
+    (428, "Precondition Required"),
+    (429, "Too Many Requests"),
+    (431, "Request Header Fields Too Large"),
+    (451, "Unavailable For Legal Reasons"),
+)
+# Older and current registry names for the same codes.
+_CLIENT_REASON_ALIASES: tuple[tuple[int, str], ...] = (
+    (413, "Request Entity Too Large"),
+    (413, "Content Too Large"),
+    (414, "Request-URI Too Long"),
+    (416, "Requested Range Not Satisfiable"),
+    (418, "I'm a teapot"),
+)
+_SERVER_REASONS: tuple[tuple[int, str], ...] = (
+    (500, "Internal Server Error"),
+    (501, "Not Implemented"),
+    (502, "Bad Gateway"),
+    (503, "Service Unavailable"),
+    (504, "Gateway Timeout"),
+    (505, "HTTP Version Not Supported"),
+    (506, "Variant Also Negotiates"),
+    (507, "Insufficient Storage"),
+    (508, "Loop Detected"),
+    (510, "Not Extended"),
+    (511, "Network Authentication Required"),
+)
+# Start of a line, or after HTTP / status. Not a code merely near a reason word.
+_HTTP_ERROR_ANCHOR = (
+    r"(?m)(?:^|\bHTTP(?:/1\.[0-9]|\s+Error)\s+|\bstatus(?:[\s_-]*code)?\s*[:=]?\s*)"
+)
+
+
+def _code_reason_pattern(code_class: str, phrases: tuple[str, ...]) -> re.Pattern[str]:
+    ordered = sorted(set(phrases), key=len, reverse=True)
+    alternation = "|".join(re.escape(phrase) for phrase in ordered)
+    return re.compile(_HTTP_ERROR_ANCHOR + rf"\b({code_class})(?!\d)\s*[-:]?\s*(?:{alternation})\b")
+
+
+_SERVER_CODE_PHRASE = _code_reason_pattern(
+    r"5\d{2}", tuple(phrase for _code, phrase in _SERVER_REASONS)
+)
+_CLIENT_CODE_PHRASE = _code_reason_pattern(
+    r"4\d{2}",
+    tuple(phrase for _code, phrase in (*_CLIENT_REASONS, *_CLIENT_REASON_ALIASES)),
 )
 # Orphan mkstemp files from a SIGKILL. A few minutes avoids deleting a live write.
 _LEDGER_TEMP_AGE_SECONDS = 180
@@ -545,17 +581,23 @@ def _response_status(exc: BaseException) -> int | None:
 
 
 def _statuses_in_text(text: str) -> list[int]:
+    """Status codes in HTTP-error form. 5xx phrases are collected first."""
     found: list[int] = []
+    for match in _SERVER_CODE_PHRASE.finditer(text):
+        found.append(int(match.group(1)))
     for pattern in _HTTP_STATUS_PATTERNS:
         for match in pattern.finditer(text):
             found.append(int(match.group(1)))
-    for match in _CLIENT_REASON.finditer(text):
-        found.append(_CLIENT_REASON_CODE[match.group(1)])
+    for match in _CLIENT_CODE_PHRASE.finditer(text):
+        found.append(int(match.group(1)))
     return found
 
 
 def _http_class(exc: BaseException) -> str | None:
-    """``4xx``, ``5xx``, or None. A response status wins over the message text."""
+    """``4xx``, ``5xx``, or None. A response status wins over the message text.
+
+    Any recognised 5xx is reserved, even when a 4xx reason also appears.
+    """
     status = _response_status(exc)
     if status is None:
         found = _statuses_in_text(_cli_text(exc))
@@ -635,15 +677,25 @@ def _read_ledger(
         return []
     today = datetime.now(UTC).date().isoformat()
     rows = []
-    # Invalid bytes become U+FFFD so the line is unparseable and the repair hint
-    # names it. A raw UnicodeDecodeError would hide that hint.
+    # Invalid bytes become U+FFFD so the repair hint can name the line. A raw
+    # UnicodeDecodeError would hide that hint. A line that still contains
+    # U+FFFD is unparseable: "subm\ufffditted" would otherwise load as JSON
+    # and slip past the daily guard.
+    # Known limitation: JSON truncated mid-string is unparseable, but if the
+    # cut removes "submitted", "reserved", today's UTC date, and the sha256
+    # prefix, --allow-corrupt-ledger skips that line.
     text = ledger.read_text(encoding="utf-8", errors="replace")
     for line_number, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
             continue
-        try:
-            item = json.loads(line)
-        except json.JSONDecodeError:
+        unparseable = "\ufffd" in line
+        item = None
+        if not unparseable:
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                unparseable = True
+        if unparseable:
             reasons = _corrupt_block_reasons(line, digest, today)
             if reasons or not allow_corrupt:
                 raise ValueError(_corrupt_ledger_message(ledger, line_number, reasons)) from None
@@ -749,7 +801,7 @@ def _replace_ledger_row(ledger: Path, row: dict) -> None:
     target = None
     for index, raw_line in enumerate(raw_lines):
         line = raw_line.decode("utf-8", errors="replace")
-        if not line.strip():
+        if not line.strip() or "\ufffd" in line:
             continue
         try:
             item = json.loads(line)
