@@ -106,8 +106,14 @@ def test_prompts_reject_empty_diffs_and_stay_small():
     repair = (V7 / "sub_agents" / "repair.md").read_text()
     verify = (V7 / "sub_agents" / "verify.md").read_text()
     assert len(triage) == 1771
-    assert len(repair) == 5152
-    assert len(verify) == 3375
+    assert len(repair) == 5082
+    assert len(verify) == 3735
+    assert "text reply after a submission" not in repair
+    assert "fewer than 20 seconds" not in verify
+    assert "fewer than 60 seconds remain, and git diff is still empty" in verify
+    assert "On the last iteration, submit the current diff even if the check failed." in verify
+    assert "protected-paths-only" in verify
+    assert "git add -N" in verify
     assert "Do not stop with UNCERTAIN" in triage
     assert "include_contents: none" not in repair
     assert "Your history is isolated" not in repair
