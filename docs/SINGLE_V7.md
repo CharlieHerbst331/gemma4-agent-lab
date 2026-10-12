@@ -21,10 +21,15 @@ calls was `{filepath, new_string}` with no `old_string`. The harness text is
 single-v6 already said to change a tool call after two failures, and that
 counting rule did not stop the repeats.
 
-`src/gemma_lab/tool_failures.py` still names a failed edit only when the
-output contains `mandatory input parameters` or `missing-parameter`. It does
-not name `old_string not found` or `Target string occurs N times`. The prompt
-uses the harness phrases itself. The counter is unchanged.
+`src/gemma_lab/tool_failures.py` counts a failed `edit_file` only when the
+tool result is an error. Official ATIF fixtures store that result as JSON
+(`{"raw": "ok"}` in the writer fixtures). A harness result with `"status":
+"ok"` or `"status": "success"` is skipped, so a successful edit whose diff
+quotes a failure sentence is not counted. That status is read only when the
+tool result starts with `{`. A plain-text failure that quotes `"status": "ok"`
+is still counted. The report fields are
+`failed_edit_calls` (the total), `failed_edit_missing_parameter`,
+`failed_edit_not_found`, and `failed_edit_ambiguous`.
 
 - After one missing-parameter error, retry one smaller `edit_file`.
 - The same failing `edit_file` call is not repeated. The second identical

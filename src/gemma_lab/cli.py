@@ -159,6 +159,15 @@ def main(argv=None):
         "--evaluation", type=Path, help="Completed GPU output folder for this archive"
     )
     submit.add_argument(
+        "--allow-corrupt-ledger",
+        action="store_true",
+        help=(
+            "Skip unparseable ledger lines that do not look like a row. "
+            'A line containing "submitted", "reserved", today\'s UTC date, or '
+            "this archive's sha256 prefix still blocks the upload."
+        ),
+    )
+    submit.add_argument(
         "--scorer-overhead-seconds",
         type=float,
         default=operations.DEFAULT_SCORER_OVERHEAD_SECONDS,
@@ -329,6 +338,7 @@ def main(argv=None):
                     execute=args.execute,
                     evaluation=args.evaluation,
                     scorer_overhead_seconds=args.scorer_overhead_seconds,
+                    allow_corrupt_ledger=args.allow_corrupt_ledger,
                 )
             case "hygiene":
                 from gemma_lab.hygiene import HygieneInputError, run_cli
