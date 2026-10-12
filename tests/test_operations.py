@@ -510,10 +510,59 @@ def test_http_4xx_text_is_a_definite_failure(text):
         "File kaggle.py, line 500, in submit",
         "error 4xx",
         "sha 403 buried in ab403cd1122334455",
+        "See Line 404 Report",
+        "400 Rows uploaded",
+        "Timeout 400: Seconds",
+        "Uploaded 404 Percent",
+        "localhost:400 Refused",
     ],
 )
 def test_http_5xx_and_unrelated_numbers_stay_ambiguous(text):
     assert operations._definite_submit_failure(RuntimeError(text)) is False
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "402 Payment Required",
+        "405 Method Not Allowed",
+        "406 Not Acceptable",
+        "407 Proxy Authentication Required",
+        "408 Request Timeout",
+        "410 Gone",
+        "411 Length Required",
+        "412 Precondition Failed",
+        "414 URI Too Long",
+        "415 Unsupported Media Type",
+        "416 Range Not Satisfiable",
+        "417 Expectation Failed",
+        "421 Misdirected Request",
+        "423 Locked",
+        "424 Failed Dependency",
+        "425 Too Early",
+        "426 Upgrade Required",
+        "428 Precondition Required",
+        "429 Too Many Requests",
+        "431 Request Header Fields Too Large",
+        "451 Unavailable For Legal Reasons",
+    ],
+)
+def test_explicit_4xx_reason_phrases_are_definite_failures(text):
+    assert operations._definite_submit_failure(RuntimeError(text)) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "See Line 404 Report",
+        "400 Rows uploaded",
+        "Timeout 400: Seconds",
+        "Uploaded 404 Percent",
+        "localhost:400 Refused",
+    ],
+)
+def test_capitalised_word_after_4xx_stays_reserved(tmp_path, monkeypatch, text):
+    _assert_stays_reserved(tmp_path, monkeypatch, RuntimeError(text))
 
 
 def test_response_status_classifies_http_error():
@@ -752,6 +801,48 @@ def test_directory_fsync_error_warns_and_submit_continues(tmp_path, monkeypatch)
     with pytest.warns(UserWarning, match="Could not fsync directory"):
         plan = operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
     assert plan["status"] == "submitted"
+
+
+def test_non_utf8_ledger_line_names_the_line(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    good = {"created_at": "2020-01-01T00:00:00+00:00", "status": "failed", "sha256": "older"}
+    original = json.dumps(good).encode() + b"\n\xff garbage\n"
+    ledger.write_bytes(original)
+    calls = _install_kaggle(monkeypatch, lambda *args, **kwargs: "Successfully submitted")
+    with pytest.raises(ValueError, match="line 2") as raised:
+        operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert not isinstance(raised.value, UnicodeDecodeError)
+    assert "--allow-corrupt-ledger" in str(raised.value)
+    assert ledger.read_bytes() == original
+    assert _submit_calls(calls) == []
+
+    def on_submit(*args, **kwargs):
+        raise RuntimeError("400 Client Error: Bad Request")
+
+    _install_kaggle(monkeypatch, on_submit)
+    with pytest.warns(UserWarning, match="unparseable ledger line 2"):
+        with pytest.raises(RuntimeError, match="400 Client Error"):
+            operations.submit(
+                archive,
+                "ship it",
+                ledger,
+                execute=True,
+                evaluation=evaluation,
+                allow_corrupt_ledger=True,
+            )
+    raw = ledger.read_bytes()
+    assert b"\xff garbage" in raw
+    parsed = []
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        if line.startswith("{"):
+            parsed.append(json.loads(line))
+    by_digest = {row["sha256"]: row for row in parsed}
+    assert by_digest["older"]["status"] == "failed"
+    current = [row for row in parsed if row["sha256"] != "older"]
+    assert len(current) == 1
+    assert current[0]["status"] == "failed"
 
 
 def test_trailing_unparseable_ledger_line_is_skipped(tmp_path, monkeypatch):

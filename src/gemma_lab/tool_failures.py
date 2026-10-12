@@ -46,7 +46,6 @@ def is_failed_skill(event) -> bool:
 _NOT_FOUND_EDIT = "failed to replace: old_string not found"
 _AMBIGUOUS_EDIT = re.compile(r"Target string occurs \d+ times")
 _OK_EDIT_STATUS = {"ok", "success", "succeeded"}
-_STATUS_FIELD = re.compile(r"""["']status["']\s*:\s*["']([A-Za-z_]+)["']""")
 
 
 def _status_in_mapping(payload: dict) -> str | None:
@@ -78,21 +77,17 @@ def _edit_result_status(text: str) -> str | None:
     ``{"raw": "ok"}``. A successful harness edit adds ``"status": "ok"``.
     """
     stripped = text.strip()
-    # Only a result that is itself JSON. A plain-text failure that quotes
-    # `"status": "ok"` later in the text is still an error.
+    # Only valid JSON. A result that merely starts with "{" and quotes
+    # `"status": "ok"` on the first line is still an error, as is a
+    # plain-text failure that quotes that snippet later.
     if not stripped.startswith("{"):
         return None
     try:
         payload = json.loads(stripped)
     except json.JSONDecodeError:
-        payload = None
+        return None
     if isinstance(payload, dict):
-        found = _status_in_mapping(payload)
-        if found:
-            return found
-    match = _STATUS_FIELD.search(stripped)
-    if match:
-        return match.group(1).lower()
+        return _status_in_mapping(payload)
     return None
 
 

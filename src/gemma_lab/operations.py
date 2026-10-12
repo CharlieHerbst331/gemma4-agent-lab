@@ -471,25 +471,50 @@ def _failure_text(exc: BaseException) -> str:
 
 
 _HTTP_CODE = r"[45]\d{2}"
-# Anchored to an HTTP status. Prose such as "error: 500 bytes" or "status 500 files" does not match.
+# Anchored to an HTTP status. A code followed by any capitalised word is not a status.
 _HTTP_STATUS_PATTERNS = (
     re.compile(rf"\b({_HTTP_CODE})\s+(?:Client|Server)\s+Error\b"),
     re.compile(rf"\bHTTP/1\.[0-9]\s+({_HTTP_CODE})\b"),
     re.compile(rf"\bstatus[\s_-]*code\s*[:=]\s*({_HTTP_CODE})\b"),
     re.compile(rf"""["']code["']\s*:\s*({_HTTP_CODE})\b"""),
     re.compile(rf"\(({_HTTP_CODE})\)\s*Reason\s*:"),
-    re.compile(rf"\b({_HTTP_CODE})\s*[-:]\s*[A-Z][a-z]+"),
-    re.compile(rf"\b({_HTTP_CODE})(?!\s*(?:bytes|files|ms|mb|MB|s|retries)\b)\s+[A-Z][a-z]+"),
 )
-_CLIENT_REASON = re.compile(
-    r"\b(Bad Request|Payload Too Large|Unprocessable Entity|Too Many Requests)\b"
-)
+# Official 4xx reason phrases. The pattern tries the longest phrase first.
 _CLIENT_REASON_CODE = {
-    "Bad Request": 400,
-    "Payload Too Large": 413,
+    "Request Header Fields Too Large": 431,
+    "Unavailable For Legal Reasons": 451,
+    "Proxy Authentication Required": 407,
+    "Unsupported Media Type": 415,
+    "Range Not Satisfiable": 416,
+    "Precondition Required": 428,
     "Unprocessable Entity": 422,
+    "Method Not Allowed": 405,
+    "Precondition Failed": 412,
+    "Misdirected Request": 421,
+    "Expectation Failed": 417,
+    "Failed Dependency": 424,
     "Too Many Requests": 429,
+    "Payload Too Large": 413,
+    "Payment Required": 402,
+    "Upgrade Required": 426,
+    "Request Timeout": 408,
+    "Length Required": 411,
+    "Not Acceptable": 406,
+    "URI Too Long": 414,
+    "Unauthorized": 401,
+    "Bad Request": 400,
+    "Not Found": 404,
+    "Forbidden": 403,
+    "Too Early": 425,
+    "Conflict": 409,
+    "Locked": 423,
+    "Gone": 410,
 }
+_CLIENT_REASON = re.compile(
+    r"\b("
+    + "|".join(re.escape(phrase) for phrase in sorted(_CLIENT_REASON_CODE, key=len, reverse=True))
+    + r")\b"
+)
 # Orphan mkstemp files from a SIGKILL. A few minutes avoids deleting a live write.
 _LEDGER_TEMP_AGE_SECONDS = 180
 _LEDGER_TEMP_SUFFIX = re.compile(r"^[A-Za-z0-9_]{8}$")
@@ -610,7 +635,10 @@ def _read_ledger(
         return []
     today = datetime.now(UTC).date().isoformat()
     rows = []
-    for line_number, line in enumerate(ledger.read_text().splitlines(), start=1):
+    # Invalid bytes become U+FFFD so the line is unparseable and the repair hint
+    # names it. A raw UnicodeDecodeError would hide that hint.
+    text = ledger.read_text(encoding="utf-8", errors="replace")
+    for line_number, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
             continue
         try:
@@ -684,16 +712,17 @@ def _append_ledger(ledger: Path, row: dict) -> None:
     _fsync_directory(ledger.parent)
 
 
-def _atomic_write(path: Path, text: str) -> None:
+def _atomic_write(path: Path, text: str | bytes) -> None:
     """Write ``text`` via a same-directory temp file, then replace the target."""
+    data = text.encode("utf-8") if isinstance(text, str) else text
     directory = path.parent
     directory.mkdir(parents=True, exist_ok=True)
     _cleanup_old_ledger_temps(path)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=directory)
     tmp_path = Path(tmp_name)
     try:
-        with os.fdopen(fd, "w") as handle:
-            handle.write(text)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
@@ -716,9 +745,10 @@ def _same_ledger_row(item: dict, row: dict) -> bool:
 
 def _replace_ledger_row(ledger: Path, row: dict) -> None:
     """Replace the row with the same id. Other lines, including garbage, stay."""
-    lines = ledger.read_text().splitlines() if ledger.exists() else []
+    raw_lines = ledger.read_bytes().splitlines() if ledger.exists() else []
     target = None
-    for index, line in enumerate(lines):
+    for index, raw_line in enumerate(raw_lines):
+        line = raw_line.decode("utf-8", errors="replace")
         if not line.strip():
             continue
         try:
@@ -734,8 +764,8 @@ def _replace_ledger_row(ledger: Path, row: dict) -> None:
             f"sha256={row.get('sha256')!r} was not found in {ledger}. "
             "The reserved line was not rewritten."
         )
-    lines[target] = json.dumps(row)
-    _atomic_write(ledger, "\n".join(lines) + "\n")
+    raw_lines[target] = json.dumps(row).encode("utf-8")
+    _atomic_write(ledger, b"\n".join(raw_lines) + b"\n")
 
 
 def submit(
