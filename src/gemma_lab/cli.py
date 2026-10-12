@@ -74,6 +74,38 @@ def main(argv=None):
         default=[],
         help="LABEL=owner/slug for an arm archive larger than 5 MiB",
     )
+    notebook_multi = sub.add_parser(
+        "notebook-multi",
+        help="Generate a hash-pinned multi-arm smoke notebook",
+    )
+    notebook_multi.add_argument("--protocol", type=Path, required=True)
+    notebook_multi.add_argument("--owner", required=True)
+    notebook_multi.add_argument("--slug", required=True)
+    notebook_multi.add_argument("--repeats-in-session", default="1")
+    notebook_multi.add_argument("--output", type=Path, required=True)
+    notebook_multi.add_argument("--wheelhouse-version", type=int, required=True)
+    notebook_multi.add_argument(
+        "--bundle-dataset",
+        action="append",
+        default=[],
+        help="LABEL=owner/slug for an arm archive larger than 5 MiB",
+    )
+    multi_report = sub.add_parser(
+        "multi-report",
+        help="Regenerate a multi-arm smoke report from one or more sessions",
+    )
+    multi_report.add_argument("runs", nargs="+", type=Path)
+    multi_report.add_argument("--protocol", type=Path, required=True)
+    multi_report.add_argument("--output", type=Path, required=True)
+    multi_report.add_argument(
+        "--allow-protocol-mismatch",
+        action="store_true",
+        help=(
+            "When pair_manifest protocol_sha256 differs from the protocol file, "
+            "print both hashes and continue. Without this flag the command exits 1 "
+            "and writes nothing."
+        ),
+    )
     pair_schedule = sub.add_parser(
         "pair-schedule", help="Print a frozen paired schedule without packing"
     )
@@ -216,6 +248,33 @@ def main(argv=None):
                     args.prior_run,
                     datasets,
                     args.wheelhouse_version,
+                )
+            case "notebook-multi":
+                from gemma_lab.multi_arm import generate_multi
+
+                datasets = {}
+                for item in args.bundle_dataset:
+                    if "=" not in item:
+                        raise ValueError("Expected --bundle-dataset LABEL=owner/slug")
+                    label, ref = item.split("=", 1)
+                    datasets[label] = ref
+                result = generate_multi(
+                    args.protocol,
+                    args.owner,
+                    args.slug,
+                    args.output,
+                    args.repeats_in_session,
+                    datasets,
+                    args.wheelhouse_version,
+                )
+            case "multi-report":
+                from gemma_lab.multi_arm import multi_report_from_runs
+
+                result = multi_report_from_runs(
+                    args.runs,
+                    args.protocol,
+                    args.output,
+                    allow_protocol_mismatch=args.allow_protocol_mismatch,
                 )
             case "pair-schedule":
                 from gemma_lab.paired import load_protocol, protocol_schedule
