@@ -9,6 +9,11 @@ error. A failed edit is ``edit_file`` whose output is one of:
   mandatory input parameters are not present``, or a ``missing-parameter`` error
 - not found: ``Failed to replace: old_string not found``
 - ambiguous: ``Target string occurs <N> times``
+
+A result whose JSON ``status`` is ``ok`` or ``success`` is not an error, even
+when the diff text contains one of those sentences. The report fields are
+``failed_edit_calls`` (the total) and ``failed_edit_missing_parameter``,
+``failed_edit_not_found``, ``failed_edit_ambiguous``.
 """
 
 from __future__ import annotations
@@ -40,17 +45,69 @@ def is_failed_skill(event) -> bool:
 
 _NOT_FOUND_EDIT = "failed to replace: old_string not found"
 _AMBIGUOUS_EDIT = re.compile(r"Target string occurs \d+ times")
+_OK_EDIT_STATUS = {"ok", "success", "succeeded"}
+_STATUS_FIELD = re.compile(r"""["']status["']\s*:\s*["']([A-Za-z_]+)["']""")
+
+
+def _status_in_mapping(payload: dict) -> str | None:
+    status = payload.get("status")
+    if isinstance(status, str) and status.strip():
+        return status.strip().lower()
+    for key in ("raw", "output", "result"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            found = _status_in_mapping(value)
+            if found:
+                return found
+        if isinstance(value, str) and value.strip().startswith("{"):
+            try:
+                nested = json.loads(value)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(nested, dict):
+                found = _status_in_mapping(nested)
+                if found:
+                    return found
+    return None
+
+
+def _edit_result_status(text: str) -> str | None:
+    """Status from a tool-result JSON object, including a nested ``raw`` object.
+
+    Official ATIF fixtures store tool output as a JSON string such as
+    ``{"raw": "ok"}``. A successful harness edit adds ``"status": "ok"``.
+    """
+    stripped = text.strip()
+    # Only a result that is itself JSON. A plain-text failure that quotes
+    # `"status": "ok"` later in the text is still an error.
+    if not stripped.startswith("{"):
+        return None
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict):
+        found = _status_in_mapping(payload)
+        if found:
+            return found
+    match = _STATUS_FIELD.search(stripped)
+    if match:
+        return match.group(1).lower()
+    return None
 
 
 def edit_failure_kind(event) -> str | None:
     """``missing_parameter``, ``not_found``, ``ambiguous``, or None.
 
     A call matches at most one kind. Missing parameters win when a result
-    mentions more than one of these sentences.
+    mentions more than one of these sentences. A result whose status is ok
+    or success is not an error.
     """
     if getattr(event, "tool", "") != "edit_file":
         return None
     text = str(getattr(event, "output", "") or "")
+    if _edit_result_status(text) in _OK_EDIT_STATUS:
+        return None
     lowered = text.lower()
     if (
         "mandatory input parameters" in lowered
@@ -195,7 +252,9 @@ def tool_failure_lines(rows) -> list[str]:
         "old_string not found, or a target string that occurs N times. "
         "Repeated identical calls of any of those kinds count. max streak is "
         "the longest adjacent failure streak. failed edit_file is the total; "
-        "the last three columns split that total.",
+        "the last three columns are failed_edit_missing_parameter, "
+        "failed_edit_not_found, and failed_edit_ambiguous. A tool result "
+        "whose status is ok or success is not counted.",
         "",
         "| arm | repeat | task | failed skill | failed edit_file | "
         "max streak | unrecovered loop | submit_patch | patch | "

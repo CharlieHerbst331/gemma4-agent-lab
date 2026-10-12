@@ -376,6 +376,43 @@ def test_edit_failure_kinds_count_not_found_and_ambiguous_loops(tmp_path):
     assert loop["patch"] == "other"
     assert loop["submit_patch_count"] == 1
     assert loop["unrecovered_loop"] is True
+    ok_diff = (
+        '{"status": "ok", "raw": "diff --git a/x.py b/x.py\\n'
+        "+# Failed to replace: old_string not found\\n"
+        '+# Target string occurs 2 times"}'
+    )
+    success_diff = '{"status": "success", "output": "Target string occurs 4 times in this hunk"}'
+    error_result = '{"status": "error", "raw": "Failed to replace: old_string not found"}'
+    quoted = summarize_trace(
+        atif(
+            "repair",
+            [
+                ("edit_file", found_args, ok_diff),
+                ("edit_file", found_args, success_diff),
+                ("edit_file", found_args, error_result),
+                ("edit_file", found_args, '{"raw": "ok"}'),
+            ],
+            content=True,
+        )
+    )
+    assert quoted["failed_edit_calls"] == 1
+    assert quoted["failed_edit_not_found"] == 1
+    assert quoted["failed_edit_ambiguous"] == 0
+    echoed = summarize_trace(
+        atif(
+            "repair",
+            [
+                (
+                    "edit_file",
+                    found_args,
+                    'Failed to replace: old_string not found\nnote {"status": "ok"}',
+                )
+            ],
+            content=True,
+        )
+    )
+    assert echoed["failed_edit_not_found"] == 1
+
     recovered = rows[("A", "not_found_then_success")]
     assert recovered["failed_edit_calls"] == 2
     assert recovered["failed_edit_not_found"] == 2

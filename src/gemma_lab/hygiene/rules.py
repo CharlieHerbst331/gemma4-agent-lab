@@ -1002,7 +1002,6 @@ _SIMPLE_READ_ONLY = {
     "echo",
     "printf",
     "stat",
-    "diff",
     "cut",
     "tr",
 }
@@ -1134,6 +1133,8 @@ def _segment_can_mutate(segment: str) -> bool:
         return _uniq_mutates(rest)
     if name == "tail":
         return _tail_mutates(rest)
+    if name == "diff":
+        return _diff_mutates(rest)
     return name not in _SIMPLE_READ_ONLY
 
 
@@ -1290,6 +1291,30 @@ def _uniq_mutates(args: list[str]) -> bool:
         positionals += 1
         if positionals > 1:
             return True
+    return False
+
+
+def _diff_paginate(base: str) -> bool:
+    """GNU diff accepts a unique abbreviation of ``--paginate``.
+
+    ``--palette`` shares the prefix ``--pa``, so ``--pag`` and anything longer
+    that is still a prefix of ``paginate`` is the unique form.
+    """
+    if not base.startswith("--"):
+        return False
+    name = base[2:]
+    return bool(name) and "paginate".startswith(name) and len(name) >= 3
+
+
+def _diff_mutates(args: list[str]) -> bool:
+    """``-l`` and ``--paginate`` (and its unique abbreviations) run ``pr``."""
+    for token in args:
+        base = token.split("=", 1)[0]
+        if _diff_paginate(base):
+            return True
+        if token.startswith("-") and not token.startswith("--") and token != "-":
+            if "l" in token[1:]:
+                return True
     return False
 
 
