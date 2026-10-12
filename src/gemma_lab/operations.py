@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import warnings
 import zipfile
 from datetime import UTC, datetime
@@ -468,11 +469,58 @@ def _failure_text(exc: BaseException) -> str:
     return _scrub_secrets("\n".join(part for part in parts if part)) or "submit failed"
 
 
-def _definite_submit_failure(exc: BaseException) -> bool:
-    """True only for a non-zero CLI exit or an HTTP error response.
+_HTTP_FAILURE = re.compile(
+    r"(?i)(?:"
+    r"\bHTTP(?:/\d+(?:\.\d+)?)?\s+[45]\d{2}\b"
+    r"|"
+    r"\b[45]\d{2}\s+(?:Client|Server)\s+Error\b"
+    r"|"
+    r"\b[45]\d{2}\s+(?:Bad Request|Unauthorized|Forbidden|Not Found|"
+    r"Too Many Requests|Internal Server Error|Bad Gateway|Service Unavailable|"
+    r"Gateway Timeout)\b"
+    r"|"
+    r"\b(?:status(?:[\s_-]*code)?|response code|error)\s*[:=]?\s*[45]\d{2}\b"
+    r")"
+)
+# Orphan mkstemp files from a SIGKILL. A few minutes avoids deleting a live write.
+_LEDGER_TEMP_AGE_SECONDS = 180
 
-    Timeouts, connection failures, and decode errors stay reserved: the upload
-    may already have been received.
+
+def _cli_text(exc: BaseException) -> str:
+    parts = [str(exc)]
+    response = getattr(exc, "response", None)
+    if response is not None:
+        status = getattr(response, "status_code", None)
+        if isinstance(status, int):
+            parts.append(f"HTTP {status}")
+        body = getattr(response, "text", None)
+        if isinstance(body, str):
+            parts.append(body)
+    for attr in ("stderr", "stdout", "output"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, bytes):
+            value = value.decode("utf-8", "replace")
+        if isinstance(value, str) and value.strip():
+            parts.append(value)
+    return "\n".join(parts)
+
+
+def _http_client_failure(exc: BaseException) -> bool:
+    """True when the CLI output or the client shows an HTTP 4xx/5xx failure."""
+    if isinstance(exc, requests.HTTPError):
+        return True
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None) if response is not None else None
+    if isinstance(status, int) and 400 <= status <= 599:
+        return True
+    return _HTTP_FAILURE.search(_cli_text(exc)) is not None
+
+
+def _definite_submit_failure(exc: BaseException) -> bool:
+    """True only for an HTTP 4xx/5xx status or that same status in CLI output.
+
+    A non-zero exit whose text is a connection error, a traceback, or an
+    unknown error stays reserved: the upload may already have been received.
     """
     if isinstance(
         exc, (subprocess.TimeoutExpired, UnicodeDecodeError, ConnectionError, TimeoutError)
@@ -480,11 +528,7 @@ def _definite_submit_failure(exc: BaseException) -> bool:
         return False
     if isinstance(exc, requests.RequestException) and not isinstance(exc, requests.HTTPError):
         return False
-    if isinstance(exc, (RuntimeError, subprocess.CalledProcessError, requests.HTTPError)):
-        return True
-    response = getattr(exc, "response", None)
-    status = getattr(response, "status_code", None)
-    return isinstance(status, int) and status >= 400
+    return _http_client_failure(exc)
 
 
 def _ambiguous_note(exc: BaseException) -> str:
@@ -493,39 +537,76 @@ def _ambiguous_note(exc: BaseException) -> str:
 
 
 def _read_ledger(ledger: Path) -> list[dict]:
-    """Parse the ledger. One trailing unparseable line is skipped with a warning."""
+    """Parse the ledger. Unparseable lines are skipped and left on disk."""
     if not ledger.exists():
         return []
     lines = ledger.read_text().splitlines()
     rows = []
-    last = len(lines) - 1
+    bad: list[int] = []
+    last_good = -1
     for index, line in enumerate(lines):
         if not line.strip():
             continue
         try:
             item = json.loads(line)
         except json.JSONDecodeError:
-            if index == last:
-                warnings.warn(
-                    f"Skipping unparseable trailing ledger line in {ledger}",
-                    stacklevel=2,
-                )
-                continue
-            raise
+            bad.append(index)
+            continue
         if isinstance(item, dict):
             rows.append(item)
+            last_good = index
+    for index in bad:
+        where = "trailing " if index > last_good else ""
+        warnings.warn(
+            f"Skipping unparseable {where}ledger line in {ledger}",
+            stacklevel=2,
+        )
     return rows
 
 
+def _fsync_directory(directory: Path) -> None:
+    try:
+        dir_fd = os.open(directory, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def _cleanup_old_ledger_temps(path: Path) -> None:
+    """Remove SIGKILL leftovers that match this ledger's temp-file prefix."""
+    directory = path.parent
+    if not directory.is_dir():
+        return
+    prefix = f".{path.name}."
+    cutoff = time.time() - _LEDGER_TEMP_AGE_SECONDS
+    for candidate in directory.iterdir():
+        if not candidate.is_file() or not candidate.name.startswith(prefix):
+            continue
+        try:
+            if candidate.stat().st_mtime > cutoff:
+                continue
+            candidate.unlink()
+        except OSError:
+            continue
+
+
 def _append_ledger(ledger: Path, row: dict) -> None:
+    _cleanup_old_ledger_temps(ledger)
     with ledger.open("a") as handle:
         handle.write(json.dumps(row) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    _fsync_directory(ledger.parent)
 
 
 def _atomic_write(path: Path, text: str) -> None:
     """Write ``text`` via a same-directory temp file, then replace the target."""
     directory = path.parent
     directory.mkdir(parents=True, exist_ok=True)
+    _cleanup_old_ledger_temps(path)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=directory)
     tmp_path = Path(tmp_name)
     try:
@@ -537,22 +618,29 @@ def _atomic_write(path: Path, text: str) -> None:
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
-    try:
-        dir_fd = os.open(directory, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(dir_fd)
-    finally:
-        os.close(dir_fd)
+    _fsync_directory(directory)
 
 
 def _replace_last_ledger_row(ledger: Path, row: dict) -> None:
+    """Replace the last parseable row. Unparseable lines stay where they are."""
     lines = ledger.read_text().splitlines() if ledger.exists() else []
-    if lines:
-        lines[-1] = json.dumps(row)
+    target = None
+    for index in range(len(lines) - 1, -1, -1):
+        stripped = lines[index].strip()
+        if not stripped:
+            continue
+        try:
+            item = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(item, dict):
+            target = index
+            break
+    encoded = json.dumps(row)
+    if target is None:
+        lines.append(encoded)
     else:
-        lines = [json.dumps(row)]
+        lines[target] = encoded
     _atomic_write(ledger, "\n".join(lines) + "\n")
 
 

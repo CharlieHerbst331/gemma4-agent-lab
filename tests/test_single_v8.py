@@ -279,6 +279,42 @@ def test_dev13_report_is_not_a_smoke(tmp_path):
     assert saved["schedule_sha256"] == DEV_SCHEDULE
 
 
+def test_unmatched_report_counts_wall_against_each_arm_cap(tmp_path):
+    run = tmp_path / "run"
+    run.mkdir()
+    rows = [
+        {
+            "arm": "A",
+            "repeat": 1,
+            "task_id": "rich_4070",
+            "resolved": False,
+            "wall_seconds": 275,
+            "hit_cap": {"wall": False, "marker": True},
+        },
+        {
+            "arm": "B",
+            "repeat": 1,
+            "task_id": "rich_4070",
+            "resolved": False,
+            "wall_seconds": 275,
+            "hit_cap": {"wall": False, "marker": False},
+        },
+    ]
+    (run / "pair_results.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+    output = tmp_path / "report"
+    report_from_runs([run], DEV, output)
+    saved = json.loads((output / "pair_report.json").read_text())
+    assert saved["raw_totals"]["A"]["hit_cap_wall"] == 1
+    assert saved["raw_totals"]["B"]["hit_cap_wall"] == 0
+    assert saved["raw_totals"]["A"]["hit_cap_marker"] == 1
+    assert saved["raw_totals"]["B"]["hit_cap_marker"] == 0
+    matched = tmp_path / "matched"
+    report_from_runs([run], SIBLING, matched)
+    kept = json.loads((matched / "pair_report.json").read_text())
+    assert kept["raw_totals"]["A"]["hit_cap_wall"] == 0
+    assert kept["raw_totals"]["B"]["hit_cap_wall"] == 0
+
+
 def test_smoke_report_banner(tmp_path):
     run = tmp_path / "run"
     _arm_row(run, "A", "rich_4070", [("submit_patch", {}, "ok")])

@@ -3480,12 +3480,15 @@ def report_from_runs(run_dirs, protocol_path, output, allow_protocol_mismatch=Fa
     schedule = protocol_schedule(protocol)
     protocol["_schedule_sha256"] = schedule["sha256"]
     caps = []
+    arm_caps = {}
     arm_meta = {"A": {"sha256": None}, "B": {"sha256": None}}
     for label, spec in protocol["arms"].items():
         source = Path(spec["source"])
         if source.is_dir():
             info = inspect_arm(source)
-            caps.append(float(info["budgets"]["max_time_minutes"]) * 60.0)
+            seconds = float(info["budgets"]["max_time_minutes"]) * 60.0
+            caps.append(seconds)
+            arm_caps[label] = seconds
             arm_meta[label]["sha256"] = None
     cap = max(caps) if caps else None
     for run_dir in run_dirs:
@@ -3498,9 +3501,14 @@ def report_from_runs(run_dirs, protocol_path, output, allow_protocol_mismatch=Fa
                 continue
             if meta.get("sha256"):
                 arm_meta.setdefault(label, {})["sha256"] = meta["sha256"]
+            budgets = meta.get("budgets")
+            if isinstance(budgets, dict) and budgets.get("max_time_minutes") is not None:
+                if label not in arm_caps:
+                    arm_caps[label] = float(budgets["max_time_minutes"]) * 60.0
             if cap is None and meta.get("budgets"):
                 cap = float(meta["budgets"]["max_time_minutes"]) * 60.0
     protocol["_cap_seconds"] = 0 if cap is None else cap
+    protocol["_arm_caps"] = arm_caps
     protocol["_arm_meta"] = arm_meta
     report = combine_pair_reports(
         run_dirs, protocol, allow_protocol_mismatch=allow_protocol_mismatch
@@ -3583,6 +3591,8 @@ def combine_pair_reports(run_dirs, protocol, allow_protocol_mismatch=False):
     if cap_seconds is None:
         cap_seconds = 0
     arm_meta = protocol.get("_arm_meta") or {"A": {"sha256": None}, "B": {"sha256": None}}
+    if protocol.get("matched_pair") is False:
+        rows = _rows_with_arm_wall(rows, protocol.get("_arm_caps") or {})
     projection = build_projection(
         rows,
         arm_meta,
@@ -3618,6 +3628,29 @@ def combine_pair_reports(run_dirs, protocol, allow_protocol_mismatch=False):
     if mismatch_notes:
         report["protocol_mismatch_warning"] = mismatch_notes
     return report
+
+
+def _rows_with_arm_wall(rows, arm_caps):
+    """Recompute ``hit_cap.wall`` from each arm's own cap.
+
+    The notebook session stores wall against the shared session cap (the max
+    of the two arms). For an unmatched pair the report uses each arm's
+    ``max_time_minutes`` instead, so a 270 s arm that ends at its own cap is
+    counted. ``hit_cap.marker`` stays as the session recorded it.
+    """
+    if not arm_caps:
+        return rows
+    adjusted = []
+    for row in rows:
+        cap = arm_caps.get(row.get("arm"))
+        wall = row.get("wall_seconds")
+        if cap is None or wall is None:
+            adjusted.append(row)
+            continue
+        hit = dict(row.get("hit_cap") or {})
+        hit["wall"] = float(wall) >= float(cap)
+        adjusted.append({**row, "hit_cap": hit})
+    return adjusted
 
 
 def _collect_harness_versions(run_dirs):

@@ -1,5 +1,7 @@
 import json
+import os
 import subprocess
+import time
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -344,7 +346,7 @@ def test_failure_error_is_capped_in_the_ledger_and_the_raised_message(tmp_path, 
     archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
     pack(Path("agents/baseline"), archive)
     evaluation = evidence(tmp_path, archive)
-    huge = "E" * 5000 + "KGAT_fakeTokenValue12345"
+    huge = "500 Server Error " + ("E" * 5000) + " KGAT_fakeTokenValue12345"
 
     def on_submit(*args, **kwargs):
         raise RuntimeError(huge)
@@ -405,6 +407,159 @@ def test_ledger_replace_keeps_the_original_when_the_write_fails(tmp_path, monkey
     assert ledger.read_text() == original + json.dumps({"status": "reserved"}) + "\n"
     leftovers = [path for path in tmp_path.iterdir() if path.name.startswith(".ledger.jsonl.")]
     assert leftovers == []
+
+
+def _assert_stays_reserved(tmp_path, monkeypatch, error):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+
+    def on_submit(*args, **kwargs):
+        raise error
+
+    calls = _install_kaggle(monkeypatch, on_submit)
+    with pytest.raises(RuntimeError, match="submissions list"):
+        operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    rows = _ledger_rows(ledger)
+    assert len(rows) == 1
+    assert rows[0]["status"] == "reserved"
+    assert "submissions list" in rows[0]["error"]
+    with pytest.raises(ValueError, match="reserved"):
+        operations.submit(archive, "retry", ledger, execute=True, evaluation=evaluation)
+    assert len(_submit_calls(calls)) == 1
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("ConnectionError: Connection reset by peer"),
+        RuntimeError(
+            'Traceback (most recent call last):\n  File "kaggle.py", line 1, in <module>\n'
+            "OSError: boom"
+        ),
+        RuntimeError("unknown error"),
+        subprocess.CalledProcessError(
+            1, ["kaggle"], stderr="ConnectionError: Connection reset by peer"
+        ),
+    ],
+)
+def test_non_http_cli_failures_stay_reserved(tmp_path, monkeypatch, error):
+    _assert_stays_reserved(tmp_path, monkeypatch, error)
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        RuntimeError("403 Forbidden"),
+        RuntimeError("HTTP/1.1 500 Internal Server Error"),
+        subprocess.CalledProcessError(1, ["kaggle"], stderr="404 Not Found"),
+    ],
+)
+def test_http_status_in_cli_output_is_failed(tmp_path, monkeypatch, error):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+
+    state = {"n": 0}
+
+    def on_submit(*args, **kwargs):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise error
+        return "Successfully submitted"
+
+    _install_kaggle(monkeypatch, on_submit)
+    with pytest.raises(RuntimeError):
+        operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    rows = _ledger_rows(ledger)
+    assert rows[-1]["status"] == "failed"
+    plan = operations.submit(archive, "retry", ledger, execute=True, evaluation=evaluation)
+    assert plan["status"] == "submitted"
+
+
+def test_reserved_append_is_fsynced(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    seen = []
+    real = operations.os.fsync
+
+    def spy(fd):
+        seen.append(fd)
+        return real(fd)
+
+    monkeypatch.setattr(operations.os, "fsync", spy)
+    _install_kaggle(monkeypatch, lambda *args, **kwargs: "Successfully submitted")
+    plan = operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert plan["status"] == "submitted"
+    assert seen
+
+
+def test_old_ledger_temp_files_are_removed_before_write(tmp_path):
+    ledger = tmp_path / "ledger.jsonl"
+    old = tmp_path / ".ledger.jsonl.deadbeef"
+    fresh = tmp_path / ".ledger.jsonl.stillopen"
+    other = tmp_path / "notes.tmp"
+    old.write_text("orphan")
+    fresh.write_text("live")
+    other.write_text("keep")
+    now = time.time()
+    os.utime(old, (now - 600, now - 600))
+    os.utime(fresh, (now, now))
+    operations._atomic_write(ledger, "{}\n")
+    assert not old.exists()
+    assert fresh.exists()
+    assert other.exists()
+    assert ledger.read_text() == "{}\n"
+
+
+def test_garbage_lines_are_skipped_and_kept(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    day = datetime.now(UTC).date().isoformat()
+    first = {
+        "created_at": f"{day}T00:00:00+00:00",
+        "status": "failed",
+        "sha256": "older",
+    }
+    original = (
+        "\n".join(
+            [
+                "not-json",
+                json.dumps(first),
+                "{mid",
+                "{also-bad",
+            ]
+        )
+        + "\n"
+    )
+    ledger.write_text(original)
+    calls = _install_kaggle(monkeypatch, lambda *args, **kwargs: "Successfully submitted")
+    with pytest.warns(UserWarning, match="unparseable") as caught:
+        plan = operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert plan["status"] == "submitted"
+    messages = [str(item.message) for item in caught]
+    assert any("trailing" not in message for message in messages)
+    text = ledger.read_text()
+    assert "not-json" in text
+    assert "{mid" in text
+    assert "{also-bad" in text
+    assert len(_submit_calls(calls)) == 1
+
+
+def test_replace_keeps_mid_file_and_trailing_garbage(tmp_path):
+    ledger = tmp_path / "ledger.jsonl"
+    submitted = json.dumps({"status": "submitted", "sha256": "abc"})
+    reserved = json.dumps({"status": "reserved", "sha256": "def"})
+    ledger.write_text(f"{submitted}\n{{mid\n{reserved}\n{{tail\n")
+    operations._replace_last_ledger_row(ledger, {"status": "failed", "error": "400 Client Error"})
+    text = ledger.read_text()
+    assert "{mid" in text
+    assert "{tail" in text
+    assert submitted in text
+    assert '"status": "reserved"' not in text
+    assert '"status": "failed"' in text
 
 
 def test_trailing_unparseable_ledger_line_is_skipped(tmp_path, monkeypatch):

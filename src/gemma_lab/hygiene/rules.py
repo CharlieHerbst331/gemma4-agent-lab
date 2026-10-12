@@ -1002,7 +1002,6 @@ _SIMPLE_READ_ONLY = {
     "echo",
     "printf",
     "stat",
-    "diff",
     "cut",
     "tr",
 }
@@ -1134,6 +1133,8 @@ def _segment_can_mutate(segment: str) -> bool:
         return _uniq_mutates(rest)
     if name == "tail":
         return _tail_mutates(rest)
+    if name == "diff":
+        return _diff_mutates(rest)
     return name not in _SIMPLE_READ_ONLY
 
 
@@ -1290,6 +1291,18 @@ def _uniq_mutates(args: list[str]) -> bool:
         positionals += 1
         if positionals > 1:
             return True
+    return False
+
+
+def _diff_mutates(args: list[str]) -> bool:
+    """``-l`` and ``--paginate`` run ``pr`` from ``PATH``."""
+    for token in args:
+        base = token.split("=", 1)[0]
+        if base == "--paginate":
+            return True
+        if token.startswith("-") and not token.startswith("--") and token != "-":
+            if "l" in token[1:]:
+                return True
     return False
 
 
