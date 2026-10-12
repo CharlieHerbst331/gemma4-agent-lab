@@ -1,0 +1,6 @@
+agent_class: SequentialAgent
+name: structured_v7
+description: Triage, then a repair and verify loop. Repair thinks. Verify rejects an empty diff. No history trim between roles.
+sub_agents:
+- config_path: sub_agents/triage.yaml
+- config_path: sub_agents/repair_loop.yaml

@@ -1,0 +1,7 @@
+agent_class: LoopAgent
+name: repair_loop
+description: Repair then verify, at most 3 iterations. There is no exit tool.
+max_iterations: 3
+sub_agents:
+- config_path: repair.yaml
+- config_path: verify.yaml
