@@ -20,6 +20,12 @@
 # samples at temperature 0.5. The others sample at 1.0 with thinking off,
 # except structured-v7 repair.
 #
+# sub_agents/* is a known marker and is not listed. No arm has a sub-agent
+# tree. Dropping it does not change the matched single-v8 vs single-v8-check
+# file check. Unknown markers are rejected.
+#
+# Arm labels are contiguous from A. expected_sha256 is the frozen archive.
+#
 # session_budget_seconds is 14400 (4 h). pair_fits charges every arm the
 # session cap, which is the max arm cap (360 s). With load 900 s and the
 # 300 s tasks.jsonl wait already on the session clock, the last task needs
@@ -31,25 +37,24 @@ arms:
   A:
     source: agents/single-v8
     name: single-v8
-    expected_sha256: null
+    expected_sha256: 6f44de6401910907b6c65f89549727d2c4492a54c3ed13743033623d81dfdc22
   B:
     source: agents/single-v8-check
     name: single-v8-check
-    expected_sha256: null
+    expected_sha256: 64dc727d78c4189c1db1184e74129290574c7b97816dd91f91d2baa7defe0fb0
   C:
     source: agents/structured-v7
     name: structured-v7
-    expected_sha256: null
+    expected_sha256: a3a08b179fee800ee0575af2a55ad14f47c42c369bf32fd4d52227a9da1109df
   D:
     source: agents/single-v7
     name: single-v7
-    expected_sha256: null
+    expected_sha256: f62c8c0b92bc5bd1fb1015f20e7cbd7a5599d5518d2d59097bf2b40d9f3412b0
 notes: "Smoke, not promotion eligible. One repeat cannot name a winner. Budgets differ: single-v8 and single-v8-check are 330 s / 150 calls / 200 turns, structured-v7 is 360 s / 150 calls / 200 turns, and single-v7 stays at 270 s / 48 calls / 64 turns. Sampling and thinking differ: structured-v7 repair uses thinking budget 256, and single-v7 uses temperature 0.5. eval_config.yaml, sampling.yaml, and thinking.yaml are the markers. The session cap is the max of the arm time caps."
 matched_pair: false
 allow_identical: false
 allowed_differences:
   - agent.yaml
-  - sub_agents/*
   - skills/*
   - prompts/*
   - eval_config.yaml

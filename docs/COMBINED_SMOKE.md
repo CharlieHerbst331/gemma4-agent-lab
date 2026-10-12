@@ -16,11 +16,14 @@ generator, `gemma-lab notebook-multi`, embeds that same runtime unchanged and
 feeds it a schedule whose `order` lists every arm. `execute_session` already
 walks `order`, so all four arms run in one session and the model loads once.
 
-`build_report` inside that runtime only totals arms A and B. After the session
-the notebook overwrites `pair_report.json` and `pair_report.md` with the
-multi-arm smoke report, and writes the same bytes to `multi_report.json` and
-`multi_report.md`. `gemma-lab pair-report` still refuses this protocol, because
-`load_protocol` still requires arms A and B. Regenerate with `gemma-lab multi-report`.
+`build_report` inside that runtime only totals arms A and B. The eval cell
+redefines `build_report` and `render_report_md` before `execute_session`, so
+the session writes the smoke report to `pair_report.json` and `pair_report.md`.
+After the session returns, the cell writes the same report to `multi_report.json`
+and `multi_report.md`. `multi_report.json` is the only authoritative file. A
+lone `pair_report.*` is invalid. `gemma-lab pair-report` still refuses this
+protocol, because `load_protocol` still requires arms A and B. Regenerate with
+`gemma-lab multi-report`.
 
 `early_stop` must be null. The embedded early-stop only knows A and B.
 
@@ -90,7 +93,9 @@ and `p0` match the two-arm schedule. Arm order rotates with `(p0 + repeat0) mod 
 | fastapi_14262 | A, B, C, D |
 
 A is first on two tasks. B, C, and D are first on one. Five tasks cannot split
-evenly across four arms. That is another reason this repeat cannot name a winner.
+evenly across four arms. The rotation confounds position with task. Slot counts,
+times each arm occupies slots 1 through 4, are A 2,1,1,1; B 1,2,1,1; C 1,1,2,1;
+D 1,1,1,2. That is another reason this repeat cannot name a winner.
 
 For two labels the same rotation matches `build_schedule` exactly, including
 the hash. The generator refuses a protocol with fewer than three arms, so that
@@ -101,8 +106,13 @@ path is only a check.
 `matched_pair: false`, with notes. `load_protocol` still rejects the file
 (`Protocol arms must be exactly A and B`).
 
-Allowed differences: `agent.yaml`, `sub_agents/*`, `skills/*`, `prompts/*`,
+Allowed differences: `agent.yaml`, `skills/*`, `prompts/*`,
 `eval_config.yaml`, `sampling.yaml`, `thinking.yaml`.
+
+`sub_agents/*` is still a known marker. This protocol does not list it. No arm
+has a sub-agent tree, and the marker does not change the matched single-v8 vs
+single-v8-check file check. Unknown markers are rejected. Arm labels must be
+contiguous from A with no gaps.
 
 The generator checks every pair. single-v8 and single-v8-check have the same
 budgets and the same sampling tuple `(1.0, 0.95, 0, false)`, so that pair is
@@ -180,15 +190,19 @@ especially likely for arm D. That number is not invented here.
 
 ### If single-v7 were left out
 
-Three arms, session cap still 360 s, 15 task-runs.
+Three arms, 15 task-runs. These are two different clocks. 6780 s is not the
+wall time.
 
-- Own-cap agent time: `5 * (330 + 330 + 360) = 5100 s`
-- Plus one load: **6000 s** = 1.667 GPU-hours
-- `pair_fits` with the 300 s data wait: `900 + 300 + 5 * 3 * 360 + 3 * 60 = 6780 s`
+- Own-cap wall, plus one load: `5 * (330 + 330 + 360) + 900 = 6000 s` =
+  **1.667 GPU-hours**. This is the wall time if every run hits its own cap.
+- `pair_fits` charges every arm the 360 s session cap, the 300 s data wait,
+  and 60 s of pad: `900 + 300 + 5 * 3 * 360 + 3 * 60 = 6780 s`. That is the
+  session clock required before the last task will start. It is not the
+  own-cap wall.
 
 6780 s fits in the older 7200 s smoke budget with 420 s of slack. The
-four-arm worst case does not (8640 s). The four-arm protocol therefore uses
-14400 s, and single-v7 is included.
+four-arm `pair_fits` worst case does not (8640 s). The four-arm protocol
+therefore uses 14400 s, and single-v7 is included.
 
 ### Option 2, not built
 
@@ -213,20 +227,38 @@ The smoke report starts with `smoke, not promotion eligible`. `winner` and
 `not_applicable`. Pairwise resolved counts are descriptive. They do not name
 a winner.
 
-The report lists each arm's own cap, call cap, and turn cap, and the session
-cap of 360 s.
+`multi_report.json` is the only authoritative file. A lone `pair_report.json`
+or `pair_report.md` is invalid. A file titled Paired evaluation report, with
+only arms A and B, wins and losses, and no smoke marker, is not a smoke result.
+The eval cell rebinds `build_report` and `render_report_md` before
+`execute_session`, so the session writes the smoke report into `pair_report.*`.
+That copy is still not authoritative until `multi_report.json` exists.
 
-Tool-failure rollup stays on the two-arm `pair-report` path. This report does
-not import it.
+The report lists, per arm, resolved rows, empty patches, infrastructure
+errors, hit-cap wall and marker counts, mean / p50 / p90 / max wall, tool-call
+and llm-call totals, failed skill and edit counts when traces exist, and the
+hygiene verdict when a sidecar exists. Missing traces are `not_available`.
+Missing hygiene sidecars are `not_computed`.
+
+`hit_cap.wall` in `pair_results.jsonl` uses each arm's own cap (v7 270 s,
+v8 and v8-check 330 s, structured-v7 360 s). The wall > cap + 120 session
+abort uses that same per-arm cap. Two infrastructure rows in one arm still
+abort the whole session (`aborted:infra`). Other arms can be left unfinished.
+That imbalance is accepted for this smoke.
+
+The report states that the 5-task rotation confounds position with task.
+Slot counts are A 2,1,1,1; B 1,2,1,1; C 1,1,2,1; D 1,1,1,2.
+
+Markdown reports are written by a temp file in the same directory, then
+replaced. `pair_report.md` from the session goes through that path too.
 
 ## Existing notebooks
 
-The twelve protocols that already existed on main were regenerated from
-`origin/main` at `85cb52bcf4385cf920311451a0bc181764dfa386` and from this
-branch, with owner `charlesaherbst` and `--wheelhouse-version 30`.
-`evaluation.ipynb`, `kernel-metadata.json`, and `schedule.json` matched for
-every protocol. `pair_manifest.json` is not part of that compare: it records
-`generated_at` and `git_revision`.
+`paired.py` and `notebook.py` on this branch match `origin/main` at
+`abcb0f13a99b45c659527cda11bb3afe0b60a85a` (PR #25). Agent directories are
+unchanged. The twelve two-arm notebooks therefore stay byte-identical to a
+notebook generated from that main. `pair_manifest.json` is not part of that
+compare: it records `generated_at` and `git_revision`.
 
 ## Generate
 
@@ -245,9 +277,21 @@ Notebook sha256, from that command, not committed:
 
 | File | sha256 |
 | --- | --- |
-| `evaluation.ipynb` | `2d6c9dae4d24e62eb85d9fc25b7be112cb71813db0d00d4f84c94c2042f019a5` |
+| `evaluation.ipynb` | `c798e3ec090df46e5718e2fcc44916d46d360bd6cb5c67856984c8cc5826b1de` |
 | `kernel-metadata.json` | `400b63dcce9ca4cbdf581e242ea71d57fdf9e4d2ab6bc4659338ea57503155bb` |
 | `schedule.json` | `654a6cae5c4e3ab58dcc4f6f5c508b5d351e9b63bb16ba5e052643ad75e1eb2c` |
+
+`evaluation.ipynb` changed from
+`2d6c9dae4d24e62eb85d9fc25b7be112cb71813db0d00d4f84c94c2042f019a5`.
+The eval cell now rebinds the smoke report before `execute_session`, the
+report text is longer, and the protocol file hash changed because the four
+`expected_sha256` values are pinned and `sub_agents/*` is no longer listed.
+`kernel-metadata.json` is unchanged: owner, slug, and wheelhouse pin are the
+same. `schedule.json` is unchanged: task order and the four-arm rotation are
+the same, so its file hash and the schedule hash
+`4d2904f77afbafbdc2bc5f52266b60f09bf45c51fc072fb24808e0b3dd2961cd` stay put.
+The two-arm schedule hash is still
+`5672ef15323e1d59847cc7cde3f1b6cb1912346d7456b13cb716902437b3e9fd`.
 
 ## Caveats
 
@@ -262,7 +306,9 @@ Notebook sha256, from that command, not committed:
   measurement from this notebook.
 - Wheel install sits on the session clock before `execute_session`. It is
   covered by the slack in the 14400 s budget, not by a measured install time.
-- If the kernel stops after `execute_session` writes `pair_report.json` and
-  before the overwrite, that file is the two-arm report and omits arms C and D.
-  `multi_report.json` is written in the same cell, after the session returns.
+- If the kernel stops after `execute_session` returns and before the tail
+  writes `multi_report.json`, `pair_report.*` is already the smoke report.
+  It is still not authoritative. A lone `pair_report.*` is invalid. Regenerate
+  with `multi-report`, or rerun the tail. A two-arm file titled Paired
+  evaluation report is not a smoke result.
 - `gemma-lab pair-report` cannot load this protocol. Use `multi-report`.

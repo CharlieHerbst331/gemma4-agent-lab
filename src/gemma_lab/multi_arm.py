@@ -3,8 +3,11 @@
 The two-arm notebook runtime in ``paired.py`` stays byte-for-byte as it is.
 ``execute_session`` already walks ``entry["order"]``, so this generator embeds
 a schedule whose order lists every arm and reuses that runtime unchanged.
-``build_report`` inside the runtime only totals arms A and B, so the generated
-notebook rewrites the report after the session.
+``build_report`` inside the runtime only totals arms A and B. The generated
+notebook rebinds ``build_report`` and ``render_report_md`` before
+``execute_session``, so the session itself writes the smoke report.
+``multi_report.json`` is the only authoritative file. A lone ``pair_report.*``
+is invalid.
 
 Two-arm protocols keep using ``notebook-pair``. This module refuses a protocol
 with fewer than three arms.
@@ -72,6 +75,20 @@ LOAD_SECONDS = float(DEFAULT_MODEL_LOAD_SECONDS)
 SCORER_OVERHEAD_SECONDS = float(DEFAULT_SCORER_OVERHEAD_SECONDS)
 FIRST_PAIR_ESTIMATE_SECONDS = 30.0
 KAGGLE_SESSION_SECONDS = WORST_CASE_WARN_SECONDS
+# ``sub_agents/*`` stays known so older files still name it. This protocol
+# omits it: no arm has a sub-agent tree, and it does not change the matched
+# single-v8 vs single-v8-check file check.
+KNOWN_ALLOWED_DIFFERENCES = (
+    "agent.yaml",
+    "sub_agents/*",
+    "skills/*",
+    "prompts/*",
+    "eval_config.yaml",
+    "sampling.yaml",
+    "thinking.yaml",
+)
+_HYGIENE_RANK = {"pass": 0, "warn": 1, "block": 2}
+_OK_EDIT_STATUS = {"ok", "success", "succeeded"}
 
 
 def session_cap_seconds(budgets, labels):
@@ -279,6 +296,12 @@ def load_multi_protocol(path):
         )
     if any(not re.fullmatch(r"[A-Z]", label) for label in labels):
         raise ValueError("Multi-arm labels must be single letters A-Z, in run order")
+    expected_labels = [chr(ord("A") + index) for index in range(len(labels))]
+    if labels != expected_labels:
+        raise ValueError(
+            "Multi-arm labels must be contiguous from A with no gaps: "
+            f"expected {expected_labels}, got {labels}"
+        )
     for label, spec in arms.items():
         if not isinstance(spec, dict) or not spec.get("source"):
             raise ValueError(f"Arm {label} needs a source directory")
@@ -302,6 +325,11 @@ def load_multi_protocol(path):
     data["repeats"] = 1
     data.setdefault("allow_identical", False)
     data.setdefault("allowed_differences", [])
+    unknown_markers = [
+        str(item) for item in data["allowed_differences"] if item not in KNOWN_ALLOWED_DIFFERENCES
+    ]
+    if unknown_markers:
+        raise ValueError("Unknown allowed_differences markers: " + ", ".join(unknown_markers))
     data.setdefault("shuffle_seed", None)
     data["pair_start_pad_seconds"] = _positive_int(
         int(data.get("pair_start_pad_seconds", 60)), "pair_start_pad_seconds"
@@ -322,6 +350,374 @@ def load_multi_protocol(path):
     return data
 
 
+def write_markdown_atomic(path, text):
+    """Replace a markdown report via a temp file in the same directory."""
+    import os
+    from pathlib import Path
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary.replace(path)
+
+
+def _as_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        for key in ("text", "content", "raw", "output"):
+            if value.get(key) is not None:
+                return _as_text(value[key])
+        try:
+            return json.dumps(value)
+        except TypeError:
+            return str(value)
+    if isinstance(value, list):
+        return "\n".join(_as_text(item) for item in value)
+    return str(value)
+
+
+def _edit_status_ok(text):
+    stripped = text.strip()
+    if not stripped.startswith("{"):
+        return False
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    candidates = [payload]
+    raw = payload.get("raw")
+    if isinstance(raw, dict):
+        candidates.append(raw)
+    for item in candidates:
+        status = item.get("status")
+        if isinstance(status, str) and status.strip().lower() in _OK_EDIT_STATUS:
+            return True
+    return False
+
+
+def _is_failed_skill_text(name, output):
+    if name != "run_skill_script":
+        return False
+    lowered = output.lower()
+    return "invalid_arguments" in lowered or "usage:" in lowered or "corrected example" in lowered
+
+
+def _is_failed_edit_text(name, output):
+    if name != "edit_file":
+        return False
+    if _edit_status_ok(output):
+        return False
+    lowered = output.lower()
+    if (
+        "mandatory input parameters" in lowered
+        or "missing-parameter" in lowered
+        or "missing parameter" in lowered
+    ):
+        return True
+    if "failed to replace: old_string not found" in lowered:
+        return True
+    return re.search(r"Target string occurs \d+ times", output) is not None
+
+
+def _atif_observation_texts(observation):
+    if isinstance(observation, list):
+        texts = []
+        for item in observation:
+            texts.extend(_atif_observation_texts(item))
+        return texts
+    if not isinstance(observation, dict):
+        return []
+    results = observation.get("results")
+    if isinstance(results, list) and results:
+        texts = []
+        for result in results:
+            if isinstance(result, str):
+                texts.append(result)
+            elif isinstance(result, dict):
+                texts.append(_as_text(result.get("content")))
+            else:
+                texts.append(_as_text(result))
+        return texts
+    content = observation.get("content")
+    if content is None:
+        return []
+    if isinstance(content, list):
+        return [_as_text(item) for item in content if _as_text(item)]
+    return [_as_text(content)]
+
+
+def trace_tool_io(payload):
+    """Tool name and output pairs. None when the trace shape is unrecognized."""
+    if not isinstance(payload, dict):
+        return None
+    version = payload.get("schema_version")
+    if isinstance(version, str) and version.startswith("ATIF"):
+        return _atif_tool_io(payload)
+    declared = payload.get("schema") or payload.get("trace_schema")
+    events = payload.get("events")
+    if events is None and isinstance(payload.get("trace"), list):
+        events = payload["trace"]
+        declared = declared or "adk-like"
+    if not isinstance(events, list):
+        return None
+    normalized = bool(events) and all(
+        isinstance(event, dict) and "tool" in event and ("agent" in event or "author" in event)
+        for event in events
+    )
+    if declared == "gemma-lab/trace/v1" or normalized:
+        found = []
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            output = event.get("output")
+            if output is None:
+                output = event.get("response")
+            found.append((str(event.get("tool") or ""), _as_text(output)))
+        return found
+    if events and all(_looks_adk_event(event) for event in events if isinstance(event, dict)):
+        return _adk_tool_io(events)
+    return None
+
+
+def _looks_adk_event(event):
+    if not isinstance(event, dict):
+        return False
+    content = event.get("content")
+    return isinstance(content, dict) and isinstance(content.get("parts"), list)
+
+
+def _adk_tool_io(events):
+    found = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        parts = (event.get("content") or {}).get("parts") or []
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            call = part.get("function_call") or part.get("functionCall")
+            response = part.get("function_response") or part.get("functionResponse")
+            if isinstance(response, dict):
+                output = response.get("response")
+                if output is None:
+                    output = response.get("output")
+                found.append((str(response.get("name") or ""), _as_text(output)))
+            elif isinstance(call, dict) and call.get("name") and call.get("output") is not None:
+                found.append((str(call.get("name") or ""), _as_text(call.get("output"))))
+    return found
+
+
+def _atif_tool_io(payload):
+    steps = payload.get("steps")
+    if not isinstance(steps, list):
+        return None
+    found = []
+    pending = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        calls = step.get("tool_calls")
+        named = []
+        if isinstance(calls, list):
+            for call in calls:
+                if isinstance(call, dict) and call.get("function_name"):
+                    named.append(str(call["function_name"]))
+        observations = _atif_observation_texts(step.get("observation"))
+        if named and len(observations) == len(named):
+            found.extend(zip(named, observations, strict=True))
+            continue
+        if named and not observations:
+            pending.extend(named)
+            continue
+        if not named and observations and pending and len(observations) == len(pending):
+            found.extend(zip(pending, observations, strict=True))
+            pending = []
+            continue
+        if not named and not observations:
+            continue
+        return None
+    if pending:
+        return None
+    return found
+
+
+def count_failed_tool_calls(payload):
+    """Failed skill and edit counts, or None when the trace is unrecognized."""
+    events = trace_tool_io(payload)
+    if events is None:
+        return None
+    skill = 0
+    edit = 0
+    for name, output in events:
+        if _is_failed_skill_text(name, output):
+            skill += 1
+        if _is_failed_edit_text(name, output):
+            edit += 1
+    return {"failed_skill_calls": skill, "failed_edit_calls": edit}
+
+
+def _scan_arm_failed_calls(output_dir, labels):
+    root = Path(output_dir) / "results"
+    if not root.is_dir():
+        return None
+    totals = {
+        label: {"failed_skill_calls": 0, "failed_edit_calls": 0, "traces": 0} for label in labels
+    }
+    found = False
+    for label in labels:
+        arm = root / label
+        if not arm.is_dir():
+            continue
+        for path in sorted(arm.glob("*/traces/*.json")):
+            if path.name.endswith(".raw.json"):
+                continue
+            found = True
+            try:
+                payload = json.loads(path.read_text())
+            except (OSError, json.JSONDecodeError):
+                continue
+            counts = count_failed_tool_calls(payload)
+            if counts is None:
+                continue
+            totals[label]["traces"] += 1
+            totals[label]["failed_skill_calls"] += counts["failed_skill_calls"]
+            totals[label]["failed_edit_calls"] += counts["failed_edit_calls"]
+    if not found:
+        return None
+    return totals
+
+
+def arm_failed_call_counts(output_dir, labels):
+    """Per-arm failed skill and edit totals. None when no traces are present.
+
+    The local report uses ``collect_tool_failures``. The notebook copy cannot
+    import that module, so it scans trace JSON with the same string markers.
+    """
+    labels = [str(label) for label in labels]
+    try:
+        from gemma_lab.tool_failures import collect_tool_failures
+    except Exception:
+        try:
+            return _scan_arm_failed_calls(output_dir, labels)
+        except Exception:
+            return None
+    try:
+        rows = collect_tool_failures(output_dir)
+    except Exception:
+        try:
+            return _scan_arm_failed_calls(output_dir, labels)
+        except Exception:
+            return None
+    if not rows:
+        return None
+    totals = {label: {"failed_skill_calls": 0, "failed_edit_calls": 0} for label in labels}
+    seen = False
+    for row in rows:
+        arm = row.get("arm")
+        if arm not in totals:
+            continue
+        seen = True
+        totals[arm]["failed_skill_calls"] += int(row.get("failed_skill_calls") or 0)
+        totals[arm]["failed_edit_calls"] += int(row.get("failed_edit_calls") or 0)
+    if not seen:
+        return None
+    return totals
+
+
+def _percentile(values, pct):
+    xs = sorted(float(value) for value in values)
+    if not xs:
+        return None
+    if len(xs) == 1:
+        return xs[0]
+    rank = (len(xs) - 1) * (pct / 100.0)
+    low = int(rank)
+    high = min(low + 1, len(xs) - 1)
+    weight = rank - low
+    return xs[low] * (1 - weight) + xs[high] * weight
+
+
+def _call_total(rows, key):
+    values = []
+    for row in rows:
+        value = row.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        values.append(float(value))
+    if not values:
+        return None
+    if all(value.is_integer() for value in values):
+        return int(sum(values))
+    return sum(values)
+
+
+def _hygiene_gate(report):
+    if not isinstance(report, dict):
+        return None
+    gate = report.get("gate")
+    if gate not in _HYGIENE_RANK:
+        candidate = report.get("candidate")
+        gate = candidate.get("gate") if isinstance(candidate, dict) else None
+    if gate not in _HYGIENE_RANK:
+        return None
+    return gate
+
+
+def _hygiene_for_arm(hygiene, label):
+    if not isinstance(hygiene, dict):
+        return "not_computed"
+    best = None
+    for key, report in hygiene.items():
+        parts = str(key).split("/")
+        if len(parts) < 2 or parts[0] != "results" or parts[1] != label:
+            continue
+        gate = _hygiene_gate(report)
+        if gate is None:
+            continue
+        if best is None or _HYGIENE_RANK[gate] > _HYGIENE_RANK[best]:
+            best = gate
+    return best or "not_computed"
+
+
+def _slot_count_note(entries, labels):
+    if not entries:
+        return None
+    width = len(labels)
+    counts = {label: [0] * width for label in labels}
+    task_ids = []
+    for entry in entries:
+        task_id = entry.get("task_id")
+        if task_id not in task_ids:
+            task_ids.append(task_id)
+        order = entry.get("order") or []
+        for slot, label in enumerate(order):
+            if label in counts and slot < width:
+                counts[label][slot] += 1
+    rendered = "; ".join(
+        f"{label} {','.join(str(count) for count in counts[label])}" for label in labels
+    )
+    n_tasks = len(task_ids) or len(entries)
+    return f"The {n_tasks}-task rotation confounds position with task (slot counts {rendered})."
+
+
+def _failure_count(tool_failures, label, key):
+    if not isinstance(tool_failures, dict):
+        return "not_available"
+    bucket = tool_failures.get(label)
+    if not isinstance(bucket, dict) or key not in bucket:
+        return "not_available"
+    return bucket[key]
+
+
 def multi_smoke_report(
     rows,
     *,
@@ -334,10 +730,13 @@ def multi_smoke_report(
     session_cap_seconds,
     hygiene="not_computed",
     notes=None,
+    schedule_entries=None,
+    tool_failures=None,
 ):
     """N-arm smoke report. One repeat cannot name a winner.
 
-    Helpers are nested so the notebook can embed this function alone.
+    Helpers used here are module-level so the notebook can embed them.
+    ``tool_failures`` is a per-arm mapping, or None when traces are absent.
     """
 
     def task_key(row):
@@ -368,8 +767,23 @@ def multi_smoke_report(
             "name": names[label],
             "rows": len(arm_rows),
             "resolved": sum(bool(row.get("resolved")) for row in arm_rows),
+            "empty_patches": sum(row.get("patch_chars") == 0 for row in arm_rows),
+            "infra_errors": sum(
+                row.get("failure_class") == "infrastructure_or_harness" for row in arm_rows
+            ),
+            "hit_cap_wall": sum(bool((row.get("hit_cap") or {}).get("wall")) for row in arm_rows),
+            "hit_cap_marker": sum(
+                bool((row.get("hit_cap") or {}).get("marker")) for row in arm_rows
+            ),
             "mean_wall_seconds": (sum(walls) / len(walls)) if walls else None,
+            "wall_p50": _percentile(walls, 50) if walls else None,
+            "wall_p90": _percentile(walls, 90) if walls else None,
             "max_wall_seconds": max(walls) if walls else None,
+            "tool_calls": _call_total(arm_rows, "tool_calls"),
+            "llm_calls": _call_total(arm_rows, "llm_calls"),
+            "failed_skill_calls": _failure_count(tool_failures, label, "failed_skill_calls"),
+            "failed_edit_calls": _failure_count(tool_failures, label, "failed_edit_calls"),
+            "hygiene": _hygiene_for_arm(hygiene, label),
             "cap_seconds": minutes * 60.0,
             "max_tool_calls": int(budgets[label]["max_tool_calls"]),
             "max_turns": int(budgets[label]["max_turns"]),
@@ -408,6 +822,7 @@ def multi_smoke_report(
                     "winner": None,
                 }
             )
+    position_confound = _slot_count_note(schedule_entries, labels)
     report = {
         "purpose": "smoke",
         "promotion": "not_eligible",
@@ -422,6 +837,20 @@ def multi_smoke_report(
         "arms": arms,
         "comparisons": comparisons,
         "hygiene": hygiene if hygiene is not None else "not_computed",
+        "authoritative_file": "multi_report.json",
+        "pair_report_status": (
+            "multi_report.json is the only authoritative file. "
+            "A lone pair_report.json or pair_report.md is invalid. "
+            "A pair_report titled Paired evaluation report, with only arms A and B, "
+            "wins and losses, and no smoke marker, is not a smoke result. "
+            "execute_session writes pair_report.* as a copy of this smoke report. "
+            "That copy is still not authoritative until multi_report.json exists."
+        ),
+        "infra_abort": (
+            "Two infrastructure rows in one arm abort the whole session (aborted:infra). "
+            "Other arms can be left unfinished. That imbalance is accepted for this smoke."
+        ),
+        "position_confound": position_confound,
         "gates": {
             "promotion": "not_eligible",
             "runtime_gates": "not_applicable",
@@ -431,17 +860,27 @@ def multi_smoke_report(
             ),
         },
         "embedded_ab_report": (
-            "execute_session writes a two-arm report that only totals A and B. "
-            "This smoke report replaces it."
+            "build_report and render_report_md are rebound to this smoke report "
+            "before execute_session. The session writes that report to pair_report.*. "
+            "multi_report.json, written after the session returns, is the only "
+            "authoritative file. A lone pair_report.* is invalid."
         ),
         "cap_note": (
             "The session cap is the max of the arm time caps. Each evaluator "
-            "still uses that arm's own max_time_minutes, max_tool_calls, and max_turns."
+            "still uses that arm's own max_time_minutes, max_tool_calls, and max_turns. "
+            "pair_results.jsonl hit_cap.wall and the wall > cap + 120 abort use each "
+            "arm's own cap, not the session cap."
         ),
     }
     if isinstance(notes, str) and notes.strip():
         report["notes"] = notes.strip()
     return report
+
+
+def _wall_text(value):
+    if value is None:
+        return "n/a"
+    return f"{float(value):.1f}s"
 
 
 def render_multi_smoke_md(report):
@@ -454,6 +893,10 @@ def render_multi_smoke_md(report):
         "One repeat cannot name a winner.",
         "rule_winner: null",
         "Promotion: not_eligible",
+        "",
+        "Authoritative file: `multi_report.json`.",
+        "A lone pair_report.json or pair_report.md is invalid.",
+        report.get("pair_report_status") or "",
         "",
     ]
     notes = report.get("notes")
@@ -470,16 +913,33 @@ def render_multi_smoke_md(report):
         f"Session cap seconds: {report.get('session_cap_seconds')} (max of the arm time caps)."
     )
     lines.append(report.get("cap_note") or "")
+    confound = report.get("position_confound")
+    if isinstance(confound, str) and confound.strip():
+        lines.append(confound.strip())
+    lines.append(report.get("infra_abort") or "")
     lines.append("")
     lines.append("## Arms")
     for label, stats in (report.get("arms") or {}).items():
-        mean = stats.get("mean_wall_seconds")
-        mean_text = "n/a" if mean is None else f"{mean:.1f}s"
         lines.append(
             f"- {label} {stats.get('name')}: resolved {stats.get('resolved')} / "
-            f"{stats.get('rows')}, cap {stats.get('cap_seconds')}s, "
-            f"calls {stats.get('max_tool_calls')}, turns {stats.get('max_turns')}, "
-            f"mean wall {mean_text}"
+            f"{stats.get('rows')}, empty patches {stats.get('empty_patches')}, "
+            f"infra {stats.get('infra_errors')}"
+        )
+        lines.append(
+            f"  cap {stats.get('cap_seconds')}s, "
+            f"hit_cap wall {stats.get('hit_cap_wall')}, "
+            f"marker {stats.get('hit_cap_marker')}, "
+            f"calls {stats.get('tool_calls')}, llm {stats.get('llm_calls')}, "
+            f"failed skill {stats.get('failed_skill_calls')}, "
+            f"failed edit {stats.get('failed_edit_calls')}, "
+            f"hygiene {stats.get('hygiene')}"
+        )
+        lines.append(
+            "  wall mean "
+            f"{_wall_text(stats.get('mean_wall_seconds'))}, "
+            f"p50 {_wall_text(stats.get('wall_p50'))}, "
+            f"p90 {_wall_text(stats.get('wall_p90'))}, "
+            f"max {_wall_text(stats.get('max_wall_seconds'))}"
         )
     lines.append("")
     lines.append("## Comparisons")
@@ -507,6 +967,133 @@ def render_multi_smoke_md(report):
     hygiene_text = hygiene if isinstance(hygiene, str) else "recorded"
     lines.append(f"Hygiene: {hygiene_text}")
     return "\n".join(lines) + "\n"
+
+
+def install_smoke_report_bindings():
+    """Point the runtime's report writers at the smoke report.
+
+    ``execute_session`` looks these names up when it runs. Calling this first
+    makes ``pair_report.*`` the smoke report even if the cell is killed before
+    ``multi_report.json`` is written. That file is still the only authoritative
+    report, and a lone ``pair_report.*`` is invalid.
+    """
+    import pathlib
+
+    # Notebook globals. The runtime cell and this cell share one namespace.
+    scope = globals()
+    labels = tuple(scope["LABELS"])
+    budgets = scope["ARM_BUDGETS"]
+    names = scope["ARM_NAMES"]
+    notes = scope["PROTOCOL_NOTES"]
+    task_schedule = scope["TASK_SCHEDULE_SHA"]
+    schedule_entries = scope["MULTI_SCHEDULE"]
+    working_dir = scope["WORKING_DIR"]
+    original_append = scope["append_jsonl"]
+    original_abort = scope["abort_code"]
+    arm_caps = {label: float(budgets[label]["max_time_minutes"]) * 60.0 for label in labels}
+    original_write_text = pathlib.Path.write_text
+
+    def _append(path, row):
+        if (
+            isinstance(row, dict)
+            and row.get("arm") in arm_caps
+            and isinstance(row.get("hit_cap"), dict)
+            and row.get("wall_seconds") is not None
+        ):
+            cap = arm_caps[row["arm"]]
+            hit = dict(row["hit_cap"])
+            hit["wall"] = float(row["wall_seconds"]) >= float(cap)
+            hit["cap_seconds"] = float(cap)
+            row["hit_cap"] = hit
+        return original_append(path, row)
+
+    def _abort(arm_rows, cap_seconds, arm):
+        return original_abort(arm_rows, arm_caps.get(arm, cap_seconds), arm)
+
+    def _build_report(
+        rows,
+        *,
+        projection,
+        exclude_import_origin=True,
+        hygiene=None,
+        protocol_sha256=None,
+        schedule_sha256=None,
+    ):
+        try:
+            failures = arm_failed_call_counts(working_dir, labels)
+        except Exception:
+            failures = None
+        report = multi_smoke_report(
+            rows,
+            labels=labels,
+            names=names,
+            budgets=budgets,
+            protocol_sha256=protocol_sha256,
+            schedule_sha256=schedule_sha256,
+            task_schedule_sha256=task_schedule,
+            session_cap_seconds=max(arm_caps.values()),
+            hygiene=hygiene if hygiene is not None else "not_computed",
+            notes=notes,
+            schedule_entries=schedule_entries,
+            tool_failures=failures,
+        )
+        report["session_projection"] = projection
+        report["exclude_import_origin_risk"] = exclude_import_origin
+        return report
+
+    def _render(report):
+        return render_multi_smoke_md(report)
+
+    def _write_text(self, data, encoding=None, errors=None, newline=None):
+        if self.name in {"pair_report.md", "multi_report.md"}:
+            write_markdown_atomic(self, data)
+            return len(data) if isinstance(data, str) else None
+        return original_write_text(self, data, encoding=encoding, errors=errors, newline=newline)
+
+    scope["append_jsonl"] = _append
+    scope["abort_code"] = _abort
+    scope["build_report"] = _build_report
+    scope["render_report_md"] = _render
+    if not getattr(pathlib.Path.write_text, "_smoke_atomic_md", False):
+        _write_text._smoke_atomic_md = True
+        pathlib.Path.write_text = _write_text
+
+
+SMOKE_BINDING_FUNCTIONS = (
+    write_markdown_atomic,
+    _as_text,
+    _edit_status_ok,
+    _is_failed_skill_text,
+    _is_failed_edit_text,
+    _atif_observation_texts,
+    trace_tool_io,
+    _looks_adk_event,
+    _adk_tool_io,
+    _atif_tool_io,
+    count_failed_tool_calls,
+    _scan_arm_failed_calls,
+    arm_failed_call_counts,
+    _percentile,
+    _call_total,
+    _hygiene_gate,
+    _hygiene_for_arm,
+    _slot_count_note,
+    _failure_count,
+    multi_smoke_report,
+    _wall_text,
+    render_multi_smoke_md,
+    install_smoke_report_bindings,
+)
+
+
+def smoke_binding_sources():
+    """Notebook source for the smoke report and the pre-session rebind."""
+    header = (
+        "_OK_EDIT_STATUS = {'ok', 'success', 'succeeded'}\n"
+        "_HYGIENE_RANK = {'pass': 0, 'warn': 1, 'block': 2}\n"
+    )
+    body = "\n".join(inspect.getsource(fn).rstrip() for fn in SMOKE_BINDING_FUNCTIONS)
+    return header + body + "\n"
 
 
 def _arm_payload_setup(label, archive, bundle_dataset):
@@ -738,8 +1325,6 @@ def _multi_eval_cell(source, budgets, labels):
     cap = session_cap_seconds(budgets, labels)
     indented = "\n".join(("    " + line if line.strip() else line) for line in config.splitlines())
     safe_config = indented.replace("{", "{{").replace("}", "}}")
-    report_source = inspect.getsource(multi_smoke_report).rstrip() + "\n"
-    render_source = inspect.getsource(render_multi_smoke_md).rstrip() + "\n"
     driver = f"""def make_evaluator(label, repeat):
     arm_dir = ARM_DIRS[label]
     results_dir = WORKING_DIR / 'results' / label / f'r{{repeat}}'
@@ -824,33 +1409,32 @@ SESSION_RESULT = execute_session(
     initial_stopped=[],
 )
 """
-    tail = f"""
-_SMOKE_REPORT = multi_smoke_report(
-    SESSION_RESULT['rows'],
-    labels=LABELS,
-    names=ARM_NAMES,
-    budgets=ARM_BUDGETS,
-    protocol_sha256=PROTOCOL_SHA,
-    schedule_sha256=SCHEDULE_SHA,
-    task_schedule_sha256=TASK_SCHEDULE_SHA,
-    session_cap_seconds={cap!r},
-    hygiene=(SESSION_RESULT.get('report') or {{}}).get('hygiene', 'not_computed'),
-)
-_SMOKE_REPORT['notes'] = PROTOCOL_NOTES
+    tail = """
+_SMOKE_REPORT = SESSION_RESULT['report']
 assert _SMOKE_REPORT['winner'] is None
 assert _SMOKE_REPORT['promotion'] == 'not_eligible'
 assert _SMOKE_REPORT['purpose'] == 'smoke'
 assert _SMOKE_REPORT['n_arms'] == len(LABELS)
+assert _SMOKE_REPORT.get('authoritative_file') == 'multi_report.json'
 _SMOKE_MD = render_multi_smoke_md(_SMOKE_REPORT)
 write_json_fsync(WORKING_DIR / 'multi_report.json', _SMOKE_REPORT)
-write_json_fsync(WORKING_DIR / 'pair_report.json', _SMOKE_REPORT)
-(WORKING_DIR / 'multi_report.md').write_text(_SMOKE_MD)
-(WORKING_DIR / 'pair_report.md').write_text(_SMOKE_MD)
+write_markdown_atomic(WORKING_DIR / 'multi_report.md', _SMOKE_MD)
 print('smoke, not promotion eligible')
 print('winner', _SMOKE_REPORT['winner'])
+print('authoritative file', _SMOKE_REPORT['authoritative_file'])
 predictions = []
 """
-    driver = driver + report_source + render_source + tail
+    needle = "SESSION_RESULT = execute_session("
+    if driver.count(needle) != 1:
+        raise ValueError("Multi-arm eval cell is missing execute_session")
+    # Rebind before the session so a kill during the report tail cannot leave
+    # the two-arm A/B report as pair_report.*.
+    driver = driver.replace(
+        needle,
+        smoke_binding_sources() + "install_smoke_report_bindings()\n" + needle,
+        1,
+    )
+    driver = driver + tail
     result = source[:start] + driver + source[frame:]
     if "AGENT_DIR" in result:
         raise ValueError(
@@ -871,11 +1455,20 @@ def _markdown_cell(n_arms):
         "\n",
         "The embedded runtime is the two-arm runtime, unchanged. `build_schedule` ",
         "is not used. The notebook embeds an N-arm schedule and `execute_session` ",
-        "walks every label in `order`. After the session, the notebook replaces ",
-        "`pair_report.json` because the embedded report only totals arms A and B.\n",
+        "walks every label in `order`. Before `execute_session`, the cell rebinds ",
+        "`build_report` and `render_report_md`, so the session writes the smoke ",
+        "report into `pair_report.*`. `multi_report.json` is the only authoritative ",
+        "file. A lone `pair_report.*` is invalid, including a two-arm report titled ",
+        "Paired evaluation report.\n",
+        "\n",
+        "The five-task rotation confounds position with task. Slot counts are ",
+        "A 2,1,1,1; B 1,2,1,1; C 1,1,2,1; D 1,1,1,2.\n",
         "\n",
         "The session `cap_seconds` is the max of the arm time caps. Each evaluator ",
-        "uses that arm's own `eval_config.yaml` limits.\n",
+        "uses that arm's own `eval_config.yaml` limits. `hit_cap.wall` and the ",
+        "wall > cap + 120 abort also use each arm's own cap. Two infrastructure ",
+        "rows in one arm still abort the whole session. Other arms may be unfinished. ",
+        "That imbalance is accepted for this smoke.\n",
         "\n",
         "Restart refuses to signal process groups None, 0, -1, 1, and its own group. ",
         "Each nvidia-smi poll is capped at 10 s and by the time left in the ",
@@ -1006,11 +1599,15 @@ def generate_multi(
     )
     codes[3] = _multi_server_cell(codes[3])
     codes[4] = _multi_eval_cell(codes[4], budgets, labels)
-    # Protocol notes are a notebook constant, set next to the report call.
+    # Protocol notes are set immediately before the smoke rebind, which itself
+    # runs before execute_session.
     notes_line = f"PROTOCOL_NOTES = {protocol['notes'].strip()!r}\n"
-    marker = "_SMOKE_REPORT['notes'] = PROTOCOL_NOTES\n"
-    if marker not in codes[4]:
-        raise ValueError("Multi-arm eval cell is missing the protocol notes assignment")
+    marker = "install_smoke_report_bindings()\n"
+    if codes[4].count(marker) != 1:
+        raise ValueError("Multi-arm eval cell is missing the smoke report rebind")
+    session_at = codes[4].index("SESSION_RESULT = execute_session(")
+    if codes[4].index(marker) > session_at:
+        raise ValueError("Smoke report rebind must run before execute_session")
     codes[4] = codes[4].replace(marker, notes_line + marker, 1)
     codes[5] = (
         "import hashlib\n"
@@ -1118,6 +1715,33 @@ def _load_pair_rows(run_dir):
     return rows
 
 
+def _hygiene_from_run_dirs(run_dirs):
+    found = {}
+    for run_dir in run_dirs:
+        root = Path(run_dir)
+        results = root / "results"
+        if not results.is_dir():
+            continue
+        for path in sorted(results.glob("*/*/hygiene.json")):
+            found[path.relative_to(root).as_posix()] = json.loads(path.read_text())
+    return found or "not_computed"
+
+
+def _tool_failures_from_run_dirs(run_dirs, labels):
+    merged = None
+    for run_dir in run_dirs:
+        counts = arm_failed_call_counts(run_dir, labels)
+        if not isinstance(counts, dict):
+            continue
+        if merged is None:
+            merged = {label: {"failed_skill_calls": 0, "failed_edit_calls": 0} for label in labels}
+        for label in labels:
+            bucket = counts.get(label) or {}
+            merged[label]["failed_skill_calls"] += int(bucket.get("failed_skill_calls") or 0)
+            merged[label]["failed_edit_calls"] += int(bucket.get("failed_edit_calls") or 0)
+    return merged
+
+
 def multi_report_from_runs(run_dirs, protocol_path, output, allow_protocol_mismatch=False):
     """Regenerate the smoke report. Refuses a protocol_sha256 mismatch."""
     protocol = load_multi_protocol(protocol_path)
@@ -1168,13 +1792,16 @@ def multi_report_from_runs(run_dirs, protocol_path, output, allow_protocol_misma
         task_schedule_sha256=task_schedule["sha256"],
         session_cap_seconds=session_cap_seconds(budgets, labels),
         notes=protocol.get("notes"),
+        schedule_entries=schedule["entries"],
+        hygiene=_hygiene_from_run_dirs(run_dirs),
+        tool_failures=_tool_failures_from_run_dirs(run_dirs, labels),
     )
     if mismatch_notes:
         report["protocol_mismatch_warning"] = mismatch_notes
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     write_json(output / "multi_report.json", report)
-    (output / "multi_report.md").write_text(render_multi_smoke_md(report))
+    write_markdown_atomic(output / "multi_report.md", render_multi_smoke_md(report))
     return {
         "output": str(output),
         "promotion": report["promotion"],
