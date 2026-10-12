@@ -1,0 +1,96 @@
+# Combined smoke: single-v8, single-v8-check, structured-v7, and single-v7.
+# One notebook, one model load, one repeat. Not promotion eligible.
+# One repeat cannot name a winner.
+#
+# Task order and repeats match single-v8-vs-single-v8-check-smoke.yaml.
+# The two-arm schedule hash of that list is
+# 5672ef15323e1d59847cc7cde3f1b6cb1912346d7456b13cb716902437b3e9fd.
+# This file's schedule hash differs because arm order is part of the hash
+# and each entry lists four labels.
+#
+# Arms keep their own eval_config.yaml. single-v7 stays at 270 s / 48 calls /
+# 64 turns. Changing that file would change its archive hash. A separate
+# agents/single-v7-lenient directory was not added.
+#
+# matched_pair is false because the arm budgets and sampling settings differ.
+# The pairwise check still uses the markers below. single-v8 and
+# single-v8-check match on budgets and sampling, so that pair is still checked
+# as a matched pair. The other pairs need eval_config.yaml, sampling.yaml, and
+# thinking.yaml. structured-v7's repair role thinks at budget 256. single-v7
+# samples at temperature 0.5. The others sample at 1.0 with thinking off,
+# except structured-v7 repair.
+#
+# sub_agents/* is a known marker and is not listed. No arm has a sub-agent
+# tree. Dropping it does not change the matched single-v8 vs single-v8-check
+# file check. Unknown markers are rejected.
+#
+# Arm labels are contiguous from A. expected_sha256 is the frozen archive.
+#
+# session_budget_seconds is 14400 (4 h). pair_fits charges every arm the
+# session cap, which is the max arm cap (360 s). With load 900 s and the
+# 300 s tasks.jsonl wait already on the session clock, the last task needs
+# 8640 s before it will start in that worst case. 14400 is under the 12 h
+# competition session cap (43200 s).
+purpose: smoke
+multi_arm: true
+arms:
+  A:
+    source: agents/single-v8
+    name: single-v8
+    expected_sha256: 6f44de6401910907b6c65f89549727d2c4492a54c3ed13743033623d81dfdc22
+  B:
+    source: agents/single-v8-check
+    name: single-v8-check
+    expected_sha256: 64dc727d78c4189c1db1184e74129290574c7b97816dd91f91d2baa7defe0fb0
+  C:
+    source: agents/structured-v7
+    name: structured-v7
+    expected_sha256: a3a08b179fee800ee0575af2a55ad14f47c42c369bf32fd4d52227a9da1109df
+  D:
+    source: agents/single-v7
+    name: single-v7
+    expected_sha256: f62c8c0b92bc5bd1fb1015f20e7cbd7a5599d5518d2d59097bf2b40d9f3412b0
+notes: "Smoke, not promotion eligible. One repeat cannot name a winner. Budgets differ: single-v8 and single-v8-check are 330 s / 150 calls / 200 turns, structured-v7 is 360 s / 150 calls / 200 turns, and single-v7 stays at 270 s / 48 calls / 64 turns. Sampling and thinking differ: structured-v7 repair uses thinking budget 256, and single-v7 uses temperature 0.5. eval_config.yaml, sampling.yaml, and thinking.yaml are the markers. The session cap is the max of the arm time caps."
+matched_pair: false
+allow_identical: false
+allowed_differences:
+  - agent.yaml
+  - skills/*
+  - prompts/*
+  - eval_config.yaml
+  - sampling.yaml
+  - thinking.yaml
+cohort:
+  path: configs/cohorts/dev-13-environment-screened.json
+  task_file_sha256: e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6
+task_ids:
+  - rich_4070
+  - rich_3934
+  - fastapi_11194
+  - rich_3938
+  - fastapi_14262
+repeats: 1
+order_rule: per_task_parity_v1
+shuffle_seed: null
+session_budget_seconds: 14400
+pair_start_pad_seconds: 60
+abort_policy: round2_v1
+early_stop: null
+budget_gate:
+  block:
+    - name: round2_load_plus_129_mean
+      formula: L + 129 * mean_wall
+      threshold_seconds: 38880
+    - name: coordinator_mean_times_120
+      formula: mean_wall * 120
+      threshold_seconds: 39600
+  warn:
+    - name: worst_case_12h
+      formula: L + n * (cap + p90_delta)
+      threshold_seconds: 43200
+      n_values: [120, 129]
+  L_default: 900
+  coordinator_hours: 11
+timing_tier: 2
+pins_mode: record
+exclude_import_origin_risk: true
