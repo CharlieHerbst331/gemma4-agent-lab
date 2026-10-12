@@ -78,16 +78,19 @@ def _edit_result_status(text: str) -> str | None:
     ``{"raw": "ok"}``. A successful harness edit adds ``"status": "ok"``.
     """
     stripped = text.strip()
-    if stripped.startswith("{"):
-        try:
-            payload = json.loads(stripped)
-        except json.JSONDecodeError:
-            payload = None
-        if isinstance(payload, dict):
-            found = _status_in_mapping(payload)
-            if found:
-                return found
-    match = _STATUS_FIELD.search(text)
+    # Only a result that is itself JSON. A plain-text failure that quotes
+    # `"status": "ok"` later in the text is still an error.
+    if not stripped.startswith("{"):
+        return None
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict):
+        found = _status_in_mapping(payload)
+        if found:
+            return found
+    match = _STATUS_FIELD.search(stripped)
     if match:
         return match.group(1).lower()
     return None

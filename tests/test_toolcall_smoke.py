@@ -398,6 +398,20 @@ def test_edit_failure_kinds_count_not_found_and_ambiguous_loops(tmp_path):
     assert quoted["failed_edit_calls"] == 1
     assert quoted["failed_edit_not_found"] == 1
     assert quoted["failed_edit_ambiguous"] == 0
+    echoed = summarize_trace(
+        atif(
+            "repair",
+            [
+                (
+                    "edit_file",
+                    found_args,
+                    'Failed to replace: old_string not found\nnote {"status": "ok"}',
+                )
+            ],
+            content=True,
+        )
+    )
+    assert echoed["failed_edit_not_found"] == 1
 
     recovered = rows[("A", "not_found_then_success")]
     assert recovered["failed_edit_calls"] == 2

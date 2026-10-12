@@ -25,7 +25,9 @@ counting rule did not stop the repeats.
 tool result is an error. Official ATIF fixtures store that result as JSON
 (`{"raw": "ok"}` in the writer fixtures). A harness result with `"status":
 "ok"` or `"status": "success"` is skipped, so a successful edit whose diff
-quotes a failure sentence is not counted. The report fields are
+quotes a failure sentence is not counted. That status is read only when the
+tool result starts with `{`. A plain-text failure that quotes `"status": "ok"`
+is still counted. The report fields are
 `failed_edit_calls` (the total), `failed_edit_missing_parameter`,
 `failed_edit_not_found`, and `failed_edit_ambiguous`.
 

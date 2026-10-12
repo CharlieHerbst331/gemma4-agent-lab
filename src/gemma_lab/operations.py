@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 import warnings
 import zipfile
 from datetime import UTC, datetime
@@ -469,30 +470,35 @@ def _failure_text(exc: BaseException) -> str:
     return _scrub_secrets("\n".join(part for part in parts if part)) or "submit failed"
 
 
-_HTTP_FAILURE = re.compile(
-    r"(?i)(?:"
-    r"\bHTTP(?:/\d+(?:\.\d+)?)?\s+[45]\d{2}\b"
-    r"|"
-    r"\b[45]\d{2}\s+(?:Client|Server)\s+Error\b"
-    r"|"
-    r"\b[45]\d{2}\s+(?:Bad Request|Unauthorized|Forbidden|Not Found|"
-    r"Too Many Requests|Internal Server Error|Bad Gateway|Service Unavailable|"
-    r"Gateway Timeout)\b"
-    r"|"
-    r"\b(?:status(?:[\s_-]*code)?|response code|error)\s*[:=]?\s*[45]\d{2}\b"
-    r")"
+_HTTP_CODE = r"[45]\d{2}"
+# Anchored to an HTTP status. Prose such as "error: 500 bytes" or "status 500 files" does not match.
+_HTTP_STATUS_PATTERNS = (
+    re.compile(rf"\b({_HTTP_CODE})\s+(?:Client|Server)\s+Error\b"),
+    re.compile(rf"\bHTTP/1\.[0-9]\s+({_HTTP_CODE})\b"),
+    re.compile(rf"\bstatus[\s_-]*code\s*[:=]\s*({_HTTP_CODE})\b"),
+    re.compile(rf"""["']code["']\s*:\s*({_HTTP_CODE})\b"""),
+    re.compile(rf"\(({_HTTP_CODE})\)\s*Reason\s*:"),
+    re.compile(rf"\b({_HTTP_CODE})\s*[-:]\s*[A-Z][a-z]+"),
+    re.compile(rf"\b({_HTTP_CODE})(?!\s*(?:bytes|files|ms|mb|MB|s|retries)\b)\s+[A-Z][a-z]+"),
 )
+_CLIENT_REASON = re.compile(
+    r"\b(Bad Request|Payload Too Large|Unprocessable Entity|Too Many Requests)\b"
+)
+_CLIENT_REASON_CODE = {
+    "Bad Request": 400,
+    "Payload Too Large": 413,
+    "Unprocessable Entity": 422,
+    "Too Many Requests": 429,
+}
 # Orphan mkstemp files from a SIGKILL. A few minutes avoids deleting a live write.
 _LEDGER_TEMP_AGE_SECONDS = 180
+_LEDGER_TEMP_SUFFIX = re.compile(r"^[A-Za-z0-9_]{8}$")
 
 
 def _cli_text(exc: BaseException) -> str:
     parts = [str(exc)]
     response = getattr(exc, "response", None)
     if response is not None:
-        status = getattr(response, "status_code", None)
-        if isinstance(status, int):
-            parts.append(f"HTTP {status}")
         body = getattr(response, "text", None)
         if isinstance(body, str):
             parts.append(body)
@@ -505,22 +511,47 @@ def _cli_text(exc: BaseException) -> str:
     return "\n".join(parts)
 
 
-def _http_client_failure(exc: BaseException) -> bool:
-    """True when the CLI output or the client shows an HTTP 4xx/5xx failure."""
-    if isinstance(exc, requests.HTTPError):
-        return True
+def _response_status(exc: BaseException) -> int | None:
     response = getattr(exc, "response", None)
     status = getattr(response, "status_code", None) if response is not None else None
     if isinstance(status, int) and 400 <= status <= 599:
-        return True
-    return _HTTP_FAILURE.search(_cli_text(exc)) is not None
+        return status
+    return None
+
+
+def _statuses_in_text(text: str) -> list[int]:
+    found: list[int] = []
+    for pattern in _HTTP_STATUS_PATTERNS:
+        for match in pattern.finditer(text):
+            found.append(int(match.group(1)))
+    for match in _CLIENT_REASON.finditer(text):
+        found.append(_CLIENT_REASON_CODE[match.group(1)])
+    return found
+
+
+def _http_class(exc: BaseException) -> str | None:
+    """``4xx``, ``5xx``, or None. A response status wins over the message text."""
+    status = _response_status(exc)
+    if status is None:
+        found = _statuses_in_text(_cli_text(exc))
+        if any(500 <= code <= 599 for code in found):
+            return "5xx"
+        if any(400 <= code <= 499 for code in found):
+            return "4xx"
+        return None
+    if 500 <= status <= 599:
+        return "5xx"
+    if 400 <= status <= 499:
+        return "4xx"
+    return None
 
 
 def _definite_submit_failure(exc: BaseException) -> bool:
-    """True only for an HTTP 4xx/5xx status or that same status in CLI output.
+    """True only for an HTTP 4xx client error.
 
-    A non-zero exit whose text is a connection error, a traceback, or an
-    unknown error stays reserved: the upload may already have been received.
+    5xx stays reserved: the upload may already have been received. So do a
+    connection error, a traceback, an unknown error, and a number that is not
+    an HTTP status.
     """
     if isinstance(
         exc, (subprocess.TimeoutExpired, UnicodeDecodeError, ConnectionError, TimeoutError)
@@ -528,7 +559,7 @@ def _definite_submit_failure(exc: BaseException) -> bool:
         return False
     if isinstance(exc, requests.RequestException) and not isinstance(exc, requests.HTTPError):
         return False
-    return _http_client_failure(exc)
+    return _http_class(exc) == "4xx"
 
 
 def _ambiguous_note(exc: BaseException) -> str:
@@ -536,31 +567,66 @@ def _ambiguous_note(exc: BaseException) -> str:
     return _scrub_secrets(f"{prefix} {exc}")
 
 
-def _read_ledger(ledger: Path) -> list[dict]:
-    """Parse the ledger. Unparseable lines are skipped and left on disk."""
+def _corrupt_block_reasons(line: str, digest: str | None, today: str) -> list[str]:
+    reasons = []
+    if "submitted" in line:
+        reasons.append('"submitted"')
+    if "reserved" in line:
+        reasons.append('"reserved"')
+    if today and today in line:
+        reasons.append(f"today's UTC date {today}")
+    prefix = (digest or "")[:12]
+    if len(prefix) >= 12 and prefix in line:
+        reasons.append(f"archive sha256 prefix {prefix}")
+    return reasons
+
+
+def _corrupt_ledger_message(ledger: Path, line_number: int, reasons: list[str]) -> str:
+    where = f"Unparseable ledger line {line_number} in {ledger}."
+    if reasons:
+        why = ", ".join(reasons)
+        return (
+            f"{where} It blocks because it contains {why}. Repair the line before retrying. "
+            "--allow-corrupt-ledger does not skip a line that contains "
+            '"submitted", "reserved", today\'s UTC date, or this archive\'s sha256 prefix.'
+        )
+    return (
+        f"{where} Repair the line, or rerun with --allow-corrupt-ledger. "
+        "That flag still refuses a line that contains "
+        '"submitted", "reserved", today\'s UTC date, or this archive\'s sha256 prefix.'
+    )
+
+
+def _read_ledger(
+    ledger: Path, *, allow_corrupt: bool = False, digest: str | None = None
+) -> list[dict]:
+    """Parse the ledger. An unparseable line fails closed unless explicitly allowed.
+
+    With ``allow_corrupt``, a line is still an error when it contains
+    ``submitted``, ``reserved``, today's UTC date, or the archive sha256 prefix.
+    Corrupt lines are never rewritten or deleted.
+    """
     if not ledger.exists():
         return []
-    lines = ledger.read_text().splitlines()
+    today = datetime.now(UTC).date().isoformat()
     rows = []
-    bad: list[int] = []
-    last_good = -1
-    for index, line in enumerate(lines):
+    for line_number, line in enumerate(ledger.read_text().splitlines(), start=1):
         if not line.strip():
             continue
         try:
             item = json.loads(line)
         except json.JSONDecodeError:
-            bad.append(index)
+            reasons = _corrupt_block_reasons(line, digest, today)
+            if reasons or not allow_corrupt:
+                raise ValueError(_corrupt_ledger_message(ledger, line_number, reasons)) from None
+            warnings.warn(
+                f"Skipping unparseable ledger line {line_number} in {ledger} "
+                "because --allow-corrupt-ledger was set",
+                stacklevel=2,
+            )
             continue
         if isinstance(item, dict):
             rows.append(item)
-            last_good = index
-    for index in bad:
-        where = "trailing " if index > last_good else ""
-        warnings.warn(
-            f"Skipping unparseable {where}ledger line in {ledger}",
-            stacklevel=2,
-        )
     return rows
 
 
@@ -570,20 +636,30 @@ def _fsync_directory(directory: Path) -> None:
     except OSError:
         return
     try:
-        os.fsync(dir_fd)
+        try:
+            os.fsync(dir_fd)
+        except OSError as exc:
+            warnings.warn(f"Could not fsync directory {directory}: {exc}", stacklevel=2)
     finally:
         os.close(dir_fd)
 
 
+def _is_own_ledger_temp(name: str, ledger_name: str) -> bool:
+    """True for this tool's mkstemp files, ``.{ledger}.{8 chars}``, and nothing else."""
+    prefix = f".{ledger_name}."
+    if not name.startswith(prefix):
+        return False
+    return _LEDGER_TEMP_SUFFIX.fullmatch(name[len(prefix) :]) is not None
+
+
 def _cleanup_old_ledger_temps(path: Path) -> None:
-    """Remove SIGKILL leftovers that match this ledger's temp-file prefix."""
+    """Remove SIGKILL leftovers that match this ledger's mkstemp names."""
     directory = path.parent
     if not directory.is_dir():
         return
-    prefix = f".{path.name}."
     cutoff = time.time() - _LEDGER_TEMP_AGE_SECONDS
     for candidate in directory.iterdir():
-        if not candidate.is_file() or not candidate.name.startswith(prefix):
+        if not candidate.is_file() or not _is_own_ledger_temp(candidate.name, path.name):
             continue
         try:
             if candidate.stat().st_mtime > cutoff:
@@ -595,8 +671,14 @@ def _cleanup_old_ledger_temps(path: Path) -> None:
 
 def _append_ledger(ledger: Path, row: dict) -> None:
     _cleanup_old_ledger_temps(ledger)
+    prefix = ""
+    if ledger.exists() and ledger.stat().st_size:
+        with ledger.open("rb") as handle:
+            handle.seek(-1, os.SEEK_END)
+            if handle.read(1) != b"\n":
+                prefix = "\n"
     with ledger.open("a") as handle:
-        handle.write(json.dumps(row) + "\n")
+        handle.write(prefix + json.dumps(row) + "\n")
         handle.flush()
         os.fsync(handle.fileno())
     _fsync_directory(ledger.parent)
@@ -621,26 +703,38 @@ def _atomic_write(path: Path, text: str) -> None:
     _fsync_directory(directory)
 
 
-def _replace_last_ledger_row(ledger: Path, row: dict) -> None:
-    """Replace the last parseable row. Unparseable lines stay where they are."""
+def _same_ledger_row(item: dict, row: dict) -> bool:
+    row_id = row.get("id")
+    if row_id:
+        return item.get("id") == row_id
+    created_at = row.get("created_at")
+    digest = row.get("sha256")
+    if not created_at or not digest:
+        return False
+    return item.get("created_at") == created_at and item.get("sha256") == digest
+
+
+def _replace_ledger_row(ledger: Path, row: dict) -> None:
+    """Replace the row with the same id. Other lines, including garbage, stay."""
     lines = ledger.read_text().splitlines() if ledger.exists() else []
     target = None
-    for index in range(len(lines) - 1, -1, -1):
-        stripped = lines[index].strip()
-        if not stripped:
+    for index, line in enumerate(lines):
+        if not line.strip():
             continue
         try:
-            item = json.loads(stripped)
+            item = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(item, dict):
+        if isinstance(item, dict) and _same_ledger_row(item, row):
             target = index
             break
-    encoded = json.dumps(row)
     if target is None:
-        lines.append(encoded)
-    else:
-        lines[target] = encoded
+        raise ValueError(
+            f"Ledger row id={row.get('id')!r} created_at={row.get('created_at')!r} "
+            f"sha256={row.get('sha256')!r} was not found in {ledger}. "
+            "The reserved line was not rewritten."
+        )
+    lines[target] = json.dumps(row)
     _atomic_write(ledger, "\n".join(lines) + "\n")
 
 
@@ -651,6 +745,7 @@ def submit(
     execute=False,
     evaluation=None,
     scorer_overhead_seconds=DEFAULT_SCORER_OVERHEAD_SECONDS,
+    allow_corrupt_ledger=False,
 ):
     archive = Path(archive).resolve()
     validate_archive(archive)
@@ -680,7 +775,7 @@ def submit(
         history = kaggle("competitions", "submissions", COMPETITION, "--csv")
         if submissions_today(history):
             raise ValueError("Kaggle daily submission slot already used")
-        previous = _read_ledger(ledger)
+        previous = _read_ledger(ledger, allow_corrupt=allow_corrupt_ledger, digest=digest)
         day = datetime.now(UTC).date().isoformat()
         if any(
             r["created_at"].startswith(day) and r["status"] in {"reserved", "submitted"}
@@ -698,6 +793,7 @@ def submit(
                 shutil.copyfile(archive, staged)
             if sha256(staged) != digest:
                 raise RuntimeError("staged submission.zip hash does not match the source archive")
+            plan["id"] = uuid.uuid4().hex
             plan["status"] = "reserved"
             _append_ledger(ledger, plan)
             try:
@@ -715,11 +811,17 @@ def submit(
                 if _definite_submit_failure(exc):
                     text = _failure_text(exc)
                     plan = {**plan, "status": "failed", "error": text}
-                    _replace_last_ledger_row(ledger, plan)
+                    try:
+                        _replace_ledger_row(ledger, plan)
+                    except ValueError as missing:
+                        raise RuntimeError(f"{text}\n{missing}") from exc
                     raise RuntimeError(text) from exc
                 note = _ambiguous_note(exc)
                 plan = {**plan, "status": "reserved", "error": note}
-                _replace_last_ledger_row(ledger, plan)
+                try:
+                    _replace_ledger_row(ledger, plan)
+                except ValueError as missing:
+                    raise RuntimeError(f"{note}\n{missing}") from exc
                 raise RuntimeError(note) from exc
             plan = {**plan, "status": "submitted", "response": _scrub_secrets(output or "")}
             _append_ledger(ledger, plan)

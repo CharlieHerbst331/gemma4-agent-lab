@@ -1294,11 +1294,23 @@ def _uniq_mutates(args: list[str]) -> bool:
     return False
 
 
+def _diff_paginate(base: str) -> bool:
+    """GNU diff accepts a unique abbreviation of ``--paginate``.
+
+    ``--palette`` shares the prefix ``--pa``, so ``--pag`` and anything longer
+    that is still a prefix of ``paginate`` is the unique form.
+    """
+    if not base.startswith("--"):
+        return False
+    name = base[2:]
+    return bool(name) and "paginate".startswith(name) and len(name) >= 3
+
+
 def _diff_mutates(args: list[str]) -> bool:
-    """``-l`` and ``--paginate`` run ``pr`` from ``PATH``."""
+    """``-l`` and ``--paginate`` (and its unique abbreviations) run ``pr``."""
     for token in args:
         base = token.split("=", 1)[0]
-        if base == "--paginate":
+        if _diff_paginate(base):
             return True
         if token.startswith("-") and not token.startswith("--") and token != "-":
             if "l" in token[1:]:
