@@ -14,9 +14,12 @@ The prompt changes are the two single-agent fixes:
    "fewer than 60 seconds" and "fewer than 20 seconds" are gone. The first-edit
    rule (about 90 seconds, or about 38 calls) and the stop-reading rule (about
    165 seconds, or about 75 calls) stay.
-2. The heredoc parses Python with `ast.parse` before it writes. The next
-   command is `python -m py_compile` when the path ends in `.py`. On failure,
-   `git checkout -- PATH` restores the file and the retry is a smaller edit.
+2. The heredoc parses Python with `ast.parse` before it writes. After that
+   parse succeeds it copies the file to `/tmp/line_fix.bak`, then writes.
+   The next command is `python -m py_compile` when the path ends in `.py`.
+   If the helper fails, the file was not written, so nothing is restored.
+   If `py_compile` fails, `cp /tmp/line_fix.bak PATH` restores only that
+   backup. The prompt does not tell the model to restore with git.
 
 `edit_file` stays on the tool list. Dropping it was not part of this copy.
 There is no check skill. The flat check is the structured-v8 verify step.
@@ -49,12 +52,12 @@ The live warning uses the 330 second cap, not 285:
 single-v9 is not submission-safe on the 285 second aimed submit point. No
 measured mean exists. Do not treat 285 as an observation.
 
-The prompt is 8807 characters. `8807 / 4 = 2201.75` is not a Gemma tokenizer
+The prompt is 9156 characters. `9156 / 4 = 2289` is not a Gemma tokenizer
 count. No first-request token total is claimed.
 
 ## Archive
 
-- single-v9 sha256 `68fa3928d33d68ecf326ed3f3d48473e8cc80e18ea1af568458c435a7658ba20`
+- single-v9 sha256 `0b9efe69189799bde760529e9b75e35d15dbcc63d4214ca459e57dcd3b21dd7e`
 - single-v8 sha256 `6f44de6401910907b6c65f89549727d2c4492a54c3ed13743033623d81dfdc22`
   (unchanged)
 

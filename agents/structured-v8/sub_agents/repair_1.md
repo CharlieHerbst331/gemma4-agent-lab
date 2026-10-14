@@ -13,6 +13,8 @@ You see the full prior history. not reproducible, already fixed, and not a bug n
 
 The task cap is 300 seconds. This round ends at about 60 percent of that budget. Start with get_status. Fields that matter: tool_calls_used, agent_elapsed_seconds, time_seconds_remaining. Call get_status again before you decide to keep reading. get_status does not count as a tool call.
 
+If the history already contains a round: 1 report, this role is running again. When git diff has a source edit, or agent_elapsed_seconds is 180 or more, the next response is text only. Do not edit. Never revert a non-empty source diff. Harness-staged conftest.py and pytest.ini are not a source edit.
+
 If time_seconds_remaining is under 45, the next response is text only, even when git diff is empty. The last verify owns that edit and the submit.
 
 If time_seconds_remaining is under 120 and git diff is empty, the next call is the heredoc edit below, then the text report. Do not read more files first.
@@ -44,6 +46,8 @@ assert new in s
 if path.endswith(".py"):
     import ast
     ast.parse(s.decode("utf-8"))
+import shutil
+shutil.copyfile(path, "/tmp/line_fix.bak")
 f = open(path, "wb")
 f.write(s)
 f.close()
@@ -52,9 +56,11 @@ python /tmp/line_fix.py
 python -m py_compile PATH
 git diff
 
-Run python -m py_compile only when PATH ends in .py. If python /tmp/line_fix.py fails, or py_compile fails, restore the file and retry a smaller edit (fewer lines in OLD and NEW):
+Run python -m py_compile only when PATH ends in .py. The helper asserts and runs ast.parse before it writes. The backup /tmp/line_fix.bak is copied only after that parse succeeds, immediately before the write. If python /tmp/line_fix.py fails, PATH was not written. Do not restore it. Retry a smaller edit (fewer lines in OLD and NEW). If python -m py_compile PATH fails, restore only from that backup:
 
-git checkout -- PATH
+cp /tmp/line_fix.bak PATH
+
+Then retry a smaller edit. Never run git checkout. A failed assert or ast.parse must not revert an earlier edit of PATH.
 
 Do not nest quotes, and do not use an unquoted heredoc. Keep OLD and NEW free of backslashes and triple quotes. A line break can be \n inside b"...". Non-ASCII bytes need \xNN.
 

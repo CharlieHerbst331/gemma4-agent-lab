@@ -48,6 +48,8 @@ assert new in s
 if path.endswith(".py"):
     import ast
     ast.parse(s.decode("utf-8"))
+import shutil
+shutil.copyfile(path, "/tmp/line_fix.bak")
 f = open(path, "wb")
 f.write(s)
 f.close()
@@ -56,9 +58,11 @@ python /tmp/line_fix.py
 python -m py_compile PATH
 git diff
 
-Run python -m py_compile only when PATH ends in .py. The helper parses Python with ast.parse before it writes. If python /tmp/line_fix.py fails, or py_compile fails, restore the file and retry a smaller edit (fewer lines in OLD and NEW):
+Run python -m py_compile only when PATH ends in .py. The helper asserts and runs ast.parse before it writes. The backup /tmp/line_fix.bak is copied only after that parse succeeds, immediately before the write. If python /tmp/line_fix.py fails, PATH was not written. Do not restore it. Retry a smaller edit (fewer lines in OLD and NEW). If python -m py_compile PATH fails, restore only from that backup:
 
-git checkout -- PATH
+cp /tmp/line_fix.bak PATH
+
+Then retry a smaller edit. Never run git checkout. A failed assert or ast.parse must not revert an earlier edit of PATH.
 
 Do not nest quotes, and do not use an unquoted heredoc. Keep OLD and NEW free of backslashes and triple quotes. A line break can be \n inside b"...". Non-ASCII bytes need \xNN.
 

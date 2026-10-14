@@ -46,13 +46,19 @@ What is prompt-only, via `get_status`:
 - With under 45 seconds left, earlier roles stop so `verify_3` can run.
   `verify_3` submits the current diff. If the diff is still empty, its next
   call is one heredoc, then `submit_patch`. A cap hit with no diff is the
-  failure the prompt forbids.
-- `ast.parse` before the write, `python -m py_compile` after it, and
-  `git checkout -- PATH` on failure live inside the recipe the model is told
-  to copy. They are not a harness hook.
+  failure the prompt forbids. `verify_3` then calls `submit_patch` even if
+  that heredoc left the diff empty. A text-only ending restarts the root.
+- `ast.parse` runs before the write. The helper copies `PATH` to
+  `/tmp/line_fix.bak` only after that parse succeeds. `python -m py_compile`
+  runs after the write. A failed helper does not restore anything. A failed
+  `py_compile` restores with `cp /tmp/line_fix.bak PATH`. The recipe does not
+  use git to restore a file. This is still prompt text, not a harness hook.
 - When 45 seconds or more remain, `verify_3` must call
   `{"skill_name":"check","file_path":"scripts/run.py"}` before `submit_patch`.
   Under 45 seconds the submit deadline wins, so the check is skipped.
+  `verify_1` uses the same under-90-second text-only rule as `verify_2`.
+- `repair_2`, and `repair_1` on a later pass, leave a non-empty source diff
+  alone. They do not edit it and they do not restore it.
 
 `repair_1` can still ignore the 180 second line and run until the task cap.
 Nothing in the schema interrupts that role. Narrower tools on later rounds
@@ -66,7 +72,7 @@ helps after the first repair stops.
 | --- | --- | --- | --- |
 | triage | none | off | one brief, no tools |
 | repair_1 | status, read, command, graph | 256 | 180 s elapsed, or 120 s left |
-| verify_1 | status, read, command, check | off | one check, cannot submit |
+| verify_1 | status, read, command, check | off | under 90 s, text only; otherwise one check |
 | repair_2 | status, read, command | 256 | 240 s elapsed, or 60 s left |
 | verify_2 | status, read, command, check | off | one check, cannot submit |
 | repair_3 | status, command | 256 | one heredoc if the diff is empty |
@@ -138,13 +144,13 @@ No first-request token total is claimed.
 
 | Role | Characters | chars/4 |
 | --- | --- | --- |
-| triage | 1796 | 449 |
-| repair_1 | 4578 | 1144.5 |
+| triage | 1937 | 484.25 |
+| repair_1 | 5287 | 1321.75 |
 | verify_1 | 1685 | 421.25 |
-| repair_2 | 2235 | 558.75 |
+| repair_2 | 2889 | 722.25 |
 | verify_2 | 1316 | 329 |
-| repair_3 | 1789 | 447.25 |
-| verify_3 | 3156 | 789 |
+| repair_3 | 2254 | 563.5 |
+| verify_3 | 4183 | 1045.75 |
 
 The completion reservation is 1024 tokens on triage and 2048 on the other
 roles, inside a 32768 context. Those ceilings are harness limits, not measured
@@ -152,8 +158,8 @@ prompt tokens.
 
 ## Archives and protocols
 
-- structured-v8 sha256 `34a9353d7504ec93d9d2237f1c1793f215e8e7d44ce3166190c203d645ff5936`
-- single-v9 sha256 `68fa3928d33d68ecf326ed3f3d48473e8cc80e18ea1af568458c435a7658ba20`
+- structured-v8 sha256 `16cee658599fe212c9909868cd0a84c01da6cd8bddab6d9691190b3dbd953e2b`
+- single-v9 sha256 `0b9efe69189799bde760529e9b75e35d15dbcc63d4214ca459e57dcd3b21dd7e`
   (see `docs/SINGLE_V9.md`)
 - Unchanged: structured-v7 `a3a08b179fee800ee0575af2a55ad14f47c42c369bf32fd4d52227a9da1109df`,
   single-v8 `6f44de6401910907b6c65f89549727d2c4492a54c3ed13743033623d81dfdc22`,
@@ -193,6 +199,23 @@ uv run gemma-lab notebook-multi \
   --output /tmp/structured-v8-candidate-smoke \
   --wheelhouse-version 30
 ```
+
+## Why verify_3 always submits
+
+`docs/STRUCTURED_V5.md` records the harness behavior: when the root finishes
+without a submission, the nudge starts the root again, which reruns triage.
+A stub of structured-v8 showed four full passes of all seven roles when
+`verify_3` ended in text and never called `submit_patch`. `submit_patch`
+stores the diff and a later text response ends the task, which skips that
+nudge (`agent_runner.py` in the harness notes above).
+
+`verify_3` is therefore told to end on `submit_patch` after at most one
+heredoc and, when 45 seconds or more remain, the flat check. If the diff is
+still empty after that heredoc, it still submits once. One submission stops
+the restart. If a nudge does happen, triage returns the existing brief, and
+`repair_1` on a later pass with a source diff or with 180 seconds already
+elapsed hands off in text. `repair_2` and `repair_3` do the same whenever
+the source diff is already non-empty.
 
 Hypothesis: unrolling the loop and telling repair to stop at 180 seconds lets
 verify run, which structured-v7 did not do. Whether the model obeys the clock

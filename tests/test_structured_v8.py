@@ -39,7 +39,7 @@ SMOKE_TASKS = ["rich_4070", "rich_3934", "fastapi_11194", "rich_3938", "fastapi_
 CAP_SECONDS = 300
 PROJECTED_MEAN_SECONDS = 255
 V7_ARCHIVE = "a3a08b179fee800ee0575af2a55ad14f47c42c369bf32fd4d52227a9da1109df"
-V8_ARCHIVE = "34a9353d7504ec93d9d2237f1c1793f215e8e7d44ce3166190c203d645ff5936"
+V8_ARCHIVE = "16cee658599fe212c9909868cd0a84c01da6cd8bddab6d9691190b3dbd953e2b"
 SINGLE_V8_ARCHIVE = "6f44de6401910907b6c65f89549727d2c4492a54c3ed13743033623d81dfdc22"
 CHECK_ARCHIVE = "64dc727d78c4189c1db1184e74129290574c7b97816dd91f91d2baa7defe0fb0"
 SINGLE_V7_ARCHIVE = "f62c8c0b92bc5bd1fb1015f20e7cbd7a5599d5518d2d59097bf2b40d9f3412b0"
@@ -145,13 +145,13 @@ def test_prompts_force_handoff_deadlines_without_a_ratio_warning():
     verify_1 = _prompt("verify_1")
     verify_2 = _prompt("verify_2")
     verify_3 = _prompt("verify_3")
-    assert len(triage) == 1796
-    assert len(repair_1) == 4578
-    assert len(repair_2) == 2235
-    assert len(repair_3) == 1789
+    assert len(triage) == 1937
+    assert len(repair_1) == 5287
+    assert len(repair_2) == 2889
+    assert len(repair_3) == 2254
     assert len(verify_1) == 1685
     assert len(verify_2) == 1316
-    assert len(verify_3) == 3156
+    assert len(verify_3) == 4183
     assert "under 20 seconds" in triage
     assert "Do not stop with UNCERTAIN" in triage
     joined = "\n".join([triage, repair_1, repair_2, repair_3, verify_1, verify_2, verify_3])
@@ -163,8 +163,18 @@ def test_prompts_force_handoff_deadlines_without_a_ratio_warning():
         assert "the next call is the heredoc" in prompt
         assert 'ast.parse(s.decode("utf-8"))' in prompt
         assert "python -m py_compile PATH" in prompt
-        assert "git checkout -- PATH" in prompt
+        assert "cp /tmp/line_fix.bak PATH" in prompt
+        assert "git checkout --" not in prompt
+        assert "Never run git checkout" in prompt
         assert "/tmp" in prompt
+    assert "Never revert a non-empty source diff" in repair_1
+    assert "this role is running again" in repair_1
+    assert "Never revert a non-empty source diff" in repair_2
+    assert "Never revert a non-empty source diff" in repair_3
+    assert "time_seconds_remaining is under 90" in verify_1
+    assert "time_seconds_remaining is under 90" in verify_2
+    assert "all seven roles run from triage" in verify_3
+    assert "call submit_patch anyway" in verify_3
     assert "time_seconds_remaining is under 45" in verify_3
     assert "A cap hit with no diff must not happen." in verify_3
     assert CHECK_CALL in verify_1

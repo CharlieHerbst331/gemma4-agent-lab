@@ -24,11 +24,11 @@ arms:
   B:
     source: agents/structured-v8
     name: structured-v8
-    expected_sha256: 34a9353d7504ec93d9d2237f1c1793f215e8e7d44ce3166190c203d645ff5936
+    expected_sha256: 16cee658599fe212c9909868cd0a84c01da6cd8bddab6d9691190b3dbd953e2b
   C:
     source: agents/single-v9
     name: single-v9
-    expected_sha256: 68fa3928d33d68ecf326ed3f3d48473e8cc80e18ea1af568458c435a7658ba20
+    expected_sha256: 0b9efe69189799bde760529e9b75e35d15dbcc63d4214ca459e57dcd3b21dd7e
 notes: "Smoke, not promotion eligible. One repeat cannot name a winner. Budgets differ: structured-v7 is 360 s / 150 calls / 200 turns, structured-v8 is 300 s / 220 calls / 320 turns, and single-v9 is 330 s / 150 calls / 200 turns. Sampling differs because single-v9 has thinking off and the structured arms think on repair only. eval_config.yaml, sampling.yaml, and thinking.yaml are the markers."
 matched_pair: false
 allow_identical: false

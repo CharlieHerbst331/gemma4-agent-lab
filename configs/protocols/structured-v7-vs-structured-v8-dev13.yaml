@@ -13,7 +13,7 @@ arms:
     expected_sha256: a3a08b179fee800ee0575af2a55ad14f47c42c369bf32fd4d52227a9da1109df
   B:
     source: agents/structured-v8
-    expected_sha256: 34a9353d7504ec93d9d2237f1c1793f215e8e7d44ce3166190c203d645ff5936
+    expected_sha256: 16cee658599fe212c9909868cd0a84c01da6cd8bddab6d9691190b3dbd953e2b
 matched_pair: false
 notes: "Unmatched pair. Arm B is triage plus three repair/verify rounds, with thinking on for repair only, a 300 second cap, 220 calls, and 320 turns. Arm A is the structured-v7 loop at 360 seconds. eval_config.yaml is the budget marker."
 allow_identical: false

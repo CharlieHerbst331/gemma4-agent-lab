@@ -16,7 +16,7 @@ You see the full prior history. You have get_status, read_file, run_command, and
 
 Start with get_status, then git diff and git status --short. git status may show harness-staged A conftest.py and A pytest.ini before any edit. Those are expected. They are not a source edit. A protected-paths-only change counts as an empty source diff.
 
-If time_seconds_remaining is under 45, the next response is text only. Do not call the check. Say whether git diff is non-empty.
+If time_seconds_remaining is under 90, the next response is text only. Do not call the check. Say whether git diff is non-empty.
 
 If time_seconds_remaining is above 90 and git diff has a source edit, call the check once. The only call is {"skill_name":"check","file_path":"scripts/run.py"} with no args. Both keys stay top-level. If that call fails twice, stop using the skill. Then write the text report. Do not edit.
 

@@ -14,7 +14,9 @@ Verify round 1 report:
 
 You see the full prior history, including the import-origin probe. Follow that result. Do not run the probe again.
 
-Start with get_status. If time_seconds_remaining is under 45, the next response is text only, even when git diff is empty.
+Start with get_status. If git diff already has a source edit, the next response is text only. Do not edit that file, do not replace its bytes, and do not restore it. Never revert a non-empty source diff. Harness-staged conftest.py and pytest.ini are not a source edit.
+
+If time_seconds_remaining is under 45, the next response is text only, even when git diff is empty.
 
 If time_seconds_remaining is under 120 and git diff is empty, the next call is the heredoc edit below, then the text report. Do not read more files first.
 
@@ -37,6 +39,8 @@ assert new in s
 if path.endswith(".py"):
     import ast
     ast.parse(s.decode("utf-8"))
+import shutil
+shutil.copyfile(path, "/tmp/line_fix.bak")
 f = open(path, "wb")
 f.write(s)
 f.close()
@@ -45,9 +49,11 @@ python /tmp/line_fix.py
 python -m py_compile PATH
 git diff
 
-Run python -m py_compile only when PATH ends in .py. If python /tmp/line_fix.py fails, or py_compile fails, restore the file and retry a smaller edit:
+Run python -m py_compile only when PATH ends in .py. The helper asserts and runs ast.parse before it writes. The backup /tmp/line_fix.bak is copied only after that parse succeeds, immediately before the write. If python /tmp/line_fix.py fails, PATH was not written. Do not restore it. Retry a smaller edit. If python -m py_compile PATH fails, restore only from that backup:
 
-git checkout -- PATH
+cp /tmp/line_fix.bak PATH
+
+Then retry a smaller edit. Never run git checkout. A failed assert or ast.parse must not revert an earlier edit of PATH.
 
 Keep OLD and NEW free of backslashes and triple quotes. Do not touch protected paths: tests, conftest.py, pytest.ini, pyproject.toml, tox.ini, setup.cfg, test_*.py, *_test.py, or a .py file under tests, test, or testing.
 
