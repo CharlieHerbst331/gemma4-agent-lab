@@ -33,6 +33,10 @@ from gemma_lab.paired import (
 )
 
 PROTOCOL = Path("configs/protocols/combined-candidate-smoke.yaml")
+MULTI_PROTOCOLS = {
+    PROTOCOL,
+    Path("configs/protocols/structured-v8-candidate-smoke.yaml"),
+}
 STARTER = Path("vendor/official/notebook/getting-started-gemma-4-developer-agent.ipynb")
 CONFOUND = (
     "The 5-task rotation confounds position with task "
@@ -65,6 +69,7 @@ AGENT_DIRS = {
     "structured-v5t0",
     "structured-v6",
     "structured-v7",
+    "structured-v8",
     "single-v1",
     "single-v1t0",
     "single-v2",
@@ -76,6 +81,7 @@ AGENT_DIRS = {
     "single-v7",
     "single-v8",
     "single-v8-check",
+    "single-v9",
 }
 
 
@@ -108,19 +114,24 @@ def _budgets():
     }
 
 
-def test_agent_directories_stay_at_twenty_one():
+def test_agent_directories_stay_at_twenty_three():
     found = {path.name for path in Path("agents").iterdir() if path.is_dir()}
     assert found == AGENT_DIRS
+    assert len(found) == 23
     assert "single-v7-lenient" not in found
 
 
 def test_existing_protocols_remain_two_arm():
     paths = sorted(Path("configs/protocols").glob("*.yaml"))
-    others = [path for path in paths if path != PROTOCOL]
-    assert len(others) == 12
+    others = [path for path in paths if path not in MULTI_PROTOCOLS]
+    assert len(paths) == 15
+    assert len(others) == 13
     for path in others:
         protocol = load_protocol(path)
         assert set(protocol["arms"]) == {"A", "B"}
+    for path in MULTI_PROTOCOLS:
+        loaded = load_multi_protocol(path)
+        assert loaded["multi_arm"] is True
 
 
 def test_notebook_pair_refuses_the_multi_protocol(tmp_path):

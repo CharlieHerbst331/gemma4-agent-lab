@@ -1,0 +1,10 @@
+# Gemma 4 model card: temperature 1.0, top_p 0.95, top_k 64.
+# GenerateContentConfig in adk-submission accepts all three. The pair checker
+# compares temperature and top_p, not top_k. Listing this file in
+# allowed_differences is the marker that lets temperature differ.
+temperature: 1.0
+top_p: 0.95
+top_k: 64
+# 2048 completion tokens leaves a 30720-token prompt ceiling inside 32768.
+max_output_tokens: 2048
+thinking_config: !include thinking.yaml
