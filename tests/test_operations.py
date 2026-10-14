@@ -471,7 +471,7 @@ def test_http_5xx_stays_reserved(tmp_path, monkeypatch, error):
         "409 Conflict",
         "413 Payload Too Large",
         "422 Unprocessable Entity",
-        "Bad Request",
+        "400 Bad Request",
         '{"code":400}',
         '{"code": 422}',
         "HTTP/1.1 404 Not Found",
@@ -510,10 +510,128 @@ def test_http_4xx_text_is_a_definite_failure(text):
         "File kaggle.py, line 500, in submit",
         "error 4xx",
         "sha 403 buried in ab403cd1122334455",
+        "See Line 404 Report",
+        "400 Rows uploaded",
+        "Timeout 400: Seconds",
+        "Uploaded 404 Percent",
+        "localhost:400 Refused",
+        "503 Service Unavailable: upstream Forbidden by policy",
+        "503 Service Unavailable: Forbidden by policy",
+        "502 Bad Gateway: ... Not Found",
+        "502 Bad Gateway: upstream Not Found",
+        "500 Internal Server Error: Conflict in database",
+        "504 Gateway Timeout: Request Timeout",
+        "500 Internal Server Error: Conflict while writing submission record",
+        "503 Service Unavailable: Forbidden...",
+        "Error 404 Not Found in log line",
+        "file 403 Forbidden.txt",
+        "File Not Found: ...kaggle.json",
+        "File Not Found: /tmp/kaggle.json",
+        "File Not Found",
+        "Merge Conflict",
+        "Locked file",
+        "The page is Gone",
+        "Unauthorized: bad credentials",
+        "Conflict",
+        "Locked",
+        "Bad Request",
     ],
 )
 def test_http_5xx_and_unrelated_numbers_stay_ambiguous(text):
     assert operations._definite_submit_failure(RuntimeError(text)) is False
+
+
+_HTTP_ERROR_FORMS = (
+    "{code} {reason}",
+    "{code} - {reason}",
+    "{code}: {reason}",
+    "{code}-{reason}",
+    "HTTP/1.1 {code} {reason}",
+    "HTTP/1.0 {code} {reason}",
+    "HTTP Error {code}: {reason}",
+    "{code} Client Error: {reason} for url: https://example.test",
+    "({code}) Reason: {reason}",
+    "status_code={code}",
+    "status code={code}",
+    "status: {code} {reason}",
+    "status_code={code} {reason}",
+)
+
+
+def test_real_4xx_status_forms_are_definite_failures():
+    reasons = operations._CLIENT_REASONS
+    assert len(reasons) == 29
+    core = _HTTP_ERROR_FORMS[:8]
+    assert len(reasons) * len(core) == 232
+    missed = []
+    for code, reason in (*reasons, *operations._CLIENT_REASON_ALIASES):
+        for form in _HTTP_ERROR_FORMS:
+            text = form.format(code=code, reason=reason)
+            if operations._definite_submit_failure(RuntimeError(text)) is not True:
+                missed.append(text)
+    assert missed == []
+
+
+def test_real_5xx_status_forms_stay_ambiguous():
+    missed = []
+    for code, reason in operations._SERVER_REASONS:
+        for form in _HTTP_ERROR_FORMS:
+            text = form.format(code=code, reason=reason)
+            if operations._definite_submit_failure(RuntimeError(text)) is not False:
+                missed.append(text)
+    assert missed == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "402 Payment Required",
+        "405 Method Not Allowed",
+        "406 Not Acceptable",
+        "407 Proxy Authentication Required",
+        "408 Request Timeout",
+        "410 Gone",
+        "411 Length Required",
+        "412 Precondition Failed",
+        "414 URI Too Long",
+        "415 Unsupported Media Type",
+        "416 Range Not Satisfiable",
+        "417 Expectation Failed",
+        "421 Misdirected Request",
+        "423 Locked",
+        "424 Failed Dependency",
+        "425 Too Early",
+        "426 Upgrade Required",
+        "428 Precondition Required",
+        "429 Too Many Requests",
+        "431 Request Header Fields Too Large",
+        "451 Unavailable For Legal Reasons",
+    ],
+)
+def test_explicit_4xx_reason_phrases_are_definite_failures(text):
+    assert operations._definite_submit_failure(RuntimeError(text)) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "See Line 404 Report",
+        "400 Rows uploaded",
+        "Timeout 400: Seconds",
+        "Uploaded 404 Percent",
+        "localhost:400 Refused",
+    ],
+)
+def test_capitalised_word_after_4xx_stays_reserved(tmp_path, monkeypatch, text):
+    _assert_stays_reserved(tmp_path, monkeypatch, RuntimeError(text))
+
+
+def test_server_error_with_a_client_reason_stays_reserved(tmp_path, monkeypatch):
+    _assert_stays_reserved(
+        tmp_path,
+        monkeypatch,
+        RuntimeError("500 Internal Server Error: Conflict while writing submission record"),
+    )
 
 
 def test_response_status_classifies_http_error():
@@ -752,6 +870,108 @@ def test_directory_fsync_error_warns_and_submit_continues(tmp_path, monkeypatch)
     with pytest.warns(UserWarning, match="Could not fsync directory"):
         plan = operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
     assert plan["status"] == "submitted"
+
+
+def test_non_utf8_ledger_line_names_the_line(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    good = {"created_at": "2020-01-01T00:00:00+00:00", "status": "failed", "sha256": "older"}
+    original = json.dumps(good).encode() + b"\n\xff garbage\n"
+    ledger.write_bytes(original)
+    calls = _install_kaggle(monkeypatch, lambda *args, **kwargs: "Successfully submitted")
+    with pytest.raises(ValueError, match="line 2") as raised:
+        operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    assert not isinstance(raised.value, UnicodeDecodeError)
+    assert "--allow-corrupt-ledger" in str(raised.value)
+    assert ledger.read_bytes() == original
+    assert _submit_calls(calls) == []
+
+    def on_submit(*args, **kwargs):
+        raise RuntimeError("400 Client Error: Bad Request")
+
+    _install_kaggle(monkeypatch, on_submit)
+    with pytest.warns(UserWarning, match="unparseable ledger line 2"):
+        with pytest.raises(RuntimeError, match="400 Client Error"):
+            operations.submit(
+                archive,
+                "ship it",
+                ledger,
+                execute=True,
+                evaluation=evaluation,
+                allow_corrupt_ledger=True,
+            )
+    raw = ledger.read_bytes()
+    assert b"\xff garbage" in raw
+    parsed = []
+    for line in raw.decode("utf-8", errors="replace").splitlines():
+        if line.startswith("{"):
+            parsed.append(json.loads(line))
+    by_digest = {row["sha256"]: row for row in parsed}
+    assert by_digest["older"]["status"] == "failed"
+    current = [row for row in parsed if row["sha256"] != "older"]
+    assert len(current) == 1
+    assert current[0]["status"] == "failed"
+
+
+def test_replacement_char_inside_today_status_fails_closed(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    today = datetime.now(UTC).date().isoformat()
+    original = (
+        b'{"status": "subm\xffitted", "created_at": "'
+        + today.encode()
+        + b'T00:00:00+00:00", "sha256": "'
+        + sha256(archive).encode()
+        + b'"}\n'
+    )
+    ledger.write_bytes(original)
+    calls = _install_kaggle(monkeypatch, lambda *args, **kwargs: pytest.fail("upload attempted"))
+    with pytest.raises(ValueError, match="line 1") as raised:
+        operations.submit(archive, "ship it", ledger, execute=True, evaluation=evaluation)
+    message = str(raised.value)
+    assert not isinstance(raised.value, UnicodeDecodeError)
+    assert today in message
+    assert "--allow-corrupt-ledger" in message
+    with pytest.raises(ValueError, match="blocks because"):
+        operations.submit(
+            archive,
+            "ship it",
+            ledger,
+            execute=True,
+            evaluation=evaluation,
+            allow_corrupt_ledger=True,
+        )
+    assert ledger.read_bytes() == original
+    assert _submit_calls(calls) == []
+
+
+def test_garbled_json_line_keeps_its_raw_bytes(tmp_path, monkeypatch):
+    archive, ledger = tmp_path / "single-v6.zip", tmp_path / "ledger.jsonl"
+    pack(Path("agents/baseline"), archive)
+    evaluation = evidence(tmp_path, archive)
+    garbled = (
+        b'{"id": "old", "status": "subm\xffitted", "created_at": '
+        b'"2020-01-01T00:00:00+00:00", "sha256": "older"}\n'
+    )
+    ledger.write_bytes(garbled)
+
+    def on_submit(*args, **kwargs):
+        raise RuntimeError("400 Client Error: Bad Request")
+
+    _install_kaggle(monkeypatch, on_submit)
+    with pytest.warns(UserWarning, match="unparseable ledger line 1"):
+        with pytest.raises(RuntimeError, match="400 Client Error"):
+            operations.submit(
+                archive,
+                "ship it",
+                ledger,
+                execute=True,
+                evaluation=evaluation,
+                allow_corrupt_ledger=True,
+            )
+    assert b"subm\xffitted" in ledger.read_bytes()
 
 
 def test_trailing_unparseable_ledger_line_is_skipped(tmp_path, monkeypatch):

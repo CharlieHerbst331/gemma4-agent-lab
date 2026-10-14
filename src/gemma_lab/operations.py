@@ -471,25 +471,86 @@ def _failure_text(exc: BaseException) -> str:
 
 
 _HTTP_CODE = r"[45]\d{2}"
-# Anchored to an HTTP status. Prose such as "error: 500 bytes" or "status 500 files" does not match.
+# Code in an HTTP-error shape. A reason phrase alone is not a status.
 _HTTP_STATUS_PATTERNS = (
     re.compile(rf"\b({_HTTP_CODE})\s+(?:Client|Server)\s+Error\b"),
     re.compile(rf"\bHTTP/1\.[0-9]\s+({_HTTP_CODE})\b"),
     re.compile(rf"\bstatus[\s_-]*code\s*[:=]\s*({_HTTP_CODE})\b"),
     re.compile(rf"""["']code["']\s*:\s*({_HTTP_CODE})\b"""),
     re.compile(rf"\(({_HTTP_CODE})\)\s*Reason\s*:"),
-    re.compile(rf"\b({_HTTP_CODE})\s*[-:]\s*[A-Z][a-z]+"),
-    re.compile(rf"\b({_HTTP_CODE})(?!\s*(?:bytes|files|ms|mb|MB|s|retries)\b)\s+[A-Z][a-z]+"),
 )
-_CLIENT_REASON = re.compile(
-    r"\b(Bad Request|Payload Too Large|Unprocessable Entity|Too Many Requests)\b"
+# One phrase per code for 400-431 and 451, skipping unassigned codes. 29 in all.
+_CLIENT_REASONS: tuple[tuple[int, str], ...] = (
+    (400, "Bad Request"),
+    (401, "Unauthorized"),
+    (402, "Payment Required"),
+    (403, "Forbidden"),
+    (404, "Not Found"),
+    (405, "Method Not Allowed"),
+    (406, "Not Acceptable"),
+    (407, "Proxy Authentication Required"),
+    (408, "Request Timeout"),
+    (409, "Conflict"),
+    (410, "Gone"),
+    (411, "Length Required"),
+    (412, "Precondition Failed"),
+    (413, "Payload Too Large"),
+    (414, "URI Too Long"),
+    (415, "Unsupported Media Type"),
+    (416, "Range Not Satisfiable"),
+    (417, "Expectation Failed"),
+    (418, "I'm a Teapot"),
+    (421, "Misdirected Request"),
+    (422, "Unprocessable Entity"),
+    (423, "Locked"),
+    (424, "Failed Dependency"),
+    (425, "Too Early"),
+    (426, "Upgrade Required"),
+    (428, "Precondition Required"),
+    (429, "Too Many Requests"),
+    (431, "Request Header Fields Too Large"),
+    (451, "Unavailable For Legal Reasons"),
 )
-_CLIENT_REASON_CODE = {
-    "Bad Request": 400,
-    "Payload Too Large": 413,
-    "Unprocessable Entity": 422,
-    "Too Many Requests": 429,
-}
+# Older and current registry names for the same codes.
+_CLIENT_REASON_ALIASES: tuple[tuple[int, str], ...] = (
+    (413, "Request Entity Too Large"),
+    (413, "Content Too Large"),
+    (414, "Request-URI Too Long"),
+    (416, "Requested Range Not Satisfiable"),
+    (418, "I'm a teapot"),
+)
+_SERVER_REASONS: tuple[tuple[int, str], ...] = (
+    (500, "Internal Server Error"),
+    (501, "Not Implemented"),
+    (502, "Bad Gateway"),
+    (503, "Service Unavailable"),
+    (504, "Gateway Timeout"),
+    (505, "HTTP Version Not Supported"),
+    (506, "Variant Also Negotiates"),
+    (507, "Insufficient Storage"),
+    (508, "Loop Detected"),
+    (510, "Not Extended"),
+    (511, "Network Authentication Required"),
+)
+# Start of a line, or after HTTP / status. Not a code merely near a reason word.
+_HTTP_ERROR_ANCHOR = (
+    r"(?m)(?:^|\bHTTP(?:/1\.[0-9]|\s+Error)\s+|\bstatus(?:[\s_-]*code)?\s*[:=]?\s*)"
+)
+
+
+def _code_reason_pattern(code_class: str, phrases: tuple[str, ...]) -> re.Pattern[str]:
+    ordered = sorted(set(phrases), key=len, reverse=True)
+    alternation = "|".join(re.escape(phrase) for phrase in ordered)
+    return re.compile(_HTTP_ERROR_ANCHOR + rf"\b({code_class})(?!\d)\s*[-:]?\s*(?:{alternation})\b")
+
+
+_SERVER_CODE_PHRASE = _code_reason_pattern(
+    r"5\d{2}", tuple(phrase for _code, phrase in _SERVER_REASONS)
+)
+_CLIENT_CODE_PHRASE = _code_reason_pattern(
+    r"4\d{2}",
+    tuple(phrase for _code, phrase in (*_CLIENT_REASONS, *_CLIENT_REASON_ALIASES)),
+)
 # Orphan mkstemp files from a SIGKILL. A few minutes avoids deleting a live write.
 _LEDGER_TEMP_AGE_SECONDS = 180
 _LEDGER_TEMP_SUFFIX = re.compile(r"^[A-Za-z0-9_]{8}$")
@@ -520,17 +581,23 @@ def _response_status(exc: BaseException) -> int | None:
 
 
 def _statuses_in_text(text: str) -> list[int]:
+    """Status codes in HTTP-error form. 5xx phrases are collected first."""
     found: list[int] = []
+    for match in _SERVER_CODE_PHRASE.finditer(text):
+        found.append(int(match.group(1)))
     for pattern in _HTTP_STATUS_PATTERNS:
         for match in pattern.finditer(text):
             found.append(int(match.group(1)))
-    for match in _CLIENT_REASON.finditer(text):
-        found.append(_CLIENT_REASON_CODE[match.group(1)])
+    for match in _CLIENT_CODE_PHRASE.finditer(text):
+        found.append(int(match.group(1)))
     return found
 
 
 def _http_class(exc: BaseException) -> str | None:
-    """``4xx``, ``5xx``, or None. A response status wins over the message text."""
+    """``4xx``, ``5xx``, or None. A response status wins over the message text.
+
+    Any recognised 5xx is reserved, even when a 4xx reason also appears.
+    """
     status = _response_status(exc)
     if status is None:
         found = _statuses_in_text(_cli_text(exc))
@@ -610,12 +677,25 @@ def _read_ledger(
         return []
     today = datetime.now(UTC).date().isoformat()
     rows = []
-    for line_number, line in enumerate(ledger.read_text().splitlines(), start=1):
+    # Invalid bytes become U+FFFD so the repair hint can name the line. A raw
+    # UnicodeDecodeError would hide that hint. A line that still contains
+    # U+FFFD is unparseable: "subm\ufffditted" would otherwise load as JSON
+    # and slip past the daily guard.
+    # Known limitation: JSON truncated mid-string is unparseable, but if the
+    # cut removes "submitted", "reserved", today's UTC date, and the sha256
+    # prefix, --allow-corrupt-ledger skips that line.
+    text = ledger.read_text(encoding="utf-8", errors="replace")
+    for line_number, line in enumerate(text.splitlines(), start=1):
         if not line.strip():
             continue
-        try:
-            item = json.loads(line)
-        except json.JSONDecodeError:
+        unparseable = "\ufffd" in line
+        item = None
+        if not unparseable:
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                unparseable = True
+        if unparseable:
             reasons = _corrupt_block_reasons(line, digest, today)
             if reasons or not allow_corrupt:
                 raise ValueError(_corrupt_ledger_message(ledger, line_number, reasons)) from None
@@ -684,16 +764,17 @@ def _append_ledger(ledger: Path, row: dict) -> None:
     _fsync_directory(ledger.parent)
 
 
-def _atomic_write(path: Path, text: str) -> None:
+def _atomic_write(path: Path, text: str | bytes) -> None:
     """Write ``text`` via a same-directory temp file, then replace the target."""
+    data = text.encode("utf-8") if isinstance(text, str) else text
     directory = path.parent
     directory.mkdir(parents=True, exist_ok=True)
     _cleanup_old_ledger_temps(path)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=directory)
     tmp_path = Path(tmp_name)
     try:
-        with os.fdopen(fd, "w") as handle:
-            handle.write(text)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
@@ -716,10 +797,11 @@ def _same_ledger_row(item: dict, row: dict) -> bool:
 
 def _replace_ledger_row(ledger: Path, row: dict) -> None:
     """Replace the row with the same id. Other lines, including garbage, stay."""
-    lines = ledger.read_text().splitlines() if ledger.exists() else []
+    raw_lines = ledger.read_bytes().splitlines() if ledger.exists() else []
     target = None
-    for index, line in enumerate(lines):
-        if not line.strip():
+    for index, raw_line in enumerate(raw_lines):
+        line = raw_line.decode("utf-8", errors="replace")
+        if not line.strip() or "\ufffd" in line:
             continue
         try:
             item = json.loads(line)
@@ -734,8 +816,8 @@ def _replace_ledger_row(ledger: Path, row: dict) -> None:
             f"sha256={row.get('sha256')!r} was not found in {ledger}. "
             "The reserved line was not rewritten."
         )
-    lines[target] = json.dumps(row)
-    _atomic_write(ledger, "\n".join(lines) + "\n")
+    raw_lines[target] = json.dumps(row).encode("utf-8")
+    _atomic_write(ledger, b"\n".join(raw_lines) + b"\n")
 
 
 def submit(

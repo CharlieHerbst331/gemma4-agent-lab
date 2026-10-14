@@ -412,6 +412,20 @@ def test_edit_failure_kinds_count_not_found_and_ambiguous_loops(tmp_path):
         )
     )
     assert echoed["failed_edit_not_found"] == 1
+    broken_json = summarize_trace(
+        atif(
+            "repair",
+            [
+                (
+                    "edit_file",
+                    found_args,
+                    '{"status": "ok"\nFailed to replace: old_string not found',
+                )
+            ],
+            content=True,
+        )
+    )
+    assert broken_json["failed_edit_not_found"] == 1
 
     recovered = rows[("A", "not_found_then_success")]
     assert recovered["failed_edit_calls"] == 2
