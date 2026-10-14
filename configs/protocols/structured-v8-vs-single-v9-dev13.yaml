@@ -1,0 +1,54 @@
+# Dev-13 comparison: structured-v8 (A) vs single-v9 (B), one repeat.
+# Not a smoke. Arm A is the unrolled repair/verify candidate at 300 seconds,
+# 220 calls, and 320 turns, with thinking on for repair only. Arm B is the
+# single-agent candidate at 330 seconds, 150 calls, and 200 turns, with
+# thinking off. matched_pair is false. eval_config.yaml is the budget marker.
+# sampling.yaml and thinking.yaml are listed because the thinking tuples
+# differ in length. Schedule hashes are not required to be unique, so this
+# hash matches the other one-repeat dev-13 protocols.
+arms:
+  A:
+    source: agents/structured-v8
+    expected_sha256: 9b1b01ca6881268867b06b5610fa03fc5fcb7b9f0ae3f98df5df565fb1ab586e
+  B:
+    source: agents/single-v9
+    expected_sha256: 42665a7febbfc63a1811df5fd1f46ade4afd78977cbf6576dd285d9543fdd7f3
+matched_pair: false
+notes: "Unmatched pair. Arm A is structured-v8 at 300 seconds, 220 calls, and 320 turns, with thinking on for repair only. Arm B is single-v9 at 330 seconds, 150 calls, and 200 turns, with thinking off. eval_config.yaml is the budget marker."
+allow_identical: false
+allowed_differences:
+  - agent.yaml
+  - sub_agents/*
+  - skills/*
+  - prompts/*
+  - eval_config.yaml
+  - sampling.yaml
+  - thinking.yaml
+cohort:
+  path: configs/cohorts/dev-13-environment-screened.json
+  task_file_sha256: e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6
+repeats: 1
+order_rule: per_task_parity_v1
+shuffle_seed: null
+session_budget_seconds: 40200
+pair_start_pad_seconds: 60
+abort_policy: round2_v1
+early_stop: null
+budget_gate:
+  block:
+    - name: round2_load_plus_129_mean
+      formula: L + 129 * mean_wall
+      threshold_seconds: 38880
+    - name: coordinator_mean_times_120
+      formula: mean_wall * 120
+      threshold_seconds: 39600
+  warn:
+    - name: worst_case_12h
+      formula: L + n * (cap + p90_delta)
+      threshold_seconds: 43200
+      n_values: [120, 129]
+  L_default: 900
+  coordinator_hours: 11
+timing_tier: 2
+pins_mode: record
+exclude_import_origin_risk: true

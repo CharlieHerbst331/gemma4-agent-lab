@@ -23,7 +23,13 @@ from gemma_lab.operations import (
     PROJECTED_RUNTIME_LIMIT_SECONDS,
     WORST_CASE_WARN_SECONDS,
 )
-from gemma_lab.paired import assert_arms_compatible, inspect_arm, load_protocol, protocol_schedule
+from gemma_lab.paired import (
+    assert_arms_compatible,
+    inspect_arm,
+    load_protocol,
+    pair_fits,
+    protocol_schedule,
+)
 
 V7 = Path("agents/structured-v7")
 V8 = Path("agents/structured-v8")
@@ -33,13 +39,15 @@ SINGLE_V7 = Path("agents/single-v7")
 SINGLE_V9 = Path("agents/single-v9")
 DEV_PROTOCOL = Path("configs/protocols/structured-v7-vs-structured-v8-dev13.yaml")
 SMOKE_PROTOCOL = Path("configs/protocols/structured-v8-candidate-smoke.yaml")
+V9_PROTOCOL = Path("configs/protocols/structured-v8-vs-single-v9-dev13.yaml")
+V9_ARCHIVE = "42665a7febbfc63a1811df5fd1f46ade4afd78977cbf6576dd285d9543fdd7f3"
 DEV_SCHEDULE = "629000fccc9d9da5bfeab9823fb0e216d8c044b3a8753f320f0561223d5d24ed"
 SMOKE_SCHEDULE = "50ea6e7f7f7e54213ec78a1cec8edd9fd0398deff22450fae42abd781bba7857"
 SMOKE_TASKS = ["rich_4070", "rich_3934", "fastapi_11194", "rich_3938", "fastapi_14262"]
 CAP_SECONDS = 300
 PROJECTED_MEAN_SECONDS = 255
 V7_ARCHIVE = "a3a08b179fee800ee0575af2a55ad14f47c42c369bf32fd4d52227a9da1109df"
-V8_ARCHIVE = "16cee658599fe212c9909868cd0a84c01da6cd8bddab6d9691190b3dbd953e2b"
+V8_ARCHIVE = "9b1b01ca6881268867b06b5610fa03fc5fcb7b9f0ae3f98df5df565fb1ab586e"
 SINGLE_V8_ARCHIVE = "6f44de6401910907b6c65f89549727d2c4492a54c3ed13743033623d81dfdc22"
 CHECK_ARCHIVE = "64dc727d78c4189c1db1184e74129290574c7b97816dd91f91d2baa7defe0fb0"
 SINGLE_V7_ARCHIVE = "f62c8c0b92bc5bd1fb1015f20e7cbd7a5599d5518d2d59097bf2b40d9f3412b0"
@@ -146,12 +154,12 @@ def test_prompts_force_handoff_deadlines_without_a_ratio_warning():
     verify_2 = _prompt("verify_2")
     verify_3 = _prompt("verify_3")
     assert len(triage) == 1937
-    assert len(repair_1) == 5287
-    assert len(repair_2) == 2889
-    assert len(repair_3) == 2254
+    assert len(repair_1) == 5417
+    assert len(repair_2) == 3019
+    assert len(repair_3) == 2376
     assert len(verify_1) == 1685
     assert len(verify_2) == 1316
-    assert len(verify_3) == 4183
+    assert len(verify_3) == 4303
     assert "under 20 seconds" in triage
     assert "Do not stop with UNCERTAIN" in triage
     joined = "\n".join([triage, repair_1, repair_2, repair_3, verify_1, verify_2, verify_3])
@@ -162,8 +170,12 @@ def test_prompts_force_handoff_deadlines_without_a_ratio_warning():
         assert "time_seconds_remaining is under 120" in prompt
         assert "the next call is the heredoc" in prompt
         assert 'ast.parse(s.decode("utf-8"))' in prompt
-        assert "python -m py_compile PATH" in prompt
-        assert "cp /tmp/line_fix.bak PATH" in prompt
+        assert 'backup = "/tmp/pre_" + path.replace("/", "_")' in prompt
+        assert "shutil.copyfile(path, backup)" in prompt
+        assert "shutil.copyfile(backup, path)" in prompt
+        assert "py_compile.compile(path, doraise=True)" in prompt
+        assert "onto no other file" in prompt
+        assert "line_fix.bak" not in prompt
         assert "git checkout --" not in prompt
         assert "Never run git checkout" in prompt
         assert "/tmp" in prompt
@@ -234,6 +246,36 @@ def test_dev13_and_smoke_protocols_load():
     assert minimum == 6780
     assert smoke["session_budget_seconds"] >= minimum
     assert smoke["session_budget_seconds"] < WORST_CASE_WARN_SECONDS
+
+
+def test_structured_v8_vs_single_v9_dev13_protocol():
+    protocol = load_protocol(V9_PROTOCOL)
+    assert protocol["matched_pair"] is False
+    assert protocol["repeats"] == 1
+    assert protocol["session_budget_seconds"] == 40200
+    assert protocol["arms"]["A"]["source"] == "agents/structured-v8"
+    assert protocol["arms"]["B"]["source"] == "agents/single-v9"
+    assert protocol["arms"]["A"]["expected_sha256"] == V8_ARCHIVE
+    assert protocol["arms"]["B"]["expected_sha256"] == V9_ARCHIVE
+    schedule = protocol_schedule(protocol)
+    assert len(schedule["entries"]) == 13
+    assert schedule["sha256"] == DEV_SCHEDULE
+    assert_arms_compatible(
+        inspect_arm(V8),
+        inspect_arm(SINGLE_V9),
+        allow_identical=False,
+        allowed_differences=protocol["allowed_differences"],
+        sha_a=V8_ARCHIVE,
+        sha_b=V9_ARCHIVE,
+        matched_pair=False,
+    )
+    # Session clock is the max arm cap (330 s). extra_elapsed is the tasks.jsonl wait.
+    minimum = pair_fits_minimum_budget(13, 2, 330, extra_elapsed=300)
+    assert minimum == 9900
+    assert protocol["session_budget_seconds"] >= minimum
+    # Elapsed before the last task if every earlier arm hit the 330 s session cap:
+    # 900 + 300 + 12 * 2 * 330 = 9120. The last pair still fits.
+    assert pair_fits(9120, 2, 330, 0, protocol["session_budget_seconds"], 60) is True
 
 
 def test_runtime_gates_for_cap_and_projected_mean():

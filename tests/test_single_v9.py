@@ -18,7 +18,7 @@ from gemma_lab.operations import (
 V8 = Path("agents/single-v8")
 V9 = Path("agents/single-v9")
 V8_ARCHIVE = "6f44de6401910907b6c65f89549727d2c4492a54c3ed13743033623d81dfdc22"
-V9_ARCHIVE = "0b9efe69189799bde760529e9b75e35d15dbcc63d4214ca459e57dcd3b21dd7e"
+V9_ARCHIVE = "42665a7febbfc63a1811df5fd1f46ade4afd78977cbf6576dd285d9543fdd7f3"
 CAP_SECONDS = 330
 # 330 - 45. This aimed submit point is above the 255 second mean ceiling.
 PROJECTED_SUBMIT_SECONDS = 285
@@ -44,7 +44,7 @@ def test_single_v9_changes_only_the_prompt():
     prompt = (V9 / "prompts" / "system.md").read_text()
     parent = (V8 / "prompts" / "system.md").read_text()
     assert prompt != parent
-    assert len(prompt) == 9156
+    assert len(prompt) == 9286
     assert "about 90 seconds" in prompt
     assert "about 165 seconds" in prompt
     assert "time_seconds_remaining is under 120" in prompt
@@ -52,8 +52,11 @@ def test_single_v9_changes_only_the_prompt():
     assert "the next call is the heredoc edit" in prompt
     assert "A cap hit with no diff must not happen." in prompt
     assert 'ast.parse(s.decode("utf-8"))' in prompt
-    assert "python -m py_compile PATH" in prompt
-    assert "cp /tmp/line_fix.bak PATH" in prompt
+    assert 'backup = "/tmp/pre_" + path.replace("/", "_")' in prompt
+    assert "shutil.copyfile(backup, path)" in prompt
+    assert "py_compile.compile(path, doraise=True)" in prompt
+    assert "onto no other file" in prompt
+    assert "line_fix.bak" not in prompt
     assert "git checkout --" not in prompt
     assert "Never run git checkout" in prompt
     assert "fewer than 60 seconds remain" not in prompt

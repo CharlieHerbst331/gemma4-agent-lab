@@ -333,12 +333,72 @@ def check_projected_runtime(rows, manifest, archive, evaluation, overhead):
     return report
 
 
-def check_evaluation(archive, evaluation, scorer_overhead_seconds=DEFAULT_SCORER_OVERHEAD_SECONDS):
+def resolve_submission_evaluation(archive, evaluation, arm=None):
+    """Select the result folder whose archive hash matches the submission.
+
+    A single-arm directory that already holds ``run_manifest.json`` and
+    ``task_results.jsonl`` is used as-is. A pair run root holds
+    ``pair_manifest.json`` and one folder per arm at ``results/<arm>/r<k>/``.
+    Each of those folders has its own manifest. The folder whose ``sha256``
+    equals the archive is the one ``submit --evaluation`` can check. ``arm``
+    limits the search to that label.
+    """
+    evaluation = Path(evaluation)
+    if not evaluation.is_dir():
+        raise ValueError(f"Evaluation directory does not exist: {evaluation}")
+    pair_root = (evaluation / "pair_manifest.json").is_file()
+    direct_manifest = evaluation / "run_manifest.json"
+    direct_rows = evaluation / "task_results.jsonl"
+    if direct_manifest.is_file() and direct_rows.is_file() and not pair_root:
+        return evaluation
+    results = evaluation / "results"
+    if not pair_root and not results.is_dir():
+        return evaluation
+    digest = sha256(Path(archive))
+    matches = []
+    if results.is_dir():
+        for manifest_path in sorted(results.glob("*/*/run_manifest.json")):
+            folder = manifest_path.parent
+            if not (folder / "task_results.jsonl").is_file():
+                continue
+            try:
+                recorded = json.loads(manifest_path.read_text())
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"Unreadable arm manifest: {manifest_path}") from exc
+            if not isinstance(recorded, dict) or recorded.get("sha256") != digest:
+                continue
+            label = str(recorded.get("arm") or folder.parent.name)
+            if arm is not None and label != str(arm) and folder.parent.name != str(arm):
+                continue
+            matches.append(folder)
+    if arm is not None and not matches:
+        raise ValueError(
+            f"No completed results for arm {arm} whose run_manifest sha256 matches the archive"
+        )
+    if not matches:
+        raise ValueError(
+            "Pair results have no arm folder whose run_manifest sha256 matches the archive. "
+            "Point --evaluation at results/<arm>/r<k>, or pass the pair root with the "
+            "archive of the arm that passed."
+        )
+    if len(matches) > 1:
+        listed = ", ".join(str(path.relative_to(evaluation)) for path in matches)
+        raise ValueError(
+            "Multiple arm result folders match this archive ("
+            + listed
+            + "). Pass that results/<arm>/r<k> directory as --evaluation."
+        )
+    return matches[0]
+
+
+def check_evaluation(
+    archive, evaluation, scorer_overhead_seconds=DEFAULT_SCORER_OVERHEAD_SECONDS, *, arm=None
+):
     from gemma_lab.metrics import load_results, summary
 
     if evaluation is None:
         raise ValueError("Actual upload requires --evaluation with completed GPU outputs")
-    evaluation = Path(evaluation)
+    evaluation = resolve_submission_evaluation(archive, evaluation, arm=arm)
     manifest = json.loads((evaluation / "run_manifest.json").read_text())
     if manifest["sha256"] != sha256(Path(archive)):
         raise ValueError("Evaluation archive hash does not match submission")
@@ -359,6 +419,9 @@ def check_evaluation(archive, evaluation, scorer_overhead_seconds=DEFAULT_SCORER
     # Also inspect official diagnostics: older collectors omitted returned failures.
     for row in rows:
         detail_path = evaluation / "results" / f"{row['instance_id']}.json"
+        sibling = evaluation / f"{row['instance_id']}.json"
+        if not detail_path.is_file() and sibling.is_file():
+            detail_path = sibling
         if detail_path.exists():
             detail = json.loads(detail_path.read_text())
             runner_error = detail.get("error_message") or ""
@@ -379,6 +442,9 @@ def check_evaluation(archive, evaluation, scorer_overhead_seconds=DEFAULT_SCORER
         rows, manifest, archive, evaluation, scorer_overhead_seconds
     )
     result = summary(rows)
+    result["evaluation_dir"] = str(evaluation)
+    if manifest.get("arm"):
+        result["arm"] = manifest["arm"]
     result["projection"] = {
         "ok_120": projection["ok_120"],
         "P_ok": projection["P_ok"],
@@ -835,6 +901,7 @@ def submit(
     evaluation=None,
     scorer_overhead_seconds=DEFAULT_SCORER_OVERHEAD_SECONDS,
     allow_corrupt_ledger=False,
+    arm=None,
 ):
     archive = Path(archive).resolve()
     validate_archive(archive)
@@ -850,7 +917,7 @@ def submit(
     if not execute:
         return plan
     plan["evaluation"] = check_evaluation(
-        archive, evaluation, scorer_overhead_seconds=scorer_overhead_seconds
+        archive, evaluation, scorer_overhead_seconds=scorer_overhead_seconds, arm=arm
     )
     # Reserve before upload so a timeout, where the file may already have been received,
     # cannot cause an automatic duplicate. A definite submit error is recorded as failed

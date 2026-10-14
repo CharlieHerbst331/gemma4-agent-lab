@@ -47,20 +47,24 @@ if path.endswith(".py"):
     import ast
     ast.parse(s.decode("utf-8"))
 import shutil
-shutil.copyfile(path, "/tmp/line_fix.bak")
+backup = "/tmp/pre_" + path.replace("/", "_")
+shutil.copyfile(path, backup)
 f = open(path, "wb")
 f.write(s)
 f.close()
+if path.endswith(".py"):
+    import py_compile
+    try:
+        py_compile.compile(path, doraise=True)
+    except Exception:
+        shutil.copyfile(backup, path)
+        raise
+print(backup)
 EOF
 python /tmp/line_fix.py
-python -m py_compile PATH
 git diff
 
-Run python -m py_compile only when PATH ends in .py. The helper asserts and runs ast.parse before it writes. The backup /tmp/line_fix.bak is copied only after that parse succeeds, immediately before the write. If python /tmp/line_fix.py fails, PATH was not written. Do not restore it. Retry a smaller edit (fewer lines in OLD and NEW). If python -m py_compile PATH fails, restore only from that backup:
-
-cp /tmp/line_fix.bak PATH
-
-Then retry a smaller edit. Never run git checkout. A failed assert or ast.parse must not revert an earlier edit of PATH.
+The helper asserts and runs ast.parse before any write. Only after that succeeds it saves this PATH under /tmp, then writes PATH. If python /tmp/line_fix.py fails before that save, PATH was not written. Do not restore it. If py_compile fails, the helper copies that /tmp backup back onto PATH and onto no other file. Do not restore again. Retry a smaller edit (fewer lines in OLD and NEW). Never run git checkout. A failed assert or ast.parse must not revert an earlier edit of PATH.
 
 Do not nest quotes, and do not use an unquoted heredoc. Keep OLD and NEW free of backslashes and triple quotes. A line break can be \n inside b"...". Non-ASCII bytes need \xNN.
 

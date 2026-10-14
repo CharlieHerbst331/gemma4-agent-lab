@@ -48,11 +48,12 @@ What is prompt-only, via `get_status`:
   call is one heredoc, then `submit_patch`. A cap hit with no diff is the
   failure the prompt forbids. `verify_3` then calls `submit_patch` even if
   that heredoc left the diff empty. A text-only ending restarts the root.
-- `ast.parse` runs before the write. The helper copies `PATH` to
-  `/tmp/line_fix.bak` only after that parse succeeds. `python -m py_compile`
-  runs after the write. A failed helper does not restore anything. A failed
-  `py_compile` restores with `cp /tmp/line_fix.bak PATH`. The recipe does not
-  use git to restore a file. This is still prompt text, not a harness hook.
+- `ast.parse` runs before the write. After that parse succeeds, the helper
+  copies this PATH to `/tmp/pre_` plus the path with `/` replaced by `_`,
+  then writes PATH. If `py_compile.compile` fails, the helper copies that
+  backup back onto PATH and onto no other file. A failed assert or
+  `ast.parse` never writes PATH, so nothing is restored. The prompt says
+  never run git checkout. This is still prompt text, not a harness hook.
 - When 45 seconds or more remain, `verify_3` must call
   `{"skill_name":"check","file_path":"scripts/run.py"}` before `submit_patch`.
   Under 45 seconds the submit deadline wins, so the check is skipped.
@@ -145,12 +146,12 @@ No first-request token total is claimed.
 | Role | Characters | chars/4 |
 | --- | --- | --- |
 | triage | 1937 | 484.25 |
-| repair_1 | 5287 | 1321.75 |
+| repair_1 | 5417 | 1354.25 |
 | verify_1 | 1685 | 421.25 |
-| repair_2 | 2889 | 722.25 |
+| repair_2 | 3019 | 754.75 |
 | verify_2 | 1316 | 329 |
-| repair_3 | 2254 | 563.5 |
-| verify_3 | 4183 | 1045.75 |
+| repair_3 | 2376 | 594 |
+| verify_3 | 4303 | 1075.75 |
 
 The completion reservation is 1024 tokens on triage and 2048 on the other
 roles, inside a 32768 context. Those ceilings are harness limits, not measured
@@ -158,8 +159,8 @@ prompt tokens.
 
 ## Archives and protocols
 
-- structured-v8 sha256 `16cee658599fe212c9909868cd0a84c01da6cd8bddab6d9691190b3dbd953e2b`
-- single-v9 sha256 `0b9efe69189799bde760529e9b75e35d15dbcc63d4214ca459e57dcd3b21dd7e`
+- structured-v8 sha256 `9b1b01ca6881268867b06b5610fa03fc5fcb7b9f0ae3f98df5df565fb1ab586e`
+- single-v9 sha256 `42665a7febbfc63a1811df5fd1f46ade4afd78977cbf6576dd285d9543fdd7f3`
   (see `docs/SINGLE_V9.md`)
 - Unchanged: structured-v7 `a3a08b179fee800ee0575af2a55ad14f47c42c369bf32fd4d52227a9da1109df`,
   single-v8 `6f44de6401910907b6c65f89549727d2c4492a54c3ed13743033623d81dfdc22`,
@@ -182,6 +183,22 @@ for `notebook-multi`: A structured-v7, B structured-v8, C single-v9. Tasks:
 Schedule hash `50ea6e7f7f7e54213ec78a1cec8edd9fd0398deff22450fae42abd781bba7857`.
 `pair_fits` worst case is 6780 seconds. Session budget 14400 seconds.
 
+`configs/protocols/structured-v8-vs-single-v9-dev13.yaml` is dev-13, one
+repeat, A structured-v8, B single-v9, `matched_pair: false`. The schedule
+hash is `629000fccc9d9da5bfeab9823fb0e216d8c044b3a8753f320f0561223d5d24ed`.
+The notebook session cap is the max arm cap, 330 seconds. `pair_fits`
+minimum budget for 13 tasks and 2 arms, with the 300 second tasks.jsonl wait,
+is `900 + 300 + 13 * 2 * 330 + 2 * 60 = 9900` seconds. Session budget 40200
+seconds, which still starts the last task when every earlier arm hits that
+330 second cap (`pair_fits(9120, 2, 330, 0, 40200, 60)`).
+
+A completed pair output directory is a valid `submit --evaluation` path.
+The arm folder under `results/<arm>/r<k>` whose `run_manifest.json` sha256
+matches the archive is the one that is checked. `--arm` restricts that
+search. The archive hash still has to match. `projection.json` is written
+into that arm folder. Pointing `--evaluation` at `results/<arm>/r<k>`
+directly also works.
+
 Generate notebooks under `/tmp` (not committed). Owner `charlesaherbst`,
 wheelhouse version 30:
 
@@ -192,12 +209,23 @@ uv run gemma-lab notebook-pair \
   --slug structured-v7-vs-structured-v8-dev13 \
   --output /tmp/structured-v7-vs-structured-v8-dev13 \
   --wheelhouse-version 30
+uv run gemma-lab notebook-pair \
+  --protocol configs/protocols/structured-v8-vs-single-v9-dev13.yaml \
+  --owner charlesaherbst \
+  --slug structured-v8-vs-single-v9-dev13 \
+  --output /tmp/structured-v8-vs-single-v9-dev13 \
+  --wheelhouse-version 30
 uv run gemma-lab notebook-multi \
   --protocol configs/protocols/structured-v8-candidate-smoke.yaml \
   --owner charlesaherbst \
   --slug structured-v8-candidate-smoke \
   --output /tmp/structured-v8-candidate-smoke \
   --wheelhouse-version 30
+uv run gemma-lab submit /tmp/structured-v8-submission.zip \
+  --message "structured-v8 dev-13" \
+  --evaluation /tmp/structured-v8-vs-single-v9-dev13 \
+  --arm A \
+  --execute
 ```
 
 ## Why verify_3 always submits
