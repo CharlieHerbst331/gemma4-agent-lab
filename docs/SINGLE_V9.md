@@ -65,5 +65,9 @@ count. No first-request token total is claimed.
 uv run gemma-lab pack agents/single-v9 --output /tmp/single-v9-submission.zip
 ```
 
-single-v9 is arm C of `configs/protocols/structured-v8-candidate-smoke.yaml`.
-See `docs/STRUCTURED_V8.md` for the notebook command.
+single-v9 is arm B of
+`configs/protocols/structured-v8-vs-single-v9-dev13.yaml` and arm C of
+`configs/protocols/structured-v8-candidate-smoke.yaml`. The dev-13 notebook
+command, schedule hash, session budget 40200, and `pair_fits` minimum 9900
+are in `docs/STRUCTURED_V8.md`. Submit that pair-results directory with
+`--arm B` when this archive is the one that passed.

@@ -156,7 +156,17 @@ def main(argv=None):
     submit.add_argument("--message", required=True)
     submit.add_argument("--execute", action="store_true")
     submit.add_argument(
-        "--evaluation", type=Path, help="Completed GPU output folder for this archive"
+        "--evaluation",
+        type=Path,
+        help=(
+            "Completed GPU output folder for this archive. A pair run root is "
+            "accepted: the arm folder under results/<arm>/r<k> whose manifest "
+            "sha256 matches the archive is checked. --arm restricts that search."
+        ),
+    )
+    submit.add_argument(
+        "--arm",
+        help="Arm label when --evaluation is a pair run root. The archive hash still has to match.",
     )
     submit.add_argument(
         "--allow-corrupt-ledger",
@@ -339,6 +349,7 @@ def main(argv=None):
                     evaluation=args.evaluation,
                     scorer_overhead_seconds=args.scorer_overhead_seconds,
                     allow_corrupt_ledger=args.allow_corrupt_ledger,
+                    arm=args.arm,
                 )
             case "hygiene":
                 from gemma_lab.hygiene import HygieneInputError, run_cli
