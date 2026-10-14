@@ -532,16 +532,23 @@ _SERVER_REASONS: tuple[tuple[int, str], ...] = (
     (510, "Not Extended"),
     (511, "Network Authentication Required"),
 )
-# Start of a line, or after HTTP / status. Not a code merely near a reason word.
+# Start of a line (leading whitespace allowed), or after HTTP, status, error:, or
+# failed:. The anchor is case-insensitive; the reason phrase is not. A code merely
+# near a reason word is not a status, so "Error 404 Not Found in log line" does not match.
 _HTTP_ERROR_ANCHOR = (
-    r"(?m)(?:^|\bHTTP(?:/1\.[0-9]|\s+Error)\s+|\bstatus(?:[\s_-]*code)?\s*[:=]?\s*)"
+    r"(?im)(?:^\s*"
+    r"|\bHTTP(?:/1\.[0-9]|/2)?(?:\s+Error)?\s+"
+    r"|\bstatus(?:[\s_-]*code)?\s*[:=]?\s*"
+    r"|\b(?:error|failed)\s*:\s*"
+    r")"
 )
 
 
 def _code_reason_pattern(code_class: str, phrases: tuple[str, ...]) -> re.Pattern[str]:
     ordered = sorted(set(phrases), key=len, reverse=True)
     alternation = "|".join(re.escape(phrase) for phrase in ordered)
-    return re.compile(_HTTP_ERROR_ANCHOR + rf"\b({code_class})(?!\d)\s*[-:]?\s*(?:{alternation})\b")
+    phrase = rf"\b({code_class})(?!\d)\s*[-:]?\s*(?:{alternation})\b"
+    return re.compile(_HTTP_ERROR_ANCHOR + "(?-i:" + phrase + ")")
 
 
 _SERVER_CODE_PHRASE = _code_reason_pattern(

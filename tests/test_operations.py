@@ -572,6 +572,38 @@ def test_real_4xx_status_forms_are_definite_failures():
     assert missed == []
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Status: 400 Bad Request",
+        "HTTP 403 Forbidden",
+        "HTTP/2 403 Forbidden",
+        "Error: 403 Forbidden",
+        "ERROR: 400 Bad Request",
+        "Submission failed: 400 Bad Request",
+        "  400 Bad Request",
+    ],
+)
+def test_real_4xx_prefixes_are_definite_failures(text):
+    assert operations._definite_submit_failure(RuntimeError(text)) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Status: 500 Internal Server Error",
+        "HTTP 503 Service Unavailable",
+        "HTTP/2 502 Bad Gateway",
+        "Error: 503 Service Unavailable: upstream Forbidden by policy",
+        "ERROR: 500 Internal Server Error: Conflict in database",
+        "Submission failed: 504 Gateway Timeout: Request Timeout",
+        "  503 Service Unavailable: Forbidden by policy",
+    ],
+)
+def test_real_5xx_prefixes_stay_reserved(text):
+    assert operations._definite_submit_failure(RuntimeError(text)) is False
+
+
 def test_real_5xx_status_forms_stay_ambiguous():
     missed = []
     for code, reason in operations._SERVER_REASONS:
