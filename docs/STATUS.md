@@ -7,11 +7,7 @@ Last updated: October 14, 2026.
 `agents/structured-v8` and `agents/single-v9` are new candidates. Existing agent
 directories were not modified. No score is claimed. No Kaggle push and no GPU run.
 Design, gate numbers, and archive hashes: `docs/STRUCTURED_V8.md` and
-`docs/SINGLE_V9.md`. Dev-13 A/B protocol:
-`configs/protocols/structured-v8-vs-single-v9-dev13.yaml` (one repeat,
-session budget 40200 seconds). `submit --evaluation` accepts that pair-results
-root and selects the arm whose archive hash matches. The structured frontier
-until a measured comparison is
+`docs/SINGLE_V9.md`. The structured frontier until a measured comparison is
 `agents/structured-v7`
 (`a3a08b179fee800ee0575af2a55ad14f47c42c369bf32fd4d52227a9da1109df`).
 Its 360 second cap warns on the 12 hour formula and does not block unless a

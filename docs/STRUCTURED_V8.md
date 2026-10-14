@@ -183,22 +183,6 @@ for `notebook-multi`: A structured-v7, B structured-v8, C single-v9. Tasks:
 Schedule hash `50ea6e7f7f7e54213ec78a1cec8edd9fd0398deff22450fae42abd781bba7857`.
 `pair_fits` worst case is 6780 seconds. Session budget 14400 seconds.
 
-`configs/protocols/structured-v8-vs-single-v9-dev13.yaml` is dev-13, one
-repeat, A structured-v8, B single-v9, `matched_pair: false`. The schedule
-hash is `629000fccc9d9da5bfeab9823fb0e216d8c044b3a8753f320f0561223d5d24ed`.
-The notebook session cap is the max arm cap, 330 seconds. `pair_fits`
-minimum budget for 13 tasks and 2 arms, with the 300 second tasks.jsonl wait,
-is `900 + 300 + 13 * 2 * 330 + 2 * 60 = 9900` seconds. Session budget 40200
-seconds, which still starts the last task when every earlier arm hits that
-330 second cap (`pair_fits(9120, 2, 330, 0, 40200, 60)`).
-
-A completed pair output directory is a valid `submit --evaluation` path.
-The arm folder under `results/<arm>/r<k>` whose `run_manifest.json` sha256
-matches the archive is the one that is checked. `--arm` restricts that
-search. The archive hash still has to match. `projection.json` is written
-into that arm folder. Pointing `--evaluation` at `results/<arm>/r<k>`
-directly also works.
-
 Generate notebooks under `/tmp` (not committed). Owner `charlesaherbst`,
 wheelhouse version 30:
 
@@ -209,23 +193,12 @@ uv run gemma-lab notebook-pair \
   --slug structured-v7-vs-structured-v8-dev13 \
   --output /tmp/structured-v7-vs-structured-v8-dev13 \
   --wheelhouse-version 30
-uv run gemma-lab notebook-pair \
-  --protocol configs/protocols/structured-v8-vs-single-v9-dev13.yaml \
-  --owner charlesaherbst \
-  --slug structured-v8-vs-single-v9-dev13 \
-  --output /tmp/structured-v8-vs-single-v9-dev13 \
-  --wheelhouse-version 30
 uv run gemma-lab notebook-multi \
   --protocol configs/protocols/structured-v8-candidate-smoke.yaml \
   --owner charlesaherbst \
   --slug structured-v8-candidate-smoke \
   --output /tmp/structured-v8-candidate-smoke \
   --wheelhouse-version 30
-uv run gemma-lab submit /tmp/structured-v8-submission.zip \
-  --message "structured-v8 dev-13" \
-  --evaluation /tmp/structured-v8-vs-single-v9-dev13 \
-  --arm A \
-  --execute
 ```
 
 ## Why verify_3 always submits

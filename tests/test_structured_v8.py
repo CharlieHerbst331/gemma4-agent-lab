@@ -23,13 +23,7 @@ from gemma_lab.operations import (
     PROJECTED_RUNTIME_LIMIT_SECONDS,
     WORST_CASE_WARN_SECONDS,
 )
-from gemma_lab.paired import (
-    assert_arms_compatible,
-    inspect_arm,
-    load_protocol,
-    pair_fits,
-    protocol_schedule,
-)
+from gemma_lab.paired import assert_arms_compatible, inspect_arm, load_protocol, protocol_schedule
 
 V7 = Path("agents/structured-v7")
 V8 = Path("agents/structured-v8")
@@ -39,8 +33,6 @@ SINGLE_V7 = Path("agents/single-v7")
 SINGLE_V9 = Path("agents/single-v9")
 DEV_PROTOCOL = Path("configs/protocols/structured-v7-vs-structured-v8-dev13.yaml")
 SMOKE_PROTOCOL = Path("configs/protocols/structured-v8-candidate-smoke.yaml")
-V9_PROTOCOL = Path("configs/protocols/structured-v8-vs-single-v9-dev13.yaml")
-V9_ARCHIVE = "42665a7febbfc63a1811df5fd1f46ade4afd78977cbf6576dd285d9543fdd7f3"
 DEV_SCHEDULE = "629000fccc9d9da5bfeab9823fb0e216d8c044b3a8753f320f0561223d5d24ed"
 SMOKE_SCHEDULE = "50ea6e7f7f7e54213ec78a1cec8edd9fd0398deff22450fae42abd781bba7857"
 SMOKE_TASKS = ["rich_4070", "rich_3934", "fastapi_11194", "rich_3938", "fastapi_14262"]
@@ -246,36 +238,6 @@ def test_dev13_and_smoke_protocols_load():
     assert minimum == 6780
     assert smoke["session_budget_seconds"] >= minimum
     assert smoke["session_budget_seconds"] < WORST_CASE_WARN_SECONDS
-
-
-def test_structured_v8_vs_single_v9_dev13_protocol():
-    protocol = load_protocol(V9_PROTOCOL)
-    assert protocol["matched_pair"] is False
-    assert protocol["repeats"] == 1
-    assert protocol["session_budget_seconds"] == 40200
-    assert protocol["arms"]["A"]["source"] == "agents/structured-v8"
-    assert protocol["arms"]["B"]["source"] == "agents/single-v9"
-    assert protocol["arms"]["A"]["expected_sha256"] == V8_ARCHIVE
-    assert protocol["arms"]["B"]["expected_sha256"] == V9_ARCHIVE
-    schedule = protocol_schedule(protocol)
-    assert len(schedule["entries"]) == 13
-    assert schedule["sha256"] == DEV_SCHEDULE
-    assert_arms_compatible(
-        inspect_arm(V8),
-        inspect_arm(SINGLE_V9),
-        allow_identical=False,
-        allowed_differences=protocol["allowed_differences"],
-        sha_a=V8_ARCHIVE,
-        sha_b=V9_ARCHIVE,
-        matched_pair=False,
-    )
-    # Session clock is the max arm cap (330 s). extra_elapsed is the tasks.jsonl wait.
-    minimum = pair_fits_minimum_budget(13, 2, 330, extra_elapsed=300)
-    assert minimum == 9900
-    assert protocol["session_budget_seconds"] >= minimum
-    # Elapsed before the last task if every earlier arm hit the 330 s session cap:
-    # 900 + 300 + 12 * 2 * 330 = 9120. The last pair still fits.
-    assert pair_fits(9120, 2, 330, 0, protocol["session_budget_seconds"], 60) is True
 
 
 def test_runtime_gates_for_cap_and_projected_mean():

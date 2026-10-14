@@ -124,8 +124,8 @@ def test_agent_directories_stay_at_twenty_three():
 def test_existing_protocols_remain_two_arm():
     paths = sorted(Path("configs/protocols").glob("*.yaml"))
     others = [path for path in paths if path not in MULTI_PROTOCOLS]
-    assert len(paths) == 16
-    assert len(others) == 14
+    assert len(paths) == 15
+    assert len(others) == 13
     for path in others:
         protocol = load_protocol(path)
         assert set(protocol["arms"]) == {"A", "B"}
