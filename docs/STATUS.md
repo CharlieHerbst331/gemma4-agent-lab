@@ -1,6 +1,17 @@
 # Project status
 
-Last updated: October 10, 2026.
+Last updated: October 14, 2026.
+
+## Unevaluated structured-v8 and single-v9
+
+`agents/structured-v8` and `agents/single-v9` are new candidates. Existing agent
+directories were not modified. No score is claimed. No Kaggle push and no GPU run.
+Design, gate numbers, and archive hashes: `docs/STRUCTURED_V8.md` and
+`docs/SINGLE_V9.md`. The structured frontier until a measured comparison is
+`agents/structured-v7`
+(`a3a08b179fee800ee0575af2a55ad14f47c42c369bf32fd4d52227a9da1109df`).
+Its 360 second cap warns on the 12 hour formula and does not block unless a
+measured mean equals that cap.
 
 ## Unevaluated structured-v5 candidate
 

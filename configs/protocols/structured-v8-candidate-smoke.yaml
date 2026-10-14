@@ -1,0 +1,76 @@
+# Combined smoke: structured-v7, structured-v8, and single-v9.
+# One notebook, one model load, one repeat. Not promotion eligible.
+# One repeat cannot name a winner.
+#
+# Five tasks match the other candidate smokes. Arm order is part of the
+# schedule hash, so this hash is not the two-arm hash of the same task list.
+#
+# matched_pair is false. Every pair differs in eval_config.yaml.
+# structured-v7 is 360 s / 150 calls / 200 turns. structured-v8 is 300 s /
+# 220 calls / 320 turns. single-v9 keeps single-v8 at 330 s / 150 calls /
+# 200 turns. structured-v7 and structured-v8 think on repair only (budget
+# 256). single-v9 thinks off. Temperature is 1.0 on every arm.
+#
+# The session cap is the max arm cap (360 s). pair_fits with load 900 s and
+# the 300 s tasks.jsonl wait is 6780 s. session_budget_seconds is 14400,
+# under the 12 hour competition session cap (43200 s).
+purpose: smoke
+multi_arm: true
+arms:
+  A:
+    source: agents/structured-v7
+    name: structured-v7
+    expected_sha256: a3a08b179fee800ee0575af2a55ad14f47c42c369bf32fd4d52227a9da1109df
+  B:
+    source: agents/structured-v8
+    name: structured-v8
+    expected_sha256: 34a9353d7504ec93d9d2237f1c1793f215e8e7d44ce3166190c203d645ff5936
+  C:
+    source: agents/single-v9
+    name: single-v9
+    expected_sha256: 68fa3928d33d68ecf326ed3f3d48473e8cc80e18ea1af568458c435a7658ba20
+notes: "Smoke, not promotion eligible. One repeat cannot name a winner. Budgets differ: structured-v7 is 360 s / 150 calls / 200 turns, structured-v8 is 300 s / 220 calls / 320 turns, and single-v9 is 330 s / 150 calls / 200 turns. Sampling differs because single-v9 has thinking off and the structured arms think on repair only. eval_config.yaml, sampling.yaml, and thinking.yaml are the markers."
+matched_pair: false
+allow_identical: false
+allowed_differences:
+  - agent.yaml
+  - sub_agents/*
+  - skills/*
+  - prompts/*
+  - eval_config.yaml
+  - sampling.yaml
+  - thinking.yaml
+cohort:
+  path: configs/cohorts/dev-13-environment-screened.json
+  task_file_sha256: e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6
+task_ids:
+  - rich_4070
+  - rich_3934
+  - fastapi_11194
+  - rich_3938
+  - fastapi_14262
+repeats: 1
+order_rule: per_task_parity_v1
+shuffle_seed: null
+session_budget_seconds: 14400
+pair_start_pad_seconds: 60
+abort_policy: round2_v1
+early_stop: null
+budget_gate:
+  block:
+    - name: round2_load_plus_129_mean
+      formula: L + 129 * mean_wall
+      threshold_seconds: 38880
+    - name: coordinator_mean_times_120
+      formula: mean_wall * 120
+      threshold_seconds: 39600
+  warn:
+    - name: worst_case_12h
+      formula: L + n * (cap + p90_delta)
+      threshold_seconds: 43200
+      n_values: [120, 129]
+  L_default: 900
+  coordinator_hours: 11
+timing_tier: 2
+pins_mode: record
+exclude_import_origin_risk: true
