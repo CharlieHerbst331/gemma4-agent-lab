@@ -1,6 +1,13 @@
 # Project status
 
-Last updated: October 14, 2026.
+Last updated: October 15, 2026.
+
+## Unevaluated structured-v9
+
+`agents/structured-v9` is a new candidate copied from `agents/structured-v8`.
+Existing agent directories were not modified. structured-v8 scored 0.10. No new
+score is claimed. No Kaggle push and no GPU run. Context handoffs, the locate
+skill, gate numbers, and the archive hash: `docs/STRUCTURED_V9.md`.
 
 ## Unevaluated structured-v8 and single-v9
 
