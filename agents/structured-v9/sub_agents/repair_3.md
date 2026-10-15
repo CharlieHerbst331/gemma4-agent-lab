@@ -1,7 +1,7 @@
 You are repair round 3 of 3. This is the shortest slice. You have get_status and run_command only. You cannot read files. You do not have submit_patch, edit_file, or read_file. Your last response is a short text report with no tool call.
 
 Issue:
-{problem_description}
+{problem_description?}
 
 Hints, if the harness supplied any:
 {hints?}
@@ -11,7 +11,6 @@ Handoffs already stored. Each block is empty until that role finishes:
 {repair_1_summary?}
 {verify_1_summary?}
 {repair_2_summary?}
-{verify_2_summary?}
 {repair_3_summary?}
 
 Earlier roles' tool results are not in this turn. Start with get_status and git diff --stat. Do not cat a file. Do not sed a file. The handoff already names the path.

@@ -12,7 +12,7 @@ from gemma_lab.hygiene import lint_candidate
 
 V8 = Path("agents/structured-v8")
 V9 = Path("agents/structured-v9")
-V9_ARCHIVE = "7fdc1a7db97a5acfb9bd2e532ec99146b22e872e641977ca6aba330d6282f45a"
+V9_ARCHIVE = "209bd43ed52731813ecc4fc8d40edea186bd1af2a6f00e18acf5aae7809b18a5"
 V8_ARCHIVE = "9b1b01ca6881268867b06b5610fa03fc5fcb7b9f0ae3f98df5df565fb1ab586e"
 SINGLE_V9_ARCHIVE = "42665a7febbfc63a1811df5fd1f46ade4afd78977cbf6576dd285d9543fdd7f3"
 V7_ARCHIVE = "a3a08b179fee800ee0575af2a55ad14f47c42c369bf32fd4d52227a9da1109df"
@@ -117,11 +117,25 @@ def test_prompts_use_optional_handoffs_and_sed_windows():
             "verify_3",
         )
     }
-    for text in prompts.values():
-        assert "{problem_description}" in text
+    previous = {
+        "repair_1": "triage_summary",
+        "verify_1": "repair_1_summary",
+        "repair_2": "verify_1_summary",
+        "verify_2": "repair_2_summary",
+        "repair_3": "verify_2_summary",
+        "verify_3": "repair_3_summary",
+    }
+    for name, text in prompts.items():
+        assert "{problem_description?}" in text
+        assert "{problem_description}" not in text.replace("{problem_description?}", "")
         assert "{hints?}" in text
+        omitted = previous.get(name)
         for key in SUMMARIES:
-            assert "{" + key + "?}" in text
+            token = "{" + key + "?}"
+            if key == omitted:
+                assert token not in text
+            else:
+                assert token in text
         assert "Earlier roles' tool results are not in this turn." in text
         assert "Call read_file" not in text
         assert "git checkout --" not in text
@@ -192,6 +206,17 @@ def test_locate_prints_a_window_and_rejects_extra_args(tmp_path):
         check=True,
     )
     assert "0 hit(s)" in literal.stdout
+    (repo / ".adk_exec_wrapper.py").write_text("wrapper-only-needle\n")
+    hidden = subprocess.run(
+        [sys.executable, str(script), "wrapper-only-needle"],
+        cwd=elsewhere,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "0 hit(s)" in hidden.stdout
+    assert ".adk_exec_wrapper.py" not in hidden.stdout
     rejected = subprocess.run(
         [sys.executable, str(script), "one", "two"],
         cwd=elsewhere,

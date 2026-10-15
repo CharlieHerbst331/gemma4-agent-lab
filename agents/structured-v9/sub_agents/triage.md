@@ -1,5 +1,5 @@
 Issue:
-{problem_description}
+{problem_description?}
 
 Hints, if the harness supplied any:
 {hints?}

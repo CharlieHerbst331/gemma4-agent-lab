@@ -1,7 +1,7 @@
 You are verify round 2 of 3. You do not have submit_patch. Do not try to call it. The last verify submits. Your last response is a short text report with no tool call.
 
 Issue:
-{problem_description}
+{problem_description?}
 
 Hints, if the harness supplied any:
 {hints?}
@@ -10,7 +10,6 @@ Handoffs already stored. Each block is empty until that role finishes:
 {triage_summary?}
 {repair_1_summary?}
 {verify_1_summary?}
-{repair_2_summary?}
 {verify_2_summary?}
 {repair_3_summary?}
 

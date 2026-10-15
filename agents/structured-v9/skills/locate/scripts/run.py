@@ -58,7 +58,7 @@ def search(repo, needle):
             and not (Path(folder) / name).is_symlink()
         )
         for name in sorted(filenames):
-            if not name.endswith(".py"):
+            if name.startswith(".") or not name.endswith(".py"):
                 continue
             path = Path(folder) / name
             if path.is_symlink() or not path.is_file():

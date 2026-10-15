@@ -38,14 +38,15 @@ State is separate from that window. `inject_session_state` fills `{name}` from
 session state. `{name?}` is the optional form: a missing key becomes an empty
 string. A required `{name}` raises `KeyError: Context variable not found`.
 v5 records that this KeyError skips the fallback diff. Every handoff in v9
-uses the optional form. `{problem_description}` stays required, as in v5 and
-v8, because the harness puts the issue in state. `{hints?}` stays optional
-because empty hints are omitted.
+uses the optional form, including `{problem_description?}`. A hosted runner
+that omits the issue key then leaves that line blank instead of raising.
+`{hints?}` stays optional because empty hints are omitted.
 
 A role still sees what it needs without the old log. The instruction contains
-the short summaries. The turn window contains the previous role's final text
-once, which is the same short summary, and this role's own `git diff` or
-`sed` output. Verify runs `git diff` itself instead of re-reading a file.
+the earlier summaries. The turn window already contains the previous role's
+final text once, as `[role] said: ...`, so that one summary is not templated
+again. This role's own `git diff` or `sed` output stays in the turn. Verify
+runs `git diff` itself instead of re-reading a file.
 
 adk-submission 0.2.12 and 0.2.13 accept `thinking_budget: 0` and turn thinking
 off. 0.2.13 replaces a missing budget with 4096, so the zero is explicit. A
@@ -62,12 +63,12 @@ SequentialAgent does not set the field. The field is legal only on LlmAgent.
 
 Each of triage, repair, and the first two verifies must end with a short text
 report. That text is the `output_key`. The shape is `files`, `hypothesis`,
-`edit`, and `test`. Later instructions inject every summary with `{name?}`.
-The current-turn window only starts at the previous role, so verify would not
-see triage without the template. The template is how a nudge, which is a new
-user message, still has the issue and the handoffs. The duplicate is one
-short block (the `[role] said:` line plus the same text in the instruction),
-not the tool log.
+`edit`, and `test`. Later instructions inject the earlier summaries with
+`{name?}`. The current-turn window only starts at the previous role, so
+verify would not see triage without the template. The template is how a
+nudge, which is a new user message, still has the issue and the older
+handoffs. The previous role's own summary is left out of the template
+because that same text is already the `[role] said:` line.
 
 What it saves: every later request drops the earlier roles' tool transcripts.
 What it does not save: this role's own tool results stay until the role
@@ -80,10 +81,11 @@ role must not `cat` a file.
 is `{"skill_name":"locate","file_path":"scripts/run.py","args":["literal text"]}`.
 `args` is one string. `skill_name` and `file_path` stay top-level. The script
 finds the repo from `GEMMA_CHECK_ROOT`, then `/workspace`, then a PYTHONPATH
-entry that contains `.git`. It searches `.py` files for that literal, prints
-at most five hits with two lines on either side, and caps the text at 1500
-characters. A missing or extra argument prints the call shape and does not
-search.
+entry that contains `.git`. It searches `.py` files for that literal and
+skips any filename that starts with a dot, including the sandbox
+`.adk_exec_*.py` wrapper. It prints at most five hits with two lines on
+either side, and caps the text at 1500 characters. A missing or extra
+argument prints the call shape and does not search.
 
 What it saves: one truncated window instead of several `read_file` or graph
 payloads that would stay in this role's turn.
@@ -175,8 +177,10 @@ Changed:
   `verify_1_summary`, `repair_2_summary`, `verify_2_summary`,
   `repair_3_summary`. v8 used `triage_brief` and `*_report`. verify_3 still
   has no `output_key`.
-- Every instruction templates `{problem_description}`, `{hints?}`, and all
-  six `{name?}` summaries. v8 templated only the previous role or two.
+- Every instruction templates `{problem_description?}`, `{hints?}`, and the
+  stored summaries except the immediately previous role, which is already
+  the `[role] said:` line. v8 templated only the previous role or two, and
+  its issue placeholder was required.
 - Prompts no longer say the role sees the full prior history.
 - `read_file` removed from repair_1, repair_2, verify_1, and verify_2.
   repair_3 and verify_3 already lacked it.
@@ -196,7 +200,7 @@ Changed:
 uv run gemma-lab pack agents/structured-v9 --output /tmp/structured-v9-submission.zip
 ```
 
-sha256 `7fdc1a7db97a5acfb9bd2e532ec99146b22e872e641977ca6aba330d6282f45a`.
+sha256 `209bd43ed52731813ecc4fc8d40edea186bd1af2a6f00e18acf5aae7809b18a5`.
 
 Portable `gemma-lab validate` is what this checkout can run. Official
 adk-submission compilation still happens on the GPU notebook. Existing
