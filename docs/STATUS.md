@@ -1,6 +1,27 @@
 # Project status
 
-Last updated: October 15, 2026.
+Last updated: October 16, 2026.
+
+## Unevaluated structured-v10
+
+`agents/structured-v10` is a new candidate built from `agents/structured-v8`.
+Existing agent directories and evidence were not modified. structured-v8
+remains the scored best at 0.10. structured-v9 scored lower; the exact
+leaderboard value is not in this repository. No score is claimed for v10. No
+Kaggle push and no GPU run. Do not merge this candidate into a submission
+until a measured comparison exists.
+
+Shape: Sequential[triage, Parallel[repair_a, repair_b, repair_c], select].
+Each branch works in its own git worktree under `/tmp` and writes
+`/tmp/cand_<letter>.diff`. Branch a also applies its first compiling edit to
+the real repo so a skipped selector still leaves a source diff. The 300 second
+cap is unchanged. Shared counters are 300 calls and 480 turns. The aimed mean
+is 255 seconds, which passes both runtime block checks; the 300 second cap
+still warns. Hypothesis, gate numbers, deviations, and open risks:
+`docs/STRUCTURED_V10.md`. Smoke protocol:
+`configs/protocols/structured-v8-vs-structured-v10-smoke.yaml` (v8 vs v10,
+combined five tasks, one repeat, not promotion eligible). Archive SHA256
+`e9fd99c7c15233f3e6bf658e4283f0418c66ff3c5bded020d22ac26e6867e932` (17 files).
 
 ## Unevaluated structured-v9
 
