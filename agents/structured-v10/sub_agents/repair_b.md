@@ -11,21 +11,26 @@ Triage brief (candidate files are unverified; empty if triage wrote no text):
 
 You see this branch's own history, including your tool results. not reproducible, already fixed, and not a bug never end the task. Make the most plausible minimal edit. This branch is edit-first. Do not write a repro until a source edit exists. The first edit is due by about 90 seconds.
 
-The task cap is 300 seconds. Stop this branch when agent_elapsed_seconds is 220 or more, so select can run. Start with get_status. Fields that matter: tool_calls_used, agent_elapsed_seconds, time_seconds_remaining. Call get_status again before you decide to keep reading. get_status does not count as a tool call.
+The task cap is 300 seconds. run_command is synchronous, so the three branches' commands run one at a time and a long command can run past the cap. Stop this branch when agent_elapsed_seconds is 170 or more, so select can run. Start with get_status. Call get_status again before every run_command. If that reading is 170 or more, do not start the command. Fields that matter: tool_calls_used, agent_elapsed_seconds, time_seconds_remaining. get_status does not count as a tool call.
 
 Work in your own git worktree. The first command, from /workspace, is:
 
 git worktree add -q /tmp/cand_b HEAD
 
-If /tmp/cand_b already exists, reuse it. After that, every read, edit, and test uses cd /tmp/cand_b. Never edit /workspace. Never run git apply. Do not git add. Do not write a new file inside the worktree or the repo. The repro and the helper script stay under /tmp, outside the worktree.
+If /tmp/cand_b already exists, reuse it. The worktree is HEAD and does not contain the harness-staged files. Copy them in when they exist. They stay untracked, so they stay out of git diff:
 
-If this branch is running again and /tmp/cand_b.diff is already non-empty, or agent_elapsed_seconds is 220 or more, the next response is the status line only. Do not edit. Never revert a non-empty source diff. Harness-staged conftest.py and pytest.ini are not a source edit.
+test -f /workspace/conftest.py && cp /workspace/conftest.py /tmp/cand_b/conftest.py
+test -f /workspace/pytest.ini && cp /workspace/pytest.ini /tmp/cand_b/pytest.ini
+
+After that, every read, edit, and test uses cd /tmp/cand_b. Do not edit source files under /workspace. The heredoc runs only in this worktree. Do not git add. Do not write a new file inside the worktree or the repo. The repro and the helper script stay under /tmp, outside the worktree.
+
+If this branch is running again and /tmp/cand_b.diff is already non-empty, or agent_elapsed_seconds is 170 or more, the next response is the status line only. Do not edit. Never revert a non-empty source diff. Harness-staged conftest.py and pytest.ini are not a source edit.
 
 If time_seconds_remaining is under 80, write /tmp/cand_b.diff when the worktree has a source edit, then the status line only.
 
 If time_seconds_remaining is under 120 and the worktree diff is empty, the next call is the heredoc edit below, then write the diff. Do not read more files first.
 
-If agent_elapsed_seconds is 220 or more, the next response is the status line only.
+If agent_elapsed_seconds is 170 or more, the next response is the status line only. Do not start another command.
 
 Open the triage files first, inside /tmp/cand_b. Call read_file with filepath only. Do not pass start_line or end_line. Use grep -n, then sed -n 'A,Bp' path | head -c 4000. If a read returns the same first lines twice, use sed. If the same tool call fails twice, change the call. Never run the same command more than twice unless you changed the code since. You do not have the graph tools. Bound shell output with head -n 40 and head -c 4000. Do not read more than about 4 files before the first edit.
 
@@ -75,9 +80,10 @@ When adding a new parameter to an internal class, pass it through the public wra
 
 Do not touch protected paths: tests, conftest.py, pyproject.toml, setup.cfg, pytest.ini, tox.ini, .pytest.ini, sitecustomize.py, usercustomize.py, _swegemma_stubs.py, any .pth file, test_*.py, *_test.py, and any .py file under a tests, test, or testing directory (those names are case-insensitive).
 
-When py_compile.compile succeeds, write the diff and the repro. Do not apply anything to /workspace.
+When py_compile.compile succeeds, write the diff and the repro. Apply that diff to the real repo only when the repo still has no diff. Select owns the final choice.
 
 cd /tmp/cand_b && git diff > /tmp/cand_b.diff
+cd /workspace && git diff --quiet && git apply /tmp/cand_b.diff
 cat > /tmp/cand_b_repro.py <<'EOF'
 import <module>  # replace this line with an assert on the issue behavior
 EOF
@@ -87,7 +93,7 @@ The repro assert must fail on the unedited code and pass after this edit. Never 
 
 cd /tmp/cand_b && python -m pytest <path>::<test> -x -q -p no:cacheprovider
 
-Refresh /tmp/cand_b.diff after the final edit. Never edit /workspace.
+Refresh /tmp/cand_b.diff after the final edit. Do not apply again. If the real repo already had a diff, leave it. Select owns the final choice.
 
 Return one line and no tool call. Use pass or fail, ok or fail, and non-empty or empty:
 

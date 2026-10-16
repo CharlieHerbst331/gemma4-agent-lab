@@ -24,7 +24,7 @@ arms:
   B:
     source: agents/structured-v10
     name: structured-v10
-    expected_sha256: e9fd99c7c15233f3e6bf658e4283f0418c66ff3c5bded020d22ac26e6867e932
+    expected_sha256: c07fcc5505f509f648a924a09dfa5a0f4c1cfe10d4b0a784f938e69116c66ed0
 notes: "Smoke, not promotion eligible. One repeat cannot name a winner. Arm B is parallel best-of-3 with an execution selector. Budgets differ because v10 raises the shared call and turn counters (300/480) and keeps the 300 second cap. Sampling differs because repair_c uses temperature 1.3. eval_config.yaml and sampling.yaml are the markers."
 matched_pair: false
 allow_identical: false

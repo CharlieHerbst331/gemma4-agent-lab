@@ -13,15 +13,18 @@ until a measured comparison exists.
 
 Shape: Sequential[triage, Parallel[repair_a, repair_b, repair_c], select].
 Each branch works in its own git worktree under `/tmp` and writes
-`/tmp/cand_<letter>.diff`. Branch a also applies its first compiling edit to
-the real repo so a skipped selector still leaves a source diff. The 300 second
-cap is unchanged. Shared counters are 300 calls and 480 turns. The aimed mean
-is 255 seconds, which passes both runtime block checks; the 300 second cap
-still warns. Hypothesis, gate numbers, deviations, and open risks:
+`/tmp/cand_<letter>.diff`. Tool commands are serialized, so branches are told
+to stop at 170 seconds via `get_status`. Any branch applies its first
+compiling edit when the real repo still has no diff. Select runs one repro
+per candidate and skips pytest under 90 seconds. The 300 second cap is
+unchanged. Shared counters are 300 calls and 480 turns. The aimed mean is
+255 seconds, which passes both runtime block checks; a mean of 261 seconds
+or more fails the 120-task block, and the 300 second cap still warns.
+Hypothesis, gate numbers, the serialization finding, and open risks:
 `docs/STRUCTURED_V10.md`. Smoke protocol:
 `configs/protocols/structured-v8-vs-structured-v10-smoke.yaml` (v8 vs v10,
 combined five tasks, one repeat, not promotion eligible). Archive SHA256
-`e9fd99c7c15233f3e6bf658e4283f0418c66ff3c5bded020d22ac26e6867e932` (17 files).
+`c07fcc5505f509f648a924a09dfa5a0f4c1cfe10d4b0a784f938e69116c66ed0` (17 files).
 
 ## Unevaluated structured-v9
 

@@ -9,6 +9,8 @@ import textwrap
 import urllib.request
 from pathlib import Path
 
+import pytest
+
 from gemma_lab.bundle import load_yaml, pack, validate
 from gemma_lab.common import sha256
 from gemma_lab.hygiene import lint_candidate
@@ -35,7 +37,7 @@ V10 = Path("agents/structured-v10")
 PROTOCOL = Path("configs/protocols/structured-v8-vs-structured-v10-smoke.yaml")
 V8_ARCHIVE = "9b1b01ca6881268867b06b5610fa03fc5fcb7b9f0ae3f98df5df565fb1ab586e"
 V9_ARCHIVE = "209bd43ed52731813ecc4fc8d40edea186bd1af2a6f00e18acf5aae7809b18a5"
-V10_ARCHIVE = "e9fd99c7c15233f3e6bf658e4283f0418c66ff3c5bded020d22ac26e6867e932"
+V10_ARCHIVE = "c07fcc5505f509f648a924a09dfa5a0f4c1cfe10d4b0a784f938e69116c66ed0"
 SMOKE_SCHEDULE = "5672ef15323e1d59847cc7cde3f1b6cb1912346d7456b13cb716902437b3e9fd"
 SMOKE_TASKS = ["rich_4070", "rich_3934", "fastapi_11194", "rich_3938", "fastapi_14262"]
 CAP_SECONDS = 300
@@ -203,26 +205,39 @@ def test_prompts_keep_the_heredoc_and_branch_a_edits_the_real_repo():
         assert "git checkout --" not in prompt
         assert "the next call is the heredoc" in prompt
         assert "time_seconds_remaining is under 120" in prompt
-        assert "agent_elapsed_seconds is 220 or more" in prompt
+        assert "agent_elapsed_seconds is 170 or more" in prompt
+        assert "Call get_status again before every run_command" in prompt
+        assert "220 or more" not in prompt
+        conftest = (
+            "test -f /workspace/conftest.py && cp /workspace/conftest.py "
+            f"/tmp/cand_{letter}/conftest.py"
+        )
+        pytest_ini = (
+            "test -f /workspace/pytest.ini && cp /workspace/pytest.ini "
+            f"/tmp/cand_{letter}/pytest.ini"
+        )
+        quiet_apply = f"cd /workspace && git diff --quiet && git apply /tmp/cand_{letter}.diff"
+        assert conftest in prompt
+        assert pytest_ini in prompt
+        assert quiet_apply in prompt
         assert "You do not have submit_patch" in prompt
         assert "line_fix.bak" not in prompt
         assert "Never revert a non-empty source diff" in prompt
+        assert "Never run git apply" not in prompt
     assert "repro-first" in repair_a
-    assert "cd /workspace && git apply /tmp/cand_a.diff" in repair_a
     assert "A cap hit with no diff must not happen once that compile has succeeded." in repair_a
     assert "edit-first" in repair_b
     assert "Do not write a repro until a source edit exists." in repair_b
-    assert "Never edit /workspace" in repair_b
-    assert "Never run git apply" in repair_b
-    assert "cd /workspace && git apply" not in repair_b
     assert "graph tools only" in repair_c
     assert "You do not have read_file" in repair_c
-    assert "Never edit /workspace" in repair_c
-    assert "cd /workspace && git apply" not in repair_c
+    assert "Select owns the final choice" in repair_a
+    assert "Select owns the final choice" in repair_b
+    assert "Select owns the final choice" in repair_c
     assert "py_compile" in select
-    assert "python /tmp/cand_a_repro.py" in select
-    assert "python /tmp/cand_b_repro.py" in select
-    assert "python /tmp/cand_c_repro.py" in select
+    assert "python /tmp/cand_X_repro.py" in select
+    assert "Do not run the other branches' repro scripts." in select
+    assert "time_seconds_remaining is under 90" in select
+    assert "skip pytest" in select
     assert "cd /workspace && git checkout -- . && git apply /tmp/cand_X.diff" in select
     assert CHECK_CALL in select
     assert "call submit_patch anyway" in select
@@ -230,8 +245,19 @@ def test_prompts_keep_the_heredoc_and_branch_a_edits_the_real_repo():
     assert "submit_patch" in select
     joined = "\n".join([triage, repair_a, repair_b, repair_c, select])
     assert "By 220 elapsed seconds" not in joined
+    assert "By 170 elapsed seconds" not in joined
     assert "git add -A" not in joined
     assert "git add ." not in joined
+
+
+def test_branch_stop_is_170_seconds():
+    for name in ("repair_a", "repair_b", "repair_c"):
+        prompt = _prompt(name)
+        assert prompt.count("agent_elapsed_seconds is 170 or more") >= 2
+        assert "220" not in prompt
+    select = _prompt("select")
+    assert "Commands are serialized" in select
+    assert "time_seconds_remaining is under 90" in select
 
 
 def test_fallback_apply_leaves_a_source_diff_without_tmp_or_worktree_paths(tmp_path):
@@ -340,6 +366,20 @@ def test_runtime_gates_pass_at_the_aimed_mean():
     assert 3 * BRANCH_CALLS <= 300
     assert 480 <= TURN_FALLBACK
     assert CAP_SECONDS - 45 == PROJECTED_MEAN_SECONDS
+    # Branches stop at 170 so select has 130 seconds. Tool time is summed,
+    # so a later mean can drift. 260 is the last integer mean that passes
+    # the 120-task block. 270 fails that block and still passes the 129-task
+    # block.
+    assert CAP_SECONDS - 170 == 130
+    mean_260 = PROJECTED_HIDDEN_TASKS * (260 + overhead)
+    mean_270 = PROJECTED_HIDDEN_TASKS * (270 + overhead)
+    public_270 = load + PROJECTED_PUBLIC_TASKS * 270
+    assert mean_260 == 39600
+    assert mean_260 <= PROJECTED_RUNTIME_LIMIT_SECONDS
+    assert mean_270 == 40800
+    assert mean_270 > PROJECTED_RUNTIME_LIMIT_SECONDS
+    assert public_270 == 35730
+    assert public_270 <= PROJECTED_LOAD_LIMIT_SECONDS
 
 
 def test_smoke_protocol_compares_v8_and_v10_on_the_combined_five():
@@ -398,17 +438,22 @@ def _ensure_adk():
     if (ADK_PY / "google" / "adk" / "__init__.py").is_file():
         return ADK_PY
     ADK_PY.mkdir(parents=True, exist_ok=True)
-    subprocess.check_call(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--target",
-            str(ADK_PY),
-            "google-adk==1.36.1",
-        ]
-    )
+    try:
+        subprocess.check_call(
+            [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--target",
+                str(ADK_PY),
+                "google-adk==1.36.1",
+            ]
+        )
+    except (OSError, subprocess.CalledProcessError):
+        pytest.skip("google-adk 1.36.1 pip install failed; compile test skipped offline")
+    if not (ADK_PY / "google" / "adk" / "__init__.py").is_file():
+        pytest.skip("google-adk 1.36.1 pip install failed; compile test skipped offline")
     return ADK_PY
 
 

@@ -87,26 +87,31 @@ real repo against `_swegemma_baseline`. Paths under `/tmp`, including a git
 worktree, are invisible unless they are applied back onto the real repo.
 
 Each branch's first command is `git worktree add -q /tmp/cand_<letter> HEAD`.
-Reads, edits, and tests run with `cd /tmp/cand_<letter>`. The branch writes
-`/tmp/cand_<letter>.diff` from `git diff` in that worktree, plus
+That HEAD is the harness baseline and does not include the harness-staged
+`conftest.py` and `pytest.ini`. The next commands copy those files from
+`/workspace` when they exist. The copies stay untracked, so they stay out of
+`git diff`. Reads, edits, and tests run with `cd /tmp/cand_<letter>`. The
+branch writes `/tmp/cand_<letter>.diff` from `git diff` in that worktree, plus
 `/tmp/cand_<letter>_repro.py`. Untracked files and `/tmp` paths are not in
 that diff.
 
-Branch a, after its first edit that `py_compile`s, also runs
-`cd /workspace && git apply /tmp/cand_a.diff` once. That is the empty-diff
-fallback: if the selector never runs, the real repo already holds a compiling
-source edit. Branches b and c are told never to edit `/workspace` and never to
-`git apply` onto it.
+Any branch, after its first edit that `py_compile`s, writes its diff and then
+runs one command: `cd /workspace && git diff --quiet && git apply /tmp/cand_<letter>.diff`.
+`run_command` is synchronous, so that check and apply are one turn of the
+shared tool queue. If the real repo already has a diff, the apply does not
+run. Select still owns the final choice. If the selector never runs, the
+real repo holds whichever branch compiled first.
 
 Select votes in `/tmp/select_vote`, a separate worktree, so the fallback on
 `/workspace` stays until a winner is chosen. For each non-empty
 `/tmp/cand_X.diff` it runs `git apply --check`, applies, `py_compile`s changed
-Python files, and cross-runs `python /tmp/cand_a_repro.py`,
-`/tmp/cand_b_repro.py`, and `/tmp/cand_c_repro.py`. The winner is the compiling
-diff with the most zero exits. Ties go to a, then b, then c. The install line
-is `cd /workspace && git checkout -- . && git apply /tmp/cand_X.diff`. If that
-compile fails, select restores `/tmp/cand_a.diff`. If nothing compiles, select
-leaves `/workspace` and calls `submit_patch`.
+Python files, and runs that candidate's own `python /tmp/cand_X_repro.py`
+once. It does not cross-run the other repro scripts. Pytest runs only when
+`time_seconds_remaining` is 90 or more. The winner is the compiling diff
+whose own repro exits 0. Ties go to a, then b, then c. The install line is
+`cd /workspace && git checkout -- . && git apply /tmp/cand_X.diff`. If that
+compile fails, select restores `/tmp/cand_a.diff`. If nothing compiles, or
+every repro fails, select leaves `/workspace` and calls `submit_patch`.
 
 When 45 seconds or more remain, select copies the winner repro to
 `/tmp/repro_check.py` and calls
@@ -137,10 +142,13 @@ The runner fallback when `max_turns` is omitted is 500
 clock is still the intended binding limit.
 
 300 seconds is the largest cap whose 45 second submit deadline lands on the
-255 second mean ceiling (`300 - 45 = 255`). Branches are told to stop when
-`agent_elapsed_seconds` is 220 or more. That stop is prompt text.
-`get_status` reports the clock and does not stop a role. If repair_a runs to
-the cap, the mean can still be 300.
+255 second mean ceiling (`300 - 45 = 255`). Branches are told to call
+`get_status` before every `run_command` and to stop when
+`agent_elapsed_seconds` is 170 or more (`300 - 170 = 130` seconds left for
+select). That stop is prompt text. `get_status` reports the clock and does
+not stop a role. A command that is already running still finishes, and the
+review stub showed a 30 second command carrying a 24 second cap out to about
+32 seconds. If a branch runs to the cap, the mean can still be 300.
 
 Overhead 70 seconds and L = 900 are the toolkit constants. The blocks use a
 measured mean. The warning uses the cap.
@@ -166,6 +174,15 @@ Aimed mean 255 seconds (submit when 45 seconds remain):
 A submission whose cap is 300 still **warns**, even when the measured mean is
 255, because the warning reads the cap. It does not block at mean 255.
 
+The 120-task block is `120 * (mean + 70) <= 39600`, so `mean <= 260`. 260
+lands on the limit (`120 * 330 = 39600`). 261 fails it. A measured mean of
+270 is `120 * (270 + 70) = 40800` (over 39600) and
+`900 + 129 * 270 = 35730` (under 38880): the 120-task block fails and the
+129-task block still passes. 280 is `120 * 350 = 42000` (fails) and
+`900 + 129 * 280 = 37020` (passes). The aimed mean stays 255, under that
+260 second break-even, only if the 170 second stop is obeyed and select
+submits with about 45 seconds left.
+
 ## Prompts
 
 Character counts are this revision. `chars/4` is not a Gemma tokenizer count.
@@ -174,10 +191,10 @@ No first-request token total is claimed.
 | Role | Characters | chars/4 |
 | --- | --- | --- |
 | triage | 2119 | 529.75 |
-| repair_a | 6574 | 1643.5 |
-| repair_b | 5897 | 1474.25 |
-| repair_c | 5923 | 1480.75 |
-| select | 4781 | 1195.25 |
+| repair_a | 7223 | 1805.75 |
+| repair_b | 6652 | 1663 |
+| repair_c | 6678 | 1669.5 |
+| select | 5204 | 1301 |
 
 The completion reservation is 1024 tokens on triage and 2048 on the other
 roles, inside a 32768 context. Those ceilings are harness limits, not measured
@@ -228,30 +245,52 @@ uv run gemma-lab pack agents/structured-v10 --output /tmp/structured-v10-submiss
 ```
 
 Archive sha256
-`e9fd99c7c15233f3e6bf658e4283f0418c66ff3c5bded020d22ac26e6867e932`
+`c07fcc5505f509f648a924a09dfa5a0f4c1cfe10d4b0a784f938e69116c66ed0`
 (17 files). Repacking structured-v8 and structured-v9 still matches
 `9b1b01ca6881268867b06b5610fa03fc5fcb7b9f0ae3f98df5df565fb1ab586e` and
 `209bd43ed52731813ecc4fc8d40edea186bd1af2a6f00e18acf5aae7809b18a5`.
 
 ## Open risks
 
-- Branches may ignore the 220 second prompt stop, so select never runs. The
-  mitigation is branch a's real-repo apply after the first compile. If nothing
-  compiles, the fallback diff can still be empty.
-- Select might `git checkout -- .` on `/workspace` before a winner is chosen
-  and clear the fallback. The prompt orders the steps. The harness does not
-  enforce that order.
-- `docker exec` may serialize `run_command` across branches. That was not
-  measured. Three concurrent vLLM streams are expected at about 1.2–1.6×
-  per-step latency. That was not measured. No GPU slot was used.
+Tool time is serialized. The PR #32 review measured this on ADK 1.36.1: the
+harness `run_command` calls `docker exec` synchronously, and the runner's
+`RunConfig` sets `max_llm_calls` only, so there is no tool thread pool. Sync
+tools therefore run on the event loop. `ParallelAgent` still uses
+`asyncio.TaskGroup`, and the three first model requests in the stub arrived
+within 0.02 seconds of each other, but the commands ran back to back. Three
+`sleep 4` commands took about 12 seconds of tool time, not 4. Wall time for
+the parallel phase is overlapped model time plus the sum of every branch's
+command time. A command that has already started keeps the loop, so the 170
+second check happens only between calls. The same stub's 24 second cap ended
+near 32 seconds because a 30 second command was in flight.
+
+The time budget after that finding: each branch calls `get_status` before
+every `run_command` and stops when `agent_elapsed_seconds` is 170 or more.
+That leaves about 130 seconds for select. Select runs one repro per candidate
+and skips pytest when `time_seconds_remaining` is under 90. It submits when
+under 45 seconds remain, so the aimed mean is still 255. The 120-task block
+passes at that mean (`120 * (255 + 70) = 39000`, limit 39600) and fails once
+the mean reaches 261 (`120 * 331 = 39720`). 260 is the last integer mean on
+the limit (`120 * 330 = 39600`). A mean of 270 is `120 * 340 = 40800` (over
+39600) and `900 + 129 * 270 = 35730` (under 38880). The 300 second cap still
+warns at `900 + 129 * (300 + 70) = 48630` and fails both blocks if the
+measured mean equals the cap (`120 * 370 = 44400`, `900 + 129 * 300 = 39600`).
+
+- Branches may ignore the 170 second prompt stop, so select never runs. Any
+  branch applies its first compiling edit when `git diff --quiet` is true. If
+  nothing compiles, the graded diff can still be empty.
+- Select votes in `/tmp/select_vote` and touches `/workspace` in one command
+  after a winner exists. A cap cannot split that command. A cap after a
+  winner apply that then fails `py_compile` would grade that winner.
+- Three-stream model latency was not measured. No GPU slot was used.
 - Worktree imports can miss an installed package. Prompts set
   `PYTHONPATH=/tmp/cand_X/src:/tmp/cand_X` and tell the model to probe import
   origin.
-- Prompt deadlines are not harness-enforced. A measured mean of 300 seconds
-  fails both block checks. The cap itself warns and does not block.
+- Prompt deadlines are not harness-enforced. A measured mean of 270 seconds
+  fails the 120-task block. A measured mean of 300 seconds fails both blocks.
+  The cap itself warns and does not block.
 - A shared `/tmp/pre_*` backup is still possible if the model ignores the
   branch-specific name.
-- No concurrency stub (`sleep 5`) was run. The design's pre-submit GPU probe
-  was not done.
+- The design's pre-submit GPU latency probe was not done.
 - Small score changes sit inside about one standard error. This document does
   not claim structured-v10 will score above 0.10.

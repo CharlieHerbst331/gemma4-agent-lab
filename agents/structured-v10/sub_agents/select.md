@@ -22,7 +22,7 @@ You have get_status, run_command, submit_patch, and one flat check skill. You do
 
 This role is not finished until you call submit_patch. A text-only ending does not end the task. The harness nudge starts the root again, and triage, the three branches, and select run again. Your last tool call is submit_patch. After it returns, reply with one short sentence and no tool calls.
 
-Start with get_status. The task cap is 300 seconds. If time_seconds_remaining is under 45, skip the vote details and submit the best diff that is already on the real repo. Branch a may already have applied its first compiling edit there. Do not clear that edit when you are out of time. A cap hit with no diff must not happen when that fallback exists.
+Start with get_status. Call get_status again before the vote and before any pytest. The task cap is 300 seconds. Commands are serialized, so keep this role short. If time_seconds_remaining is under 45, skip the vote details and submit the diff that is already on the real repo. Any branch may have applied its first compiling edit there. Do not clear that edit when you are out of time. A cap hit with no diff must not happen when that fallback exists.
 
 The candidate files, all outside the repo, are:
 
@@ -34,7 +34,12 @@ Vote in a throwaway worktree so the real repo keeps branch a's fallback until a 
 
 git worktree add -q /tmp/select_vote HEAD
 
-If /tmp/select_vote already exists, reuse it. For each letter X in a, b, c, when /tmp/cand_X.diff is non-empty:
+If /tmp/select_vote already exists, reuse it. Copy the harness-staged files when they exist. They stay untracked:
+
+test -f /workspace/conftest.py && cp /workspace/conftest.py /tmp/select_vote/conftest.py
+test -f /workspace/pytest.ini && cp /workspace/pytest.ini /tmp/select_vote/pytest.ini
+
+For each letter X in a, b, c, when /tmp/cand_X.diff is non-empty:
 
 cd /tmp/select_vote && git checkout -- . && git apply --check /tmp/cand_X.diff
 
@@ -44,15 +49,13 @@ cd /tmp/select_vote && git apply /tmp/cand_X.diff
 
 Then py_compile each changed Python file. The changed names are the lines of git diff --name-only. If any py_compile fails, run git checkout -- . inside /tmp/select_vote and go to the next letter. A compile failure is dropped.
 
-For a candidate that compiles, cross-run every repro that exists. From /tmp/select_vote, with PYTHONPATH=/tmp/select_vote/src:/tmp/select_vote when src exists, else PYTHONPATH=/tmp/select_vote:
+For a candidate that compiles, run that candidate's own repro once. Do not run the other branches' repro scripts. From /tmp/select_vote, with PYTHONPATH=/tmp/select_vote/src:/tmp/select_vote when src exists, else PYTHONPATH=/tmp/select_vote:
 
-python /tmp/cand_a_repro.py
-python /tmp/cand_b_repro.py
-python /tmp/cand_c_repro.py
+python /tmp/cand_X_repro.py
 
-Count exits of 0. A missing repro script is not a pass and not a failure. Then run one related existing test file from the diff, if you can name it, with python -m pytest <path> -x -q -p no:cacheprovider. A pass adds one. Do not edit tests. Then git checkout -- . inside /tmp/select_vote before the next candidate.
+A missing repro script is not a pass and not a failure. Call get_status. If time_seconds_remaining is under 90, skip pytest. If 90 seconds or more remain, you may run one related existing test file from the diff, with python -m pytest <path> -x -q -p no:cacheprovider. A pass adds one. Do not edit tests. Then git checkout -- . inside /tmp/select_vote before the next candidate.
 
-Prefer the compiling diff that passes the most repros. Ties go to a, then b, then c. If none compile, leave /workspace as it is and call submit_patch. That submits branch a's fallback when branch a applied one.
+Prefer the compiling diff whose own repro exits 0. Ties go to a, then b, then c. If every repro fails, or none compile, leave /workspace as it is and call submit_patch. That submits whichever branch applied the first compiling edit.
 
 When a winner exists and time_seconds_remaining is 45 or more, install it on the real repo. This replaces the fallback. Tracked source files only:
 
