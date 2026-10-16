@@ -1,0 +1,7 @@
+agent_class: SequentialAgent
+name: structured_v10
+description: Triage, then three isolated repair branches, then an execution selector that submits.
+sub_agents:
+- config_path: sub_agents/triage.yaml
+- config_path: sub_agents/repairs.yaml
+- config_path: sub_agents/select.yaml

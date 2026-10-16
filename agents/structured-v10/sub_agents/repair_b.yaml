@@ -1,0 +1,18 @@
+agent_class: LlmAgent
+name: repair_b
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Edit-first repair in /tmp/cand_b. This branch never edits the real repo.
+instruction: !include repair_b.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  max_output_tokens: 2048
+  seed: 202
+  thinking_config: !include repair_thinking.yaml
+tools:
+- get_status
+- read_file
+- run_command
+include_contents: default
+output_key: repair_b_status

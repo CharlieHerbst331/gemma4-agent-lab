@@ -1,0 +1,18 @@
+agent_class: LlmAgent
+name: select
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Py_compile each candidate, run its own repro, apply the winner, and submit.
+instruction: !include select.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  max_output_tokens: 2048
+  thinking_config: !include thinking.yaml
+tools:
+- get_status
+- run_command
+- submit_patch
+include_contents: none
+skills:
+- skills/check

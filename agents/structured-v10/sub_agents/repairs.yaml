@@ -1,0 +1,7 @@
+agent_class: ParallelAgent
+name: repairs
+description: Three isolated repair branches. Each edits its own /tmp worktree.
+sub_agents:
+- config_path: repair_a.yaml
+- config_path: repair_b.yaml
+- config_path: repair_c.yaml

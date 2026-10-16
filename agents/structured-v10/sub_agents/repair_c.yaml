@@ -1,0 +1,20 @@
+agent_class: LlmAgent
+name: repair_c
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Graph-tool repair at temperature 1.3 in /tmp/cand_c. This branch never edits the real repo.
+instruction: !include repair_c.md
+generate_content_config:
+  temperature: 1.3
+  top_p: 0.95
+  top_k: 64
+  max_output_tokens: 2048
+  seed: 303
+  thinking_config: !include repair_thinking.yaml
+tools:
+- get_status
+- run_command
+- search_similar_code
+- get_code_neighbors
+- get_code_subgraph
+include_contents: default
+output_key: repair_c_status

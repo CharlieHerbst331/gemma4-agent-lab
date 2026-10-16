@@ -1,0 +1,18 @@
+evaluation:
+  # 5 minutes = 300 seconds. The harness reads max_time_minutes.
+  # Branches are prompted to stop at 170 seconds. Tool commands are
+  # serialized, so that stop leaves select about 130 seconds. Select runs
+  # one repro per candidate and skips pytest when under 90 seconds remain.
+  # The selector submits when 45 seconds remain, so the aimed mean is 255
+  # seconds. A measured mean of 261 or more fails the 120-task block.
+  # Calls and turns are shared across the three parallel branches. 3 x 60
+  # calls is 180, plus the selector. 300 calls and 480 turns (under the
+  # runner's 500-turn fallback) leave room for that without binding before
+  # the clock. timeout_seconds is the per-command ceiling.
+  # The 300 second cap warns on the 12 hour formula and does not block by
+  # itself. A measured mean of 300 seconds would fail both block checks.
+  # A measured mean of 255 seconds passes both.
+  timeout_seconds: 300
+  max_tool_calls: 300
+  max_time_minutes: 5
+  max_turns: 480
