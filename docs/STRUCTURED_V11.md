@@ -1,40 +1,47 @@
 # structured-v11
 
-Unevaluated byte copy of structured-v8. structured-v8 scored 0.10.
-structured-v9 scored 0.08. single-v6 scored 0.08. structured-v10, archive
+Byte copy of structured-v8. structured-v8 scored 0.10. structured-v9 scored
+0.08 and single-v6 scored 0.08, per coordinator report of the public
+leaderboard (16–17 October 2026). structured-v10, archive
 `c07fcc5505f509f648a924a09dfa5a0f4c1cfe10d4b0a784f938e69116c66ed0`, merged at
-`fcc7c426`, scored 0.01. No new score is claimed. No Kaggle push and no GPU
-run. Existing agent directories and evidence were not edited.
+`fcc7c426`, scored 0.01 (submission ref 57262340). Today's upload is that
+same v8 archive under the v11 name (submission ref 57300592, pending). It is
+a noise measurement of the 0.10 result, not a new agent. No new score is
+claimed. No GPU run. Existing agent directories and evidence were not edited.
 
 ## Root cause of the v10 score
 
 structured-v10 scored 0.01 because the three repair branches starved each
-other of compute, not because the graded diff was malformed. `run_command`
-calls `docker.exec` synchronously (`swegemma/tools/execution.py` line 42 in
-the public harness copy). google-adk 1.36.1 runs that callable on the event
-loop unless `RunConfig.tool_thread_pool_config` is set
-(`flows/llm_flows/functions.py` lines 973–984; `function_tool.py` line 238
-calls `target(**args)` for a sync tool). The harness builds
-`RunConfig(max_llm_calls=remaining_turns)` and sets nothing else
-(`agent_runner.py` line 516), so branch commands run one at a time while
-three model streams share vLLM. The v10 prompts also require `get_status`
-before every `run_command`, which adds a model round trip per command, and
-they stop each branch at 170 seconds. Effective work per branch is about
+other of compute, not because the graded diff was malformed. In the swegemma
+0.2.7 copy checked here, `run_command` calls `docker.exec` synchronously
+(`swegemma/tools/execution.py` line 42) and the harness builds
+`RunConfig(max_llm_calls=remaining_turns)` with no other fields
+(`agent_runner.py` line 516). The 0.2.10/0.2.11 lines for the same two facts
+are `execution.py` line 149 and `agent_runner.py` line 801. google-adk 1.36.1
+runs that sync callable on the event loop unless
+`RunConfig.tool_thread_pool_config` is set (`flows/llm_flows/functions.py`
+lines 973–984; `function_tool.py` line 238 calls `target(**args)` for a sync
+tool). Branch commands therefore run one at a time while three model streams
+share vLLM. The v10 prompts also require `get_status` before every
+`run_command`, which adds a model round trip per command, and they stop each
+branch at 170 seconds. Effective work per branch is about
 `170 / (2 × 1.3) = 65` seconds down to `170 / (2 × 1.6) = 53` seconds of
 single-stream time. Across 118 earlier single-stream traces the median time
 to a first edit was 63.6 seconds (21 calls); only 29 of 118 had edited by
 60 seconds, 52 of 118 by 170 seconds, and 59 of 118 never edited. v8 gives
-one trajectory the full 300 seconds, which is where its resolves come from.
-A second failure mode is real and secondary: `ParallelAgent` merges branches
-with `asyncio.TaskGroup` (`parallel_agent.py` line 71), so one branch
-exception cancels the others and select never starts. In the 812-line
-`agent_runner.py` checked here, that exception leaves the inner run and is
-recorded by the outer handler (`agent_runner.py` line 799,
-`Sandbox execution error: ...`) before the fallback diff at line 758. The
-verification harness, on a longer runner, recorded the same TaskGroup error
-and graded whatever was already on `/workspace`. Diff application, worktree
-paths, temperature 1.3, and seeds were checked in that verification and did
-not explain the score.
+one trajectory the full 300 seconds. The inference from that timing, not a
+per-solve attribution, is that v8's resolves come from edits and repair after
+the first minute, the part of the clock these branches do not get. A second
+failure mode is real and secondary: `ParallelAgent` merges branches with
+`asyncio.TaskGroup` (`parallel_agent.py` line 71), so one branch exception
+cancels the others and select never starts. In the 0.2.7 `agent_runner.py`
+(812 lines), that exception leaves the inner run and is recorded by the
+outer handler (line 799, `Sandbox execution error: ...`) before the fallback
+diff at line 758. On 0.2.10/0.2.11 the same recording and the workspace
+fallback are `agent_runner.py` lines 1039–1048. The verification harness
+recorded the TaskGroup error and graded whatever was already on `/workspace`.
+Diff application, worktree paths, temperature 1.3, and seeds were checked in
+that verification and did not explain the score.
 
 ## What v11 changes
 
@@ -46,10 +53,10 @@ The archive hash is therefore v8's scored hash. v8 already reads the clock
 with `get_status` before it decides to keep reading. It does not call
 `get_status` before every command, and v11 does not add that.
 
-The v9 locate skill is not copied. v9 scored 0.08, below v8, so that skill
-is not evidence of a gain. No parallel role is added. Verification will not
-accept a parallel or v10-derived candidate without a GPU smoke, and no GPU
-slot was available.
+The v9 locate skill is not copied. v9 scored 0.08, per coordinator report of
+the public leaderboard, below v8's 0.10, so that skill is not evidence of a
+gain. No parallel role is added. Verification will not accept a parallel or
+v10-derived candidate without a GPU smoke, and no GPU slot was available.
 
 ## Serial best-of-2, not built
 

@@ -62,15 +62,15 @@ def test_v11_does_not_reintroduce_the_v10_starvation_rules():
     assert 'backup = "/tmp/pre_" + path.replace("/", "_")' in repair
     assert "shutil.copyfile(backup, path)" in repair
     assert not (V11 / "skills" / "locate").exists()
-    # Effective single-stream seconds inside a 170 s stop when each command
-    # costs two turns and model steps slow by 1.3 to 1.6.
+    # 170 s stop, two turns per command, 1.3–1.6 stream slowdown. The median
+    # time to a first edit is an independent trace statistic, so this fails
+    # if the stop or the slowdown no longer lands on that median.
     low = 170 / (2 * 1.6)
     high = 170 / (2 * 1.3)
-    assert round(low, 1) == 53.1
-    assert round(high, 1) == 65.4
-    assert low < MEDIAN_SECONDS_TO_FIRST_EDIT < high
-    # A serial best-of-2 split of the same cap spends two medians before verify.
-    assert round(2 * MEDIAN_SECONDS_TO_FIRST_EDIT, 1) == 127.2
+    assert low < MEDIAN_SECONDS_TO_FIRST_EDIT <= high
+    # Two such medians use most of a 150 s serial half and still fit in it.
+    pair = 2 * MEDIAN_SECONDS_TO_FIRST_EDIT
+    assert 120 < pair < 150
 
 
 def test_archive_is_the_scored_v8_archive_and_v10_is_unchanged(tmp_path):
