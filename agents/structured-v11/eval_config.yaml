@@ -1,0 +1,11 @@
+evaluation:
+  # 5 minutes = 300 seconds. The harness reads max_time_minutes.
+  # The submit deadline is 45 seconds remaining, so the aimed mean is 255 seconds.
+  # 220 counted calls and 320 turns are loose on purpose. The 300 s clock is the
+  # failsafe. timeout_seconds is the per-command ceiling; remaining task time
+  # lowers it further. The cap warns on the 12 hour formula and does not block
+  # by itself. A measured mean of 300 seconds would fail both block checks.
+  timeout_seconds: 300
+  max_tool_calls: 220
+  max_time_minutes: 5
+  max_turns: 320
