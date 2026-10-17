@@ -1,15 +1,33 @@
 # Project status
 
-Last updated: October 16, 2026.
+Last updated: October 17, 2026.
+
+## structured-v10 scored 0.01; structured-v11 is a v8 copy
+
+structured-v10, archive
+`c07fcc5505f509f648a924a09dfa5a0f4c1cfe10d4b0a784f938e69116c66ed0`, merged at
+`fcc7c426`, scored 0.01 on Kaggle (submission ref 57262340). structured-v8
+remains the scored best at 0.10. structured-v9 scored 0.08 and single-v6
+scored 0.08, per coordinator report of the public leaderboard (16–17 October
+2026). The v10 drop is compute starvation: serialized `run_command`, a shared
+vLLM, a `get_status` before every command, and a 170 second branch stop. One
+branch exception also cancels the `ParallelAgent` TaskGroup and skips select.
+Diff application was not the cause. Write-up: `docs/STRUCTURED_V11.md`. The
+earlier design note remains `docs/STRUCTURED_V10.md`.
+
+`agents/structured-v11` is a byte copy of `agents/structured-v8`. No role,
+prompt, skill, or budget changed. The locate skill was not added. A serial
+best-of-2 was not built. No GPU run. Today's Kaggle upload is this v8 archive
+under the v11 name (submission ref 57300592, pending), a noise measurement of
+the 0.10 result. Archive SHA256
+`9b1b01ca6881268867b06b5610fa03fc5fcb7b9f0ae3f98df5df565fb1ab586e`, the same
+archive as structured-v8.
 
 ## Unevaluated structured-v10
 
-`agents/structured-v10` is a new candidate built from `agents/structured-v8`.
-Existing agent directories and evidence were not modified. structured-v8
-remains the scored best at 0.10. structured-v9 scored lower; the exact
-leaderboard value is not in this repository. No score is claimed for v10. No
-Kaggle push and no GPU run. Do not merge this candidate into a submission
-until a measured comparison exists.
+`agents/structured-v10` was built from `agents/structured-v8` and then
+scored, as recorded above. The shape below is the candidate that scored
+0.01. Existing agent directories were not modified for that experiment.
 
 Shape: Sequential[triage, Parallel[repair_a, repair_b, repair_c], select].
 Each branch works in its own git worktree under `/tmp` and writes
