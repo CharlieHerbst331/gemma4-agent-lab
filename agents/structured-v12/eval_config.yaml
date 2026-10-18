@@ -1,0 +1,15 @@
+evaluation:
+  # 250 seconds. max_time_minutes is 250/60 = 4.166666666666667.
+  # A cap-hit run overruns the cap by about 2-8 seconds (v8 smoke5 was
+  # 302-308 on a 300 second cap), so the measured mean is about 252-258.
+  # 120 * (258 + 70) = 120 * 328 = 39360, under the 39600 block.
+  # 900 + 129 * 258 = 34182, under 38880.
+  # 900 + 129 * (250 + 70) = 42180, under the 43200 warning.
+  # A 260 second cap does not survive that overrun: 262-268 gives
+  # 120 * (mean + 70) = 39840-40560, over 39600. Submit at elapsed 205,
+  # which is 250 - 45. timeout_seconds matches the cap.
+  # 220 counted calls and 320 turns stay at the v8 values. The clock binds.
+  timeout_seconds: 250
+  max_tool_calls: 220
+  max_time_minutes: 4.166666666666667
+  max_turns: 320

@@ -1,0 +1,74 @@
+# Smoke: structured-v8 (A, control) vs structured-v12 (B) on the v8 smoke5
+# tasks. Not promotion eligible. One repeat cannot name a winner.
+#
+# Tasks are the real structured-v8 smoke5 set. rich_3454 replaces
+# fastapi_14262 from the earlier combined five: rich_4070, rich_3934,
+# fastapi_11194, rich_3938, rich_3454. fastapi_11194 is the task a single
+# T=1.0 sample has flipped. rich_3454 resolved in that smoke only through
+# the harness fallback.
+#
+# v8 is 300 seconds, 220 calls, 320 turns. v12 is 250 seconds, with the
+# same 220 calls and 320 turns. Temperature is 1.0 on both. Repair thinking
+# is 256 on both. The clocks differ: v12 keys handoffs on an [elapsed Ns]
+# line, v8 keys them on get_status.
+#
+# The session cap used for pair_fits is the larger arm cap, 300 seconds.
+# pair_fits with load 900 seconds and the 300 second tasks.jsonl wait is
+# 4320 seconds. session_budget_seconds is 14400, under the 12 hour
+# competition session cap (43200 seconds). No GPU run is started from this
+# file.
+purpose: smoke
+arms:
+  A:
+    source: agents/structured-v8
+    name: structured-v8
+    expected_sha256: 9b1b01ca6881268867b06b5610fa03fc5fcb7b9f0ae3f98df5df565fb1ab586e
+  B:
+    source: agents/structured-v12
+    name: structured-v12
+    expected_sha256: 1db40320137309e3a496b1590156ca98579e02ae385cc2cd7d44d43879515f39
+notes: "Smoke, not promotion eligible. One repeat cannot name a winner. Budgets differ because v12 lowers the cap from 300 seconds to 250 seconds. Handoffs differ because v12 reads an [elapsed Ns] line instead of get_status. eval_config.yaml and sub_agents/* are the markers."
+matched_pair: false
+allow_identical: false
+allowed_differences:
+  - agent.yaml
+  - sub_agents/*
+  - skills/*
+  - prompts/*
+  - eval_config.yaml
+  - sampling.yaml
+  - thinking.yaml
+cohort:
+  path: configs/cohorts/dev-13-environment-screened.json
+  task_file_sha256: e4b3fd60f69dbc2b9213e54eeb9636db78aefe92c1d06269d73d9f5f8f3c8ad6
+task_ids:
+  - rich_4070
+  - rich_3934
+  - fastapi_11194
+  - rich_3938
+  - rich_3454
+repeats: 1
+order_rule: per_task_parity_v1
+shuffle_seed: null
+session_budget_seconds: 14400
+pair_start_pad_seconds: 60
+abort_policy: round2_v1
+early_stop: null
+budget_gate:
+  block:
+    - name: round2_load_plus_129_mean
+      formula: L + 129 * mean_wall
+      threshold_seconds: 38880
+    - name: coordinator_mean_times_120
+      formula: mean_wall * 120
+      threshold_seconds: 39600
+  warn:
+    - name: worst_case_12h
+      formula: L + n * (cap + p90_delta)
+      threshold_seconds: 43200
+      n_values: [120, 129]
+  L_default: 900
+  coordinator_hours: 11
+timing_tier: 2
+pins_mode: record
+exclude_import_origin_risk: true

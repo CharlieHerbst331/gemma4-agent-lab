@@ -1,0 +1,21 @@
+agent_class: LlmAgent
+name: repair_1
+model: gemma-4-31b-it-qat-w4a16-ct
+description: First repair round. Stop at 130 seconds so later rounds can run.
+instruction: !include repair_1.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  # 2048 completion tokens leaves a 30720-token prompt ceiling inside 32768.
+  max_output_tokens: 2048
+  thinking_config: !include repair_thinking.yaml
+tools:
+- get_status
+- read_file
+- run_command
+- search_similar_code
+- get_code_neighbors
+- get_code_subgraph
+include_contents: default
+output_key: repair_1_report
