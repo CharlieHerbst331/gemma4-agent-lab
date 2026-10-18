@@ -73,6 +73,7 @@ AGENT_DIRS = {
     "structured-v9",
     "structured-v10",
     "structured-v11",
+    "structured-v12",
     "single-v1",
     "single-v1t0",
     "single-v2",
@@ -117,18 +118,18 @@ def _budgets():
     }
 
 
-def test_agent_directories_stay_at_twenty_six():
+def test_agent_directories_stay_at_twenty_seven():
     found = {path.name for path in Path("agents").iterdir() if path.is_dir()}
     assert found == AGENT_DIRS
-    assert len(found) == 26
+    assert len(found) == 27
     assert "single-v7-lenient" not in found
 
 
 def test_existing_protocols_remain_two_arm():
     paths = sorted(Path("configs/protocols").glob("*.yaml"))
     others = [path for path in paths if path not in MULTI_PROTOCOLS]
-    assert len(paths) == 17
-    assert len(others) == 15
+    assert len(paths) == 18
+    assert len(others) == 16
     for path in others:
         protocol = load_protocol(path)
         assert set(protocol["arms"]) == {"A", "B"}

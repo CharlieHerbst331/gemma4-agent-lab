@@ -1,6 +1,35 @@
 # Project status
 
-Last updated: October 17, 2026.
+Last updated: October 18, 2026.
+
+## Unevaluated structured-v12
+
+`agents/structured-v12` is a new candidate copied from `agents/structured-v8`.
+Existing agent directories were not modified. No score is claimed. No Kaggle
+push and no GPU run. structured-v8 remains the scored best at 0.10.
+
+The real v8 smoke5 (n=5, archive
+`9b1b01ca6881268867b06b5610fa03fc5fcb7b9f0ae3f98df5df565fb1ab586e`) resolved
+2 of 5, hit the cap on 4 of 5, and had mean wall 293.3 seconds. That fails
+`120 × (mean + 70)` against 39600. repair_1 handed off on time in 1 of 5
+because it ignored or never called `get_status`. Two runs never edited
+(45 and 52 read calls).
+
+v12 keeps the v8 shape, heredoc, rollback, check skill, sampling, 220 calls,
+and 320 turns. Triage's only command writes `/tmp/t0`. Every later
+`run_command` is prompted to start with a prefix that prints `[elapsed Ns]`.
+That prefix is not injected by the harness: `bash -c` does not source
+bashrc or run `PROMPT_COMMAND`, and the sandbox env does not set `BASH_ENV`.
+repair_1 stops at elapsed 150, repair_2 at 210, and verify_3 submits at
+215. The cap is 260 seconds (`max_time_minutes: 4.333333333333333`).
+4.5 minutes is legal and is 270 seconds, and `120 × (270 + 70) = 40800`
+fails the 39600 block. `120 × (260 + 70) = 39600` passes. The 12 hour
+warning still fires. An empty diff at elapsed 120 forces the v8 heredoc.
+Write-up: `docs/STRUCTURED_V12.md`. Smoke protocol:
+`configs/protocols/structured-v8-vs-structured-v12-smoke.yaml` (v8 vs v12,
+the smoke5 tasks with rich_3454 in place of fastapi_14262, one repeat, not
+promotion eligible). Archive SHA256
+`3d3f320ec7b9efbb92f0a732db1750fb63c6dbbde34624aa171d1dbe22e94d7b`.
 
 ## structured-v10 scored 0.01; structured-v11 is a v8 copy
 
