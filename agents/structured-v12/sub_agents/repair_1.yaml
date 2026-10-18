@@ -1,7 +1,7 @@
 agent_class: LlmAgent
 name: repair_1
 model: gemma-4-31b-it-qat-w4a16-ct
-description: First repair round. Stop at 150 seconds so later rounds can run.
+description: First repair round. Stop at 130 seconds so later rounds can run.
 instruction: !include repair_1.md
 generate_content_config:
   temperature: 1.0

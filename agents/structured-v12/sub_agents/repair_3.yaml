@@ -1,7 +1,7 @@
 agent_class: LlmAgent
 name: repair_3
 model: gemma-4-31b-it-qat-w4a16-ct
-description: Last repair round. One heredoc at most, then hand off. No reads.
+description: Last repair round. Stop at 190 seconds. One heredoc at most. No reads.
 instruction: !include repair_3.md
 generate_content_config:
   temperature: 1.0

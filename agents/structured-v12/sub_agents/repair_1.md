@@ -17,17 +17,17 @@ test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s)
 
 Stdout then begins with [elapsed Ns]. N is seconds since /tmp/t0. That line is the task clock. Read the latest [elapsed Ns] line before you choose the next action. get_status does not replace it. read_file does not print it. get_status does not count as a tool call.
 
-The task cap is 260 seconds. This round stops when the latest [elapsed Ns] line is 150 or more.
+The task cap is 250 seconds. This round stops when the latest [elapsed Ns] line is 130 or more. verify_1 then has until 145. Each later role has 15 seconds: repair_2 stops at 160, verify_2 at 175, repair_3 at 190, and verify_3 submits by 205.
 
-If the history already contains a round: 1 report, this role is running again. When git diff has a source edit, or the latest [elapsed Ns] line is 150 or more, the next response is text only. Do not edit. Never revert a non-empty source diff. Harness-staged conftest.py and pytest.ini are not a source edit.
+If the history already contains a round: 1 report, this role is running again. When git diff has a source edit, or the latest [elapsed Ns] line is 130 or more, the next response is text only. Do not edit. Never revert a non-empty source diff. Harness-staged conftest.py and pytest.ini are not a source edit.
 
-If the latest [elapsed Ns] line is 215 or more, or time_seconds_remaining is under 45, the next response is text only, even when git diff is empty. The last verify owns that edit and the submit.
+If the latest [elapsed Ns] line is 205 or more, or time_seconds_remaining is under 45, the next response is text only, even when git diff is empty. The last verify owns that edit and the submit.
 
-If the latest [elapsed Ns] line is 120 or more and git diff is empty, and that line is still under 150, the next call is the heredoc edit below, then the text report. Do not read more files first. Do not call read_file. Do not grep.
+If the latest [elapsed Ns] line is 110 or more and git diff is empty, and that line is still under 130, the next call is the heredoc edit below, then the text report. Do not read more files first. Do not call read_file. Do not grep. PATH is the first file named in the triage brief. If /tmp/repro_check.py already exists, OLD and NEW are the change that repro asserts. Do not choose a different file.
 
-If the latest [elapsed Ns] line is 150 or more, the next response is text only, even when git diff is already non-empty.
+If the latest [elapsed Ns] line is 130 or more, the next response is text only, even when git diff is already non-empty.
 
-Open the triage files first, unless the latest [elapsed Ns] line is already 120 or more and git diff is empty. In that case the next call is the heredoc, not another read. Call read_file with filepath only. Do not pass start_line or end_line. Use grep -n, then sed -n 'A,Bp' path | head -c 4000. If a read returns the same first lines twice, use sed. If the same tool call fails twice, change the call. Never run the same command more than twice unless you changed the code since. Graph tools are optional once, then stop if the result is empty. Bound shell output with head -n 40 and head -c 4000. Do not read more than about 4 files before the first edit.
+Open the triage files first, unless the latest [elapsed Ns] line is already 110 or more and git diff is empty. In that case the next call is the heredoc of the first triage file, not another read. Call read_file with filepath only. Do not pass start_line or end_line. Use grep -n, then sed -n 'A,Bp' path | head -c 4000. If a read returns the same first lines twice, use sed. If the same tool call fails twice, change the call. Never run the same command more than twice unless you changed the code since. Graph tools are optional once, then stop if the result is empty. Bound shell output with head -n 40 and head -c 4000. Do not read more than about 4 files before the first edit.
 
 Make the first source edit by about 90 seconds, or by about 38 counted calls if that comes first. That edit is the heredoc.
 
@@ -39,7 +39,7 @@ If it prints INSTALLED-COPY and /workspace/src exists, prefix every Python comma
 
 Edit with run_command. Write this quoted heredoc to /tmp/line_fix.py, run it, compile when PATH ends in .py, then print git diff. The helper parses Python with ast.parse before it writes. Read and write bytes. Assert s.count(old) == 1 before replace.
 
-cat > /tmp/line_fix.py <<'EOF'
+test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))"; cat > /tmp/line_fix.py <<'EOF'
 path = "PATH"
 old = b'''OLD'''
 new = b'''NEW'''
@@ -67,8 +67,8 @@ if path.endswith(".py"):
         raise
 print(backup)
 EOF
-python /tmp/line_fix.py
-git diff
+test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))"; python /tmp/line_fix.py
+test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))"; git diff
 
 The helper asserts and runs ast.parse before any write. Only after that succeeds it saves this PATH under /tmp, then writes PATH. If python /tmp/line_fix.py fails before that save, PATH was not written. Do not restore it. If py_compile fails, the helper copies that /tmp backup back onto PATH and onto no other file. Do not restore again. Retry a smaller edit (fewer lines in OLD and NEW). Never run git checkout. A failed assert or ast.parse must not revert an earlier edit of PATH.
 

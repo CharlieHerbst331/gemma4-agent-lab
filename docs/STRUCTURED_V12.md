@@ -5,7 +5,7 @@ scored 0.10. This candidate has no score. No Kaggle push and no GPU run.
 Existing agent directories were not modified. The scored v8 archive stays
 `9b1b01ca6881268867b06b5610fa03fc5fcb7b9f0ae3f98df5df565fb1ab586e`. The v12
 archive is
-`3d3f320ec7b9efbb92f0a732db1750fb63c6dbbde34624aa171d1dbe22e94d7b`.
+`1db40320137309e3a496b1590156ca98579e02ae385cc2cd7d44d43879515f39`.
 
 ## Smoke that motivated the clock
 
@@ -83,25 +83,34 @@ test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s)
 ```
 
 `read_file` still does not carry the line. The repair prompts say not to
-call `read_file` once the latest elapsed line is 120 or more and `git diff`
-is empty. `include_contents` stays `default`, so a printed line remains in
+call `read_file` once the latest elapsed line is 110 or more and `git diff`
+is empty. The heredoc recipe itself starts with the same prefix, then
+`cat > /tmp/line_fix.py`, so the copied command prints `[elapsed Ns]` too.
+`include_contents` stays `default`, so a printed line remains in
 the history for the next role. `get_status` stays in the tool list and does
 not count as a call. It is not the handoff clock. v12 does not call it
 before every command. That pattern is what starved structured-v10.
 
 ## Handoffs and the cap
 
-The elapsed line is the handoff key.
+The elapsed line is the handoff key. Triage writes `/tmp/t0` on its first
+command, about 5–15 seconds after the agent starts, and the line is printed
+at the start of the command. A threshold read off that line is later on the
+wall clock than the same number.
 
-- repair_1 stops when the line is 150 or more. From 120 up to 150, an empty
-  diff means the next call is the v8 heredoc, then the text report. No
-  further reads.
-- repair_2 stops when the line is 210 or more. An empty diff at 120 or more,
-  and still under 210, is the same heredoc.
-- verify_3 submits when the line is 215 or more, or
-  `time_seconds_remaining` is under 45. 215 is the cap minus 45 seconds.
-  An empty diff at that point is one heredoc, then `submit_patch`. The
-  prompt still says to call `submit_patch` anyway if the diff stays empty.
+Suggested stops of 135, 170, 195, and a submit at 205 do not leave 15
+seconds for every later role. Five roles follow repair_1, and
+`135 + 5 × 15 = 210`, which is past the 205 submit line. The stops below
+are the adjustment. Each gap is 15 seconds, and verify_3 still submits by
+205, which is the 250 second cap minus 45.
+
+- repair_1 stops at 130. verify_1 is 130 to 145.
+- repair_2 stops at 160. verify_2 is 160 to 175.
+- repair_3 stops at 190. verify_3 is 190 to 205 and must submit by 205.
+- An empty diff at 110 or more, and still before that role's stop, is the
+  v8 heredoc. PATH is the first file named in the triage brief. If
+  `/tmp/repro_check.py` already exists, OLD and NEW are the change that
+  repro asserts.
 
 The heredoc is the v8 helper: `ast.parse` before the write, backup
 `/tmp/pre_` plus the path with slashes replaced, `py_compile.compile(path,
@@ -116,23 +125,30 @@ can write `/tmp/t0`. v8 triage had `tools: []` and could not run that command.
 
 ## Gate math
 
-`max_time_minutes: 4.5` is allowed. structured-v5 uses it, and the notebook
-reads the field as a float. 4.5 minutes is 270 seconds. A cap-hit mean of
-270 fails the block that uses the measured mean:
+The v8 smoke5 cap-hit durations were 302–308 seconds on a 300 second cap, an
+overrun of 2–8 seconds. A cap of 260 therefore measures about 262–268.
+`120 × (262 + 70) = 39840` and `120 × (268 + 70) = 40560`, both over 39600.
+The block passes at a mean of 260.0 exactly, and a real cap-hit does not
+land on that number.
 
-- `120 × (270 + 70) = 40800`, over 39600.
-- `120 × (260 + 70) = 39600`, which passes.
-- `900 + 129 × 260 = 34440`, under the 38880 block.
-- `900 + 129 × (260 + 70) = 43470`, over the 43200 warning. The warning
-  still fires at a 260 second cap. The cap itself never blocks.
+The cap is 250 seconds. The same overrun is a measured mean of about
+252–258.
 
-260/60 is `4.333333333333333`, and that float times 60 is 260.0, so
-`max_time_minutes` is that value. `timeout_seconds` is 260 so one command
-cannot outlive the task. The aimed submit at elapsed 215 passes with
-margin: `120 × (215 + 70) = 34200`.
+- `120 × (258 + 70) = 120 × 328 = 39360`, under 39600.
+- `120 × (252 + 70) = 38640`, under 39600.
+- `900 + 129 × 258 = 34182`, under 38880.
+- `900 + 129 × (250 + 70) = 42180`, under the 43200 warning.
+
+250/60 is `4.166666666666667`. That literal times 60 is
+250.00000000000003, and `120 × (that product + 70)` is 38400.0, the same
+block as an exact 250 second cap. `max_time_minutes` is that literal.
+`timeout_seconds` is 250 so one command
+cannot outlive the task. Submit at elapsed 205 is `250 - 45`.
+`120 × (205 + 70) = 33000`, under 39600.
 
 The smoke mean of 293.3 would still fail. v12's claim is that a run which
-hits the new cap produces a mean the block accepts. That is unmeasured.
+hits the new cap, including a 2–8 second overrun, produces a mean the block
+accepts. That is unmeasured.
 
 ## Smoke protocol
 
@@ -149,13 +165,14 @@ and a 300 second tasks.jsonl wait is 4320 seconds. The session budget is
 - The prefix is still prompt text. A model that omits it gets no elapsed
   line, which is the failure mode this candidate is trying to leave.
 - fastapi_11194's first edit in the smoke was at 173 seconds. repair_1 now
-  stops at 150. That can drop the only explicit solve in the smoke.
+  stops at 130 and repair_2 at 160. That window is earlier than 173 even
+  after a 10 second late clock, so that solve can move into repair_3's
+  175–190 slice or be missed.
 - A forced heredoc on rich_4070 and rich_3938 is likely the wrong edit. The
   smoke analysis already said those tasks are a multi-file refactor and a
-  missing API. The 120 second rule exists so the run edits instead of
-  reading until the cap.
-- repair_2 stops at 210 and verify_3 submits at 215. Five seconds is a
-  tight gap for repair_3. The submit line is what the cap-minus-45 rule
-  requires at a 260 second cap.
+  missing API. The 110 second rule targets the first triage file, and a
+  repro when one exists, so the run edits instead of reading until the cap.
+- Each role after repair_1 has 15 seconds. That is the floor, not spare
+  time for a second edit.
 - n=5 cannot say whether the clock helps. The protocol is the comparison,
   and it has not been run.

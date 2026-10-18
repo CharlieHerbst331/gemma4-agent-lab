@@ -22,17 +22,19 @@ Stdout then begins with [elapsed Ns]. N is seconds since /tmp/t0. That line is t
 
 If git diff already has a source edit, the next response is text only. Do not edit that file, do not replace its bytes, and do not restore it. Never revert a non-empty source diff. Harness-staged conftest.py and pytest.ini are not a source edit.
 
-If the latest [elapsed Ns] line is 215 or more, or time_seconds_remaining is under 45, the next response is text only, even when git diff is empty.
+This round stops when the latest [elapsed Ns] line is 160 or more. verify_1 owns 130 to 145, so this round is 145 to 160.
 
-If the latest [elapsed Ns] line is 120 or more and git diff is empty, and that line is still under 210, the next call is the heredoc edit below, then the text report. Do not read more files first. Do not call read_file. Do not grep.
+If the latest [elapsed Ns] line is 205 or more, or time_seconds_remaining is under 45, the next response is text only, even when git diff is empty.
 
-If the latest [elapsed Ns] line is 210 or more, the next response is text only, even when git diff is already non-empty.
+If the latest [elapsed Ns] line is 110 or more and git diff is empty, and that line is still under 160, the next call is the heredoc edit below, then the text report. Do not read more files first. Do not call read_file. Do not grep. PATH is the first file named in the triage brief. If /tmp/repro_check.py already exists, OLD and NEW are the change that repro asserts. Do not choose a different file.
 
-Open at most 2 files, and only if the previous report names them and the latest [elapsed Ns] line is under 120 or git diff is already non-empty. If that line is 120 or more and git diff is empty, the next call is the heredoc, not another read. Call read_file with filepath only. Do not pass start_line or end_line. If the same tool call fails twice, change the call.
+If the latest [elapsed Ns] line is 160 or more, the next response is text only, even when git diff is already non-empty.
+
+Open at most 2 files, and only if the previous report names them and the latest [elapsed Ns] line is under 110 or git diff is already non-empty. If that line is 110 or more and git diff is empty, the next call is the heredoc of the first triage file, not another read. Call read_file with filepath only. Do not pass start_line or end_line. If the same tool call fails twice, change the call.
 
 Edit with run_command. The helper parses Python with ast.parse before it writes.
 
-cat > /tmp/line_fix.py <<'EOF'
+test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))"; cat > /tmp/line_fix.py <<'EOF'
 path = "PATH"
 old = b'''OLD'''
 new = b'''NEW'''
@@ -60,8 +62,8 @@ if path.endswith(".py"):
         raise
 print(backup)
 EOF
-python /tmp/line_fix.py
-git diff
+test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))"; python /tmp/line_fix.py
+test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))"; git diff
 
 The helper asserts and runs ast.parse before any write. Only after that succeeds it saves this PATH under /tmp, then writes PATH. If python /tmp/line_fix.py fails before that save, PATH was not written. Do not restore it. If py_compile fails, the helper copies that /tmp backup back onto PATH and onto no other file. Do not restore again. Retry a smaller edit. Never run git checkout. A failed assert or ast.parse must not revert an earlier edit of PATH.
 

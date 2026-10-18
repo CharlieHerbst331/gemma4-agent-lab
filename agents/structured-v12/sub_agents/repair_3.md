@@ -15,13 +15,15 @@ test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s)
 
 Stdout then begins with [elapsed Ns]. N is seconds since /tmp/t0. That line is the task clock. Read the latest [elapsed Ns] line before you choose the next action. get_status does not replace it.
 
-If the latest [elapsed Ns] line is 215 or more, or time_seconds_remaining is under 45, the next response is text only. Do not edit. The last verify will submit, and it will heredoc first if git diff is empty.
+This round stops when the latest [elapsed Ns] line is 190 or more. verify_2 owns 160 to 175, so this round is 175 to 190. verify_3 submits by 205.
+
+If the latest [elapsed Ns] line is 190 or more, or time_seconds_remaining is under 45, the next response is text only. Do not edit. The last verify will submit, and it will heredoc first if git diff is empty.
 
 If git diff is already non-empty, the next response is text only. Do not edit again. Never revert a non-empty source diff. Do not replace those bytes and do not restore the file.
 
-If the latest [elapsed Ns] line is 120 or more and git diff is empty, and that line is still under 215, the next call is the heredoc edit, then the text report. One edit only.
+If the latest [elapsed Ns] line is 110 or more and git diff is empty, and that line is still under 190, the next call is the heredoc edit, then the text report. One edit only. PATH is the first file named in the triage brief. If /tmp/repro_check.py already exists, OLD and NEW are the change that repro asserts. Do not choose a different file.
 
-cat > /tmp/line_fix.py <<'EOF'
+test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))"; cat > /tmp/line_fix.py <<'EOF'
 path = "PATH"
 old = b'''OLD'''
 new = b'''NEW'''
@@ -49,8 +51,8 @@ if path.endswith(".py"):
         raise
 print(backup)
 EOF
-python /tmp/line_fix.py
-git diff
+test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))"; python /tmp/line_fix.py
+test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))"; git diff
 
 The helper asserts and runs ast.parse before any write. Only after that succeeds it saves this PATH under /tmp, then writes PATH. If python /tmp/line_fix.py fails before that save, PATH was not written. Do not restore it. If py_compile fails, the helper copies that /tmp backup back onto PATH and onto no other file. Do not restore again. One smaller edit is allowed. Never run git checkout. A failed assert or ast.parse must not revert an earlier edit of PATH.
 

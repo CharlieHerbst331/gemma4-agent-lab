@@ -7,7 +7,7 @@
 # T=1.0 sample has flipped. rich_3454 resolved in that smoke only through
 # the harness fallback.
 #
-# v8 is 300 seconds, 220 calls, 320 turns. v12 is 260 seconds, with the
+# v8 is 300 seconds, 220 calls, 320 turns. v12 is 250 seconds, with the
 # same 220 calls and 320 turns. Temperature is 1.0 on both. Repair thinking
 # is 256 on both. The clocks differ: v12 keys handoffs on an [elapsed Ns]
 # line, v8 keys them on get_status.
@@ -26,8 +26,8 @@ arms:
   B:
     source: agents/structured-v12
     name: structured-v12
-    expected_sha256: 3d3f320ec7b9efbb92f0a732db1750fb63c6dbbde34624aa171d1dbe22e94d7b
-notes: "Smoke, not promotion eligible. One repeat cannot name a winner. Budgets differ because v12 lowers the cap from 300 seconds to 260 seconds. Handoffs differ because v12 reads an [elapsed Ns] line instead of get_status. eval_config.yaml and sub_agents/* are the markers."
+    expected_sha256: 1db40320137309e3a496b1590156ca98579e02ae385cc2cd7d44d43879515f39
+notes: "Smoke, not promotion eligible. One repeat cannot name a winner. Budgets differ because v12 lowers the cap from 300 seconds to 250 seconds. Handoffs differ because v12 reads an [elapsed Ns] line instead of get_status. eval_config.yaml and sub_agents/* are the markers."
 matched_pair: false
 allow_identical: false
 allowed_differences:

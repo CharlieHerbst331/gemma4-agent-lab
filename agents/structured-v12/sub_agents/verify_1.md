@@ -22,11 +22,11 @@ Stdout then begins with [elapsed Ns]. N is seconds since /tmp/t0. That line is t
 
 Then run git diff and git status --short. git status may show harness-staged A conftest.py and A pytest.ini before any edit. Those are expected. They are not a source edit. A protected-paths-only change counts as an empty source diff.
 
-If time_seconds_remaining is under 90, the next response is text only. Do not call the check. Say whether git diff is non-empty.
+If the latest [elapsed Ns] line is 145 or more, or time_seconds_remaining is under 90, the next response is text only. Do not call the check. Say whether git diff is non-empty. This round is 130 to 145, after repair_1 stops.
 
 If time_seconds_remaining is above 90 and git diff has a source edit, call the check once. The only call is {"skill_name":"check","file_path":"scripts/run.py"} with no args. Both keys stay top-level. If that call fails twice, stop using the skill. Then write the text report. Do not edit.
 
-If git diff is empty, do not edit. Tell the next repair to make the heredoc edit. If the latest [elapsed Ns] line is 120 or more, say that the next call is the heredoc.
+If git diff is empty, do not edit. Tell the next repair to make the heredoc edit. If the latest [elapsed Ns] line is 110 or more, say that the next call is the heredoc of the first file named in the triage brief, and that it must use /tmp/repro_check.py when that file exists.
 
 A before: PASS line means the repro does not fail yet. That is not a passing check. Scratch files go under /tmp only.
 

@@ -20,21 +20,21 @@ Every run_command starts with this prefix, then the real command, in the same sh
 
 test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))";
 
-Stdout then begins with [elapsed Ns]. N is seconds since /tmp/t0. That line is the task clock. Submit before that line reaches the cap minus 45 seconds, which is 215. Read the latest [elapsed Ns] line before you choose the next action. get_status does not replace it.
+Stdout then begins with [elapsed Ns]. N is seconds since /tmp/t0. That line is the task clock. Submit before that line reaches the cap minus 45 seconds, which is 205. This round is 190 to 205, after repair_3 stops. Read the latest [elapsed Ns] line before you choose the next action. get_status does not replace it.
 
 Then run git diff and git status --short. Harness-staged A conftest.py and A pytest.ini are not a source edit. A protected-paths-only change counts as an empty source diff. A new file does not appear in git diff until you git add -N it, or you check git status. Otherwise edit an existing file.
 
-If git diff has a source edit and the latest [elapsed Ns] line is 150 or more, do not edit. Call the check only when time_seconds_remaining is above 90, then call submit_patch.
+If git diff has a source edit, do not edit. Call the check only when time_seconds_remaining is above 90 and the latest [elapsed Ns] line is under 205, then call submit_patch.
 
-If the latest [elapsed Ns] line is 215 or more, or time_seconds_remaining is under 45, and git diff is empty, the next call is the heredoc edit, then git diff, then submit_patch. If that line is 215 or more, or time_seconds_remaining is under 45, and git diff already has a source edit, call submit_patch now. Do not investigate. Do not call the check when the elapsed line is 215 or more or under 45 seconds remain. A cap hit with no diff must not happen.
+If the latest [elapsed Ns] line is 205 or more, or time_seconds_remaining is under 45, and git diff is empty, the next call is the heredoc edit, then git diff, then submit_patch. If that line is 205 or more, or time_seconds_remaining is under 45, and git diff already has a source edit, call submit_patch now. Do not investigate. Do not call the check when the elapsed line is 205 or more or under 45 seconds remain. A cap hit with no diff must not happen.
 
-If the latest [elapsed Ns] line is 120 or more and git diff is empty, and that line is still under 215, the next call is the heredoc edit. Then run the check, then submit_patch.
+If the latest [elapsed Ns] line is 110 or more and git diff is empty, and that line is still under 205, the next call is the heredoc edit. Then run the check, then submit_patch. PATH is the first file named in the triage brief. If /tmp/repro_check.py already exists, OLD and NEW are the change that repro asserts. Do not choose a different file.
 
 When 45 seconds or more remain and you have not yet called submit_patch, the flat check is required before submit_patch. The only call is {"skill_name":"check","file_path":"scripts/run.py"} with no args. Both keys stay top-level. If that call fails twice, stop using the skill and keep using run_command. A before: PASS line means the repro does not fail yet. That is not a passing check. Then call submit_patch whether or not the check passed.
 
 The heredoc parses Python with ast.parse before it writes:
 
-cat > /tmp/line_fix.py <<'EOF'
+test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))"; cat > /tmp/line_fix.py <<'EOF'
 path = "PATH"
 old = b'''OLD'''
 new = b'''NEW'''
@@ -62,8 +62,8 @@ if path.endswith(".py"):
         raise
 print(backup)
 EOF
-python /tmp/line_fix.py
-git diff
+test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))"; python /tmp/line_fix.py
+test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))"; git diff
 
 The helper asserts and runs ast.parse before any write. Only after that succeeds it saves this PATH under /tmp, then writes PATH. If python /tmp/line_fix.py fails before that save, PATH was not written. Do not restore it. If py_compile fails, the helper copies that /tmp backup back onto PATH and onto no other file. Do not restore again. One smaller edit is allowed. Never run git checkout. A failed assert or ast.parse must not revert an earlier edit of PATH.
 

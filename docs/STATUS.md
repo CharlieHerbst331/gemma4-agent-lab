@@ -20,23 +20,29 @@ and 320 turns. Triage's only command writes `/tmp/t0`. Every later
 `run_command` is prompted to start with a prefix that prints `[elapsed Ns]`.
 That prefix is not injected by the harness: `bash -c` does not source
 bashrc or run `PROMPT_COMMAND`, and the sandbox env does not set `BASH_ENV`.
-repair_1 stops at elapsed 150, repair_2 at 210, and verify_3 submits at
-215. The cap is 260 seconds (`max_time_minutes: 4.333333333333333`).
-4.5 minutes is legal and is 270 seconds, and `120 × (270 + 70) = 40800`
-fails the 39600 block. `120 × (260 + 70) = 39600` passes. The 12 hour
-warning still fires. An empty diff at elapsed 120 forces the v8 heredoc.
+repair_1 stops at elapsed 130, repair_2 at 160, repair_3 at 190, and
+verify_3 submits by 205. Each of those later roles has 15 seconds. The
+suggested 135/170/195/205 spacing does not, because five roles after
+repair_1 need 75 seconds and 205 − 135 is 70. The cap is 250 seconds
+(`max_time_minutes: 4.166666666666667`). Cap-hit runs overrun by about
+2–8 seconds, so a 250 second cap measures about 252–258.
+`120 × (258 + 70) = 39360`, under 39600. A 260 second cap with that
+overrun measures 262–268 and fails (`39840–40560`). An empty diff at
+elapsed 110 forces the v8 heredoc on the first triage file, using
+`/tmp/repro_check.py` when it exists. The heredoc command itself starts
+with the elapsed prefix.
 Write-up: `docs/STRUCTURED_V12.md`. Smoke protocol:
 `configs/protocols/structured-v8-vs-structured-v12-smoke.yaml` (v8 vs v12,
 the smoke5 tasks with rich_3454 in place of fastapi_14262, one repeat, not
 promotion eligible). Archive SHA256
-`3d3f320ec7b9efbb92f0a732db1750fb63c6dbbde34624aa171d1dbe22e94d7b`.
+`1db40320137309e3a496b1590156ca98579e02ae385cc2cd7d44d43879515f39`.
 
 ## structured-v10 scored 0.01; structured-v11 is a v8 copy
 
 structured-v10, archive
 `c07fcc5505f509f648a924a09dfa5a0f4c1cfe10d4b0a784f938e69116c66ed0`, merged at
 `fcc7c426`, scored 0.01 on Kaggle (submission ref 57262340). structured-v8
-remains the scored best at 0.10. structured-v9 scored 0.08 and single-v6
+remains the scored best at 0.10. structured-v9 scored 0.08 (submission ref 57224300) and single-v6
 scored 0.08, per coordinator report of the public leaderboard (16–17 October
 2026). The v10 drop is compute starvation: serialized `run_command`, a shared
 vLLM, a `get_status` before every command, and a 170 second branch stop. One
