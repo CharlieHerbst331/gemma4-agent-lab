@@ -1,6 +1,30 @@
 # Project status
 
-Last updated: October 18, 2026.
+Last updated: October 19, 2026.
+
+## Unevaluated structured-v13
+
+`agents/structured-v13` is a new candidate copied from `agents/structured-v8`.
+Existing agent directories were not modified. No score is claimed. No Kaggle
+push and no GPU run. structured-v8 remains the scored best, at 0.10 and, on
+the same archive, 0.13. structured-v12 scored 0.06.
+
+The v8 smoke5 mean of 293.3 seconds is four cap hits (302.5, 303.5, 304.7,
+307.6) plus fastapi_11194 at 248.3. The short task pulls the mean down.
+Dropping it leaves 304.6. A 252 second cap is the largest integer cap whose
+8 second overrun still passes `120 × (mean + 70) <= 39600`. v13 does not
+use that cap. It keeps 300 seconds, 220 calls, and 320 turns, drops v12's
+stamps and edit-by-110/120, and adds a no-reread rule plus a soft handoff:
+past about 240 seconds with a diff, go to submit; with an empty diff,
+continue. Write-up: `docs/STRUCTURED_V13.md`. Archive SHA256
+`bcae1a1932f4b59547615bdcda69a437629d88fd65f946b48fa3154334f7e7d7`.
+
+## structured-v12 scored 0.06
+
+`agents/structured-v12` scored 0.06. The 250 second cap, elapsed stamps,
+and edit-by-110 cut the runs short of v8's 0.10 and 0.13. Archive SHA256
+`1db40320137309e3a496b1590156ca98579e02ae385cc2cd7d44d43879515f39`. The
+notes below were written before that score.
 
 ## Unevaluated structured-v12
 
