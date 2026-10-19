@@ -12,12 +12,25 @@ the same archive, 0.13. structured-v12 scored 0.06.
 The v8 smoke5 mean of 293.3 seconds is four cap hits (302.5, 303.5, 304.7,
 307.6) plus fastapi_11194 at 248.3. The short task pulls the mean down.
 Dropping it leaves 304.6. A 252 second cap is the largest integer cap whose
-8 second overrun still passes `120 × (mean + 70) <= 39600`. v13 does not
-use that cap. It keeps 300 seconds, 220 calls, and 320 turns, drops v12's
-stamps and edit-by-110/120, and adds a no-reread rule plus a soft handoff:
-past about 240 seconds with a diff, go to submit; with an empty diff,
-continue. Write-up: `docs/STRUCTURED_V13.md`. Archive SHA256
-`bcae1a1932f4b59547615bdcda69a437629d88fd65f946b48fa3154334f7e7d7`.
+8 second overrun still passes the internal block
+(`120 × ((252 + 8) + 70) = 39600`). That block is this lab's margin model.
+The host enforces 12 hours total only (`research/runtime-cap.md`). v13 does
+not use the 252 second cap. It keeps 300 seconds, 220 calls, and 320 turns.
+A v13 upload whose mean is above 260 seconds needs the same uploader
+override already used for v8, because `check_projected_runtime` refuses
+that mean. v13 drops v12's stamps and edit-by-110/120. "Drop edit-by-120"
+is that elapsed rule, not v8's remaining-time net. Identical calls are
+banned when no source edit has happened since; a new read range, and a
+post-edit rerun of the repro, pytest, and `git diff`, stay allowed. Past
+about 240 seconds with a diff, go to submit. With an empty diff and under
+120 seconds remaining, the v8 heredoc net still fires on repair_1/2/3 and
+verify_1/2/3. repair_1 hands off at 180 seconds, and repair_2 at 240
+seconds, whether or not a diff exists. repair_1 calls `get_status` before
+each edit. The realistic timing projection is about 267 seconds (266.86)
+and still fails the internal 120-task block. 247.66 is a hypothesis that
+the two no-edit loops end near 255. Write-up: `docs/STRUCTURED_V13.md`.
+Archive SHA256
+`5ff4c0b3671cb1ff32cfbcb714b079e7a6f72177959c72d36c578fee1fb30dde`.
 
 ## structured-v12 scored 0.06
 

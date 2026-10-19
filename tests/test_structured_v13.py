@@ -1,4 +1,4 @@
-"""structured-v13 keeps v8's cap and adds a late soft deadline."""
+"""structured-v13 keeps v8's cap, empty-diff net, and a late soft deadline."""
 
 import importlib.util
 import os
@@ -22,7 +22,7 @@ from gemma_lab.operations import (
 V8 = Path("agents/structured-v8")
 V13 = Path("agents/structured-v13")
 V8_ARCHIVE = "9b1b01ca6881268867b06b5610fa03fc5fcb7b9f0ae3f98df5df565fb1ab586e"
-V13_ARCHIVE = "bcae1a1932f4b59547615bdcda69a437629d88fd65f946b48fa3154334f7e7d7"
+V13_ARCHIVE = "5ff4c0b3671cb1ff32cfbcb714b079e7a6f72177959c72d36c578fee1fb30dde"
 SMOKE_WALLS = {
     "rich_4070": 303.5,
     "rich_3934": 307.6,
@@ -101,12 +101,46 @@ def test_v13_keeps_the_v8_cap_and_the_late_deadline():
         text = _prompt(name)
         assert "about 240 or more and git diff has a source edit" in text
         assert "Do not paste source lines" in text
-    for name in ("repair_1", "repair_2", "verify_1"):
-        assert "already appears in the history" in _prompt(name)
+        assert "already appears in the history" not in text
+        assert "Do not force an edit only because the clock passed 240" not in text
+        assert "An empty diff does not stop this round" not in text
+        assert "same path and the same range" in text
+        assert "paging past a truncated read" in text
+        assert "python /tmp/repro_check.py again, pytest, and git diff is allowed" in text
     repair_1 = _prompt("repair_1")
-    assert "time_seconds_remaining is under 120 and git diff is empty" not in repair_1
-    assert "An empty diff does not stop this round" in repair_1
+    assert "Call get_status before each edit." in repair_1
+    assert (
+        "If time_seconds_remaining is under 120 and git diff is empty, "
+        "the next call is the heredoc edit below, then the text report. "
+        "Do not read more files first."
+    ) in repair_1
+    assert (
+        "If agent_elapsed_seconds is 180 or more, or time_seconds_remaining "
+        "is 120 or less and git diff is already non-empty, the next response is text only."
+    ) in repair_1
+    repair_2 = _prompt("repair_2")
+    assert (
+        "If agent_elapsed_seconds is 240 or more, or time_seconds_remaining "
+        "is 60 or less and git diff is already non-empty, the next response is text only."
+    ) in repair_2
+    assert (
+        "If time_seconds_remaining is under 120 and git diff is empty, "
+        "the next call is the heredoc edit, then the text report, as long as "
+        "45 seconds or more remain."
+    ) in _prompt("repair_3")
+    assert "say that the next call is the heredoc" in _prompt("verify_1")
+    assert "Tell the next repair that the next call is the heredoc." in _prompt("verify_2")
+    assert (
+        "If time_seconds_remaining is under 120 and git diff is empty, and 45 seconds "
+        "or more remain, the next call is the heredoc edit. Then run the check, then submit_patch."
+    ) in _prompt("verify_3")
     assert "py_compile.compile(path, doraise=True)" in repair_1
+    comment = (V13 / "eval_config.yaml").read_text()
+    assert "120 * ((252 + 8) + 70) = 120 * 330 = 39600" in comment
+    assert "research/runtime-cap.md" in comment
+    assert "12 hours total" in comment
+    assert "same uploader override" in comment
+    assert "check_projected_runtime" in comment
     for name in ("repair_1", "repair_2", "repair_3", "verify_3"):
         assert _heredoc(_prompt(name)) == _heredoc((V8 / "sub_agents" / f"{name}.md").read_text())
     assert len(validate(V13)) == 20
@@ -115,7 +149,7 @@ def test_v13_keeps_the_v8_cap_and_the_late_deadline():
     assert report["findings"] == []
 
 
-def test_gate_passes_near_255_and_a_252_second_cap_is_not_used():
+def test_realistic_projection_is_about_267_and_247_66_is_a_hypothesis():
     overhead = DEFAULT_SCORER_OVERHEAD_SECONDS
     assert overhead == 70
     assert PROJECTED_HIDDEN_TASKS * (260 + overhead) == PROJECTED_RUNTIME_LIMIT_SECONDS
@@ -127,15 +161,15 @@ def test_gate_passes_near_255_and_a_252_second_cap_is_not_used():
     assert PROJECTED_HIDDEN_TASKS * (253 + 8 + overhead) == 39720
     assert 39720 > PROJECTED_RUNTIME_LIMIT_SECONDS
     assert (38880 - 900) / PROJECTED_PUBLIC_TASKS > 294
-    # Soft deadline alone leaves the two no-edit cap hits in place.
-    soft_only = (303.5 + 240 + 302.5 + 248.3 + 240) / 5
-    assert round(soft_only, 2) == 266.86
-    assert PROJECTED_HIDDEN_TASKS * (soft_only + overhead) > PROJECTED_RUNTIME_LIMIT_SECONDS
-    # No-reread plus the soft deadline is the projection that passes.
-    shortened = (255 + 240 + 255 + 248.3 + 240) / 5
-    assert round(shortened, 2) == 247.66
-    assert PROJECTED_HIDDEN_TASKS * (shortened + overhead) <= PROJECTED_RUNTIME_LIMIT_SECONDS
-    assert 900 + PROJECTED_PUBLIC_TASKS * shortened <= PROJECTED_LOAD_LIMIT_SECONDS
+    # Realistic best case: diff tasks hand off at 240; no-edit tasks stay on the cap.
+    realistic = (303.5 + 240 + 302.5 + 248.3 + 240) / 5
+    assert round(realistic, 2) == 266.86
+    assert PROJECTED_HIDDEN_TASKS * (realistic + overhead) > PROJECTED_RUNTIME_LIMIT_SECONDS
+    # Hypothesis: both no-edit loops end near 255. No rule makes them stop there.
+    hypothesis = (255 + 240 + 255 + 248.3 + 240) / 5
+    assert round(hypothesis, 2) == 247.66
+    assert PROJECTED_HIDDEN_TASKS * (hypothesis + overhead) <= PROJECTED_RUNTIME_LIMIT_SECONDS
+    assert 900 + PROJECTED_PUBLIC_TASKS * hypothesis <= PROJECTED_LOAD_LIMIT_SECONDS
     assert 900 + PROJECTED_PUBLIC_TASKS * (300 + overhead) == 48630
     assert 48630 > WORST_CASE_WARN_SECONDS
 

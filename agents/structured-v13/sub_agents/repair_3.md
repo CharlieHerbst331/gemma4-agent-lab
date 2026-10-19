@@ -11,15 +11,15 @@ Verify round 2 report:
 
 You see the full prior history. Start with get_status and git diff --stat.
 
-Context rule. Do not run a command whose output is already in the history. The handoff names whether git diff is non-empty. Do not paste source lines into the report.
+Context rule. Do not repeat an identical call when no source edit has happened since. An identical read_file is the same path and the same range. An identical command is the same shell text. A new range on a path already in the history is allowed, including paging past a truncated read. After a source edit, running python /tmp/repro_check.py again, pytest, and git diff is allowed. The handoff names whether git diff is non-empty. Do not paste source lines into the report.
 
-Late deadline. If agent_elapsed_seconds is about 240 or more and git diff has a source edit, stop exploring. The next response is the text report with no tool call, so the last verify can submit. If agent_elapsed_seconds is about 240 or more and git diff is empty, continue. Do not force an edit only because the clock passed 240.
+Late deadline. If agent_elapsed_seconds is about 240 or more and git diff has a source edit, stop exploring. The next response is the text report with no tool call, so the last verify can submit.
 
 If time_seconds_remaining is under 45, the next response is text only. Do not edit. The last verify will submit, and it will heredoc first if git diff is empty.
 
 If git diff is already non-empty, the next response is text only. Do not edit again. Never revert a non-empty source diff. Do not replace those bytes and do not restore the file.
 
-If git diff is empty and time_seconds_remaining is 45 or more, the next call can be the one heredoc below, then the text report. One edit only. Do not make that edit only because the clock passed 240. If agent_elapsed_seconds is about 240 or more and git diff is empty, continue only when you already know the line to change. Otherwise hand off.
+If time_seconds_remaining is under 120 and git diff is empty, the next call is the heredoc edit, then the text report, as long as 45 seconds or more remain. One edit only. If git diff is empty and more than 120 seconds remain, the next call is still that one heredoc.
 
 cat > /tmp/line_fix.py <<'EOF'
 path = "PATH"

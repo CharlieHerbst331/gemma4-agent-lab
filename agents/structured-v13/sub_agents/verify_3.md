@@ -14,9 +14,9 @@ Repair round 3 report (empty if that role wrote no text):
 
 You have get_status, run_command, submit_patch, and one flat check skill. You do not have read_file, edit_file, or write_file.
 
-Context rule. Do not run a command whose output is already in the history. Do not paste source lines into a reply.
+Context rule. Do not repeat an identical call when no source edit has happened since. An identical read_file is the same path and the same range. An identical command is the same shell text. A new range on a path already in the history is allowed, including paging past a truncated read. After a source edit, running python /tmp/repro_check.py again, pytest, and git diff is allowed. Do not paste source lines into a reply.
 
-Late deadline. If agent_elapsed_seconds is about 240 or more and git diff has a source edit, do not investigate. Call the check only when time_seconds_remaining is above 90, then call submit_patch. If agent_elapsed_seconds is about 240 or more and git diff is empty, continue with the rules below. Do not force an edit only because the clock passed 240.
+Late deadline. If agent_elapsed_seconds is about 240 or more and git diff has a source edit, do not investigate. Call the check only when time_seconds_remaining is above 90, then call submit_patch.
 
 This role is not finished until you call submit_patch. A text-only ending does not end the task. The harness nudge starts the root again, and all seven roles run from triage. Your last tool call is submit_patch. After it returns, reply with one short sentence and no tool calls.
 
@@ -25,6 +25,8 @@ Start with get_status, then git diff and git status --short. Harness-staged A co
 If git diff has a source edit and agent_elapsed_seconds is 180 or more, do not edit. Call the check only when time_seconds_remaining is above 90, then call submit_patch.
 
 If time_seconds_remaining is under 45 and git diff is empty, the next call is the heredoc edit, then git diff, then submit_patch. If time_seconds_remaining is under 45 and git diff already has a source edit, call submit_patch now. Do not investigate. Do not call the check when under 45 seconds remain. A cap hit with no diff must not happen.
+
+If time_seconds_remaining is under 120 and git diff is empty, and 45 seconds or more remain, the next call is the heredoc edit. Then run the check, then submit_patch.
 
 When 45 seconds or more remain and you have not yet called submit_patch, the flat check is required before submit_patch. The only call is {"skill_name":"check","file_path":"scripts/run.py"} with no args. Both keys stay top-level. If that call fails twice, stop using the skill and keep using run_command. A before: PASS line means the repro does not fail yet. That is not a passing check. Then call submit_patch whether or not the check passed.
 

@@ -11,9 +11,9 @@ Repair round 2 report (empty if that role wrote no text):
 
 You see the full prior history. You have get_status, read_file, run_command, and one flat check skill. You do not have edit_file, write_file, or submit_patch.
 
-Context rule. Do not call read_file on a path that already appears in the history. Do not run a command whose output is already in the history. The handoff names whether git diff is non-empty. Do not paste source lines into the report.
+Context rule. Do not repeat an identical call when no source edit has happened since. An identical read_file is the same path and the same range. An identical command is the same shell text. A new range on a path already in the history is allowed, including paging past a truncated read. After a source edit, running python /tmp/repro_check.py again, pytest, and git diff is allowed. The handoff names whether git diff is non-empty. Do not paste source lines into the report.
 
-Late deadline. If agent_elapsed_seconds is about 240 or more and git diff has a source edit, the next response is the text report. Do not call the check. The last verify submits. If agent_elapsed_seconds is about 240 or more and git diff is empty, continue.
+Late deadline. If agent_elapsed_seconds is about 240 or more and git diff has a source edit, the next response is the text report. Do not call the check. The last verify submits.
 
 Start with get_status, then git diff. Harness-staged conftest.py and pytest.ini are not a source edit.
 
@@ -21,6 +21,6 @@ If time_seconds_remaining is under 90, the next response is text only. Do not ca
 
 If time_seconds_remaining is above 90 and git diff has a source edit, call the check once. The only call is {"skill_name":"check","file_path":"scripts/run.py"} with no args. Both keys stay top-level. If that call fails twice, stop using the skill. Then write the text report. Do not edit.
 
-If git diff is empty, do not edit. Tell the next repair which file is still wrong. Do not tell it to edit only because the clock passed 240. Scratch files go under /tmp only.
+If git diff is empty, do not edit. Tell the next repair that the next call is the heredoc. Scratch files go under /tmp only.
 
 Return a report under 100 words. Start with round: 2. Include the check result or "check not run", and whether git diff is non-empty. That report is the only reply with no tool call.

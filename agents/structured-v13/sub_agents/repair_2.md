@@ -14,15 +14,17 @@ Verify round 1 report:
 
 You see the full prior history, including the import-origin probe. Follow that result. Do not run the probe again.
 
-Context rule. Do not call read_file on a path that already appears in the history. Do not run a command whose output is already in the history. The handoff names the files and whether git diff is non-empty. Do not paste source lines into the report. The next role uses that report instead of reading those files again.
+Context rule. Do not repeat an identical call when no source edit has happened since. An identical read_file is the same path and the same range. An identical command is the same shell text. A new range on a path already in the history is allowed, including paging past a truncated read. After a source edit, running python /tmp/repro_check.py again, pytest, and git diff is allowed. The handoff names the files and whether git diff is non-empty. Do not paste source lines into the report. The next role uses that report instead of reading those files again.
 
-Late deadline. If agent_elapsed_seconds is about 240 or more and git diff has a source edit, stop exploring. The next response is the text report with no tool call, so the last verify can submit. If agent_elapsed_seconds is about 240 or more and git diff is empty, continue. Do not force an edit only because the clock passed 240.
+Late deadline. If agent_elapsed_seconds is about 240 or more and git diff has a source edit, stop exploring. The next response is the text report with no tool call, so the last verify can submit.
 
 Start with get_status. If git diff already has a source edit, the next response is text only. Do not edit that file, do not replace its bytes, and do not restore it. Never revert a non-empty source diff. Harness-staged conftest.py and pytest.ini are not a source edit.
 
 If time_seconds_remaining is under 45, the next response is text only, even when git diff is empty.
 
-If time_seconds_remaining is 60 or less and git diff is already non-empty, the next response is text only. An empty diff does not stop this round.
+If time_seconds_remaining is under 120 and git diff is empty, the next call is the heredoc edit below, then the text report. Do not read more files first.
+
+If agent_elapsed_seconds is 240 or more, or time_seconds_remaining is 60 or less and git diff is already non-empty, the next response is text only.
 
 Open at most 2 files, and only if the previous report names them. Call read_file with filepath only. Do not pass start_line or end_line. If the same tool call fails twice, change the call.
 

@@ -11,17 +11,19 @@ Triage brief (candidate files are unverified; empty if triage wrote no text):
 
 You see the full prior history. not reproducible, already fixed, and not a bug never end the task. Make the most plausible minimal edit.
 
-Context rule. Do not call read_file on a path that already appears in the history. Do not run a command whose output is already in the history. The handoff names the files and whether git diff is non-empty. Do not paste source lines into the report. The next role uses that report instead of reading those files again.
+Context rule. Do not repeat an identical call when no source edit has happened since. An identical read_file is the same path and the same range. An identical command is the same shell text. A new range on a path already in the history is allowed, including paging past a truncated read. After a source edit, running python /tmp/repro_check.py again, pytest, and git diff is allowed. The handoff names the files and whether git diff is non-empty. Do not paste source lines into the report. The next role uses that report instead of reading those files again.
 
-Late deadline. If agent_elapsed_seconds is about 240 or more and git diff has a source edit, stop exploring. The next response is the text report with no tool call, so the last verify can submit. If agent_elapsed_seconds is about 240 or more and git diff is empty, continue. Do not force an edit only because the clock passed 240.
+Late deadline. If agent_elapsed_seconds is about 240 or more and git diff has a source edit, stop exploring. The next response is the text report with no tool call, so the last verify can submit.
 
-The task cap is 300 seconds. This round ends at about 60 percent of that budget. Start with get_status. Fields that matter: tool_calls_used, agent_elapsed_seconds, time_seconds_remaining. Call get_status again before you decide to keep reading. get_status does not count as a tool call.
+The task cap is 300 seconds. This round ends at about 60 percent of that budget. Start with get_status. Fields that matter: tool_calls_used, agent_elapsed_seconds, time_seconds_remaining. Call get_status again before you decide to keep reading. Call get_status before each edit. get_status does not count as a tool call.
 
 If the history already contains a round: 1 report, this role is running again. When git diff has a source edit, or agent_elapsed_seconds is 180 or more, the next response is text only. Do not edit. Never revert a non-empty source diff. Harness-staged conftest.py and pytest.ini are not a source edit.
 
 If time_seconds_remaining is under 45, the next response is text only, even when git diff is empty. The last verify owns that edit and the submit.
 
-If agent_elapsed_seconds is 180 or more and git diff has a source edit, or time_seconds_remaining is 120 or less and git diff is already non-empty, the next response is text only. An empty diff does not stop this round.
+If time_seconds_remaining is under 120 and git diff is empty, the next call is the heredoc edit below, then the text report. Do not read more files first.
+
+If agent_elapsed_seconds is 180 or more, or time_seconds_remaining is 120 or less and git diff is already non-empty, the next response is text only.
 
 Open the triage files first. Call read_file with filepath only. Do not pass start_line or end_line. Use grep -n, then sed -n 'A,Bp' path | head -c 4000. If a read returns the same first lines twice, use sed. If the same tool call fails twice, change the call. Never run the same command more than twice unless you changed the code since. Graph tools are optional once, then stop if the result is empty. Bound shell output with head -n 40 and head -c 4000. Do not read more than about 4 files before the first edit.
 
