@@ -1,6 +1,24 @@
 # Project status
 
-Last updated: October 19, 2026.
+Last updated: October 20, 2026.
+
+## Unevaluated structured-v14
+
+`agents/structured-v14` (`structured_v14`) is a copy of
+`agents/structured-v13-1`. Existing agent directories were not modified. No
+score is claimed. No Kaggle push and no GPU run. structured-v8 remains the
+scored best, at 0.10 and, on the same archive, 0.13. structured-v12 scored
+0.06. structured-v13 is submitted and its score is pending (Kaggle ref
+57412943). structured-v13-1 is unevaluated.
+
+Hypothesis: a map before any read, and numbered 100-line windows, should
+produce fewer no-edit runs than 59/118 and fewer calls to the first edit
+than the median of 21. That comparison was not run. An offline identifier
+proxy on 92 of 95 train IDs put a gold source file in the top 3 for 31
+listings and 33 map outputs. Map render time on 91 trees had median 0.071
+seconds and max 0.147 seconds. Write-up: `docs/STRUCTURED_V14.md`. Archive
+SHA256
+`1fd3227d23da56900cdfca23fc5ff5a73cf9da6a5ffa7d613fbb3b83fc3e9336`.
 
 ## Unevaluated structured-v13-1
 
