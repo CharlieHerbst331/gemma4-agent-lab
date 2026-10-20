@@ -1,0 +1,17 @@
+agent_class: LlmAgent
+name: triage
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Call map once, name at most three candidate files and functions, then stop.
+instruction: !include triage.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  # 1024 completion tokens leaves a 31744-token prompt ceiling inside 32768.
+  max_output_tokens: 1024
+  thinking_config: !include thinking.yaml
+include_contents: default
+tools: []
+output_key: triage_brief
+skills:
+- skills/map
