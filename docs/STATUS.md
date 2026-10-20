@@ -2,12 +2,33 @@
 
 Last updated: October 19, 2026.
 
-## Unevaluated structured-v13
+## Unevaluated structured-v13-1
 
-`agents/structured-v13` is a new candidate copied from `agents/structured-v8`.
-Existing agent directories were not modified. No score is claimed. No Kaggle
-push and no GPU run. structured-v8 remains the scored best, at 0.10 and, on
-the same archive, 0.13. structured-v12 scored 0.06.
+`agents/structured-v13-1` (`structured_v13_1`) is a copy of
+`agents/structured-v13`. Existing agent directories were not modified. No
+score is claimed. No Kaggle push and no GPU run for this candidate.
+structured-v8 remains the scored best, at 0.10 and, on the same archive,
+0.13. structured-v12 scored 0.06. structured-v13 is submitted and its score
+is pending (Kaggle ref 57412943).
+
+Hypothesis: v13's identical-call ban skips a role's opening `get_status`,
+`git diff`, and `git status` when an earlier role already made that call and
+no source edit has happened since. v13-1 allows the first of each when the
+role starts, and still bans a later repeat of that same call inside the role
+when no source edit has happened since. Write-up: `docs/STRUCTURED_V13_1.md`.
+Archive SHA256
+`0c8aef814e0b8a3837d5fd489c22c538babc2e51b6bd0384baa8d5dc6ed0f86b`.
+
+## structured-v13 submitted, score pending
+
+`agents/structured-v13` was submitted. Kaggle ref 57412943. Score pending. No
+score is claimed. Archive SHA256
+`5ff4c0b3671cb1ff32cfbcb714b079e7a6f72177959c72d36c578fee1fb30dde`.
+
+`agents/structured-v13` is a candidate copied from `agents/structured-v8`.
+Existing agent directories were not modified when it was built. No GPU run
+was recorded for it in this checkout. structured-v8 remains the scored best,
+at 0.10 and, on the same archive, 0.13. structured-v12 scored 0.06.
 
 The v8 smoke5 mean of 293.3 seconds is four cap hits (302.5, 303.5, 304.7,
 307.6) plus fastapi_11194 at 248.3. The short task pulls the mean down.
