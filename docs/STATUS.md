@@ -14,11 +14,16 @@ scored best, at 0.10 and, on the same archive, 0.13. structured-v12 scored
 Hypothesis: a map before any read, and numbered 100-line windows, should
 produce fewer no-edit runs than 59/118 and fewer calls to the first edit
 than the median of 21. That comparison was not run. An offline identifier
-proxy on 92 of 95 train IDs put a gold source file in the top 3 for 31
-listings and 33 map outputs. Map render time on 91 trees had median 0.071
-seconds and max 0.147 seconds. Write-up: `docs/STRUCTURED_V14.md`. Archive
-SHA256
-`1fd3227d23da56900cdfca23fc5ff5a73cf9da6a5ffa7d613fbb3b83fc3e9336`.
+proxy on all 95 train IDs, with no directory exclusions, put a gold `.py`
+file in the top 3 for 26 listings and 26 map outputs (discordant 7 vs 7,
+McNemar p = 1.0). The earlier 33/92 vs 31/92 gap was noise (13 vs 11,
+p ≈ 0.84) and dropped three pulls the old map could not name. The directory
+summary covered a gold directory on 95 of 95. Warm map time was median
+0.118 seconds and max 0.135 seconds on 94 train trees, and median 0.592
+seconds and max 0.597 seconds on a 20,000-file tree. Combined n=97 median
+0.119 seconds, max 0.597 seconds. Write-up: `docs/STRUCTURED_V14.md`.
+Archive SHA256
+`8eeae0c1859766bc08afafe2b6139e4ea4ebd82ab52b42c04bd01836e4e361bf`.
 
 ## Unevaluated structured-v13-1
 

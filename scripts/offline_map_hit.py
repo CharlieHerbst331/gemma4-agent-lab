@@ -1,13 +1,14 @@
 """Offline file-hit proxy for structured-v14's map skill.
 
-Train IDs come from configs/splits/public-v1.json. Gold files are the .py
-paths in the public GitHub pull request, excluding the same directories the
-map skill skips. This is not a model triage and not a competition score.
+Train IDs come from configs/splits/public-v1.json. Gold files are every .py
+path in the public GitHub pull request. Nothing is dropped because of a
+directory name. This is not a model triage and not a competition score.
 
-Baseline: top 3 paths by identifier overlap with the issue title and body.
-With map: the same overlap, plus identifier overlap with the signatures in
-the map output, and only among files the map printed. A hit means one gold
-source file is in those three paths.
+The zero-arg map does not receive the issue, so this run does not pass
+keywords. Signature priority is top-level package files. Triage may name any
+path the directory summary covers, so both arms rank the full Python listing.
+The map arm also adds signature-token overlap for lines the map printed.
+A hit means one gold .py file is in those three paths.
 """
 
 from __future__ import annotations
@@ -54,11 +55,19 @@ def path_tokens(path):
 
 def parse_map(text):
     rows = {}
-    for line in text.splitlines()[1:]:
-        if line.endswith(":") and ": " not in line:
-            rows[line[:-1]] = []
+    dirs = []
+    section = ""
+    for line in text.splitlines():
+        if line == "summary:":
+            section = "summary"
             continue
-        if ": " not in line:
+        if line == "signatures:":
+            section = "signatures"
+            continue
+        if section == "summary" and " files=" in line:
+            dirs.append(line.split(" ", 1)[0])
+            continue
+        if section != "signatures" or ": " not in line:
             continue
         path, sig = line.split(": ", 1)
         names = []
@@ -67,7 +76,32 @@ def parse_map(text):
             if name and not name.startswith("["):
                 names.append(name)
         rows[path] = names
-    return rows
+    return rows, dirs
+
+
+def mcnemar_p(left, right):
+    """Two-sided exact McNemar p for discordant counts left vs right."""
+    total = left + right
+    if total == 0:
+        return 1.0
+    smaller = min(left, right)
+    tail = sum(_comb(total, index) for index in range(smaller + 1))
+    return min(1.0, 2 * tail / (2**total))
+
+
+def _comb(total, choose):
+    value = 1
+    for index in range(choose):
+        value = value * (total - index) // (index + 1)
+    return value
+
+
+def _covered(path, dirs):
+    parent = path.rsplit("/", 1)[0] if "/" in path else "."
+    for directory in dirs:
+        if parent == directory or parent.startswith(directory + "/"):
+            return True
+    return False
 
 
 def rank(paths, issue, signatures, k=TOP_K):
@@ -98,16 +132,12 @@ def _gh(path):
     return json.loads(proc.stdout)
 
 
-def _gold(files, skip_dir):
+def _gold(files):
     gold = []
     for item in files or []:
         name = item.get("filename") or ""
-        if not name.endswith(".py"):
-            continue
-        parts = name.split("/")
-        if any(skip_dir(part) for part in parts[:-1]):
-            continue
-        gold.append(name)
+        if name.endswith(".py"):
+            gold.append(name)
     return gold
 
 
@@ -156,9 +186,9 @@ def evaluate():
         if not isinstance(pull, dict) or not isinstance(files, list):
             rows.append({"id": task_id, "status": "no-pr"})
             continue
-        gold = _gold(files, module._skip_dir)
+        gold = _gold(files)
         if not gold:
-            rows.append({"id": task_id, "status": "no-source-gold"})
+            rows.append({"id": task_id, "status": "no-py"})
             continue
         sha = pull["base"]["sha"]
         key = (slug, sha)
@@ -184,15 +214,16 @@ def evaluate():
             rows.append({"id": task_id, "status": "checkout-failed", "error": tree["error"]})
             continue
         issue = tokens(f"{pull.get('title') or ''}\n{pull.get('body') or ''}")
-        signatures = parse_map(tree["map"])
+        signatures, dirs = parse_map(tree["map"])
         baseline = rank(tree["listing"], issue, {})
-        mapped = rank(list(signatures), issue, signatures)
+        mapped = rank(tree["listing"], issue, signatures)
         row = {
             "id": task_id,
             "status": "scored",
             "gold": gold,
             "baseline_hit": any(path in baseline for path in gold),
             "map_hit": any(path in mapped for path in gold),
+            "dir_hit": any(_covered(path, dirs) for path in gold),
             "baseline": baseline,
             "mapped": mapped,
         }
@@ -209,10 +240,19 @@ def evaluate():
         "scored": len(scored),
         "skipped": {
             status: sum(row["status"] == status for row in rows)
-            for status in ("no-pr", "no-source-gold", "checkout-failed")
+            for status in ("no-pr", "no-py", "checkout-failed")
         },
         "baseline_hits": sum(row["baseline_hit"] for row in scored),
         "map_hits": sum(row["map_hit"] for row in scored),
+        "dir_hits": sum(row["dir_hit"] for row in scored),
+        "both": sum(row["baseline_hit"] and row["map_hit"] for row in scored),
+        "baseline_only": sum(row["baseline_hit"] and not row["map_hit"] for row in scored),
+        "map_only": sum(row["map_hit"] and not row["baseline_hit"] for row in scored),
+        "neither": sum(not row["baseline_hit"] and not row["map_hit"] for row in scored),
+        "mcnemar_p": mcnemar_p(
+            sum(row["map_hit"] and not row["baseline_hit"] for row in scored),
+            sum(row["baseline_hit"] and not row["map_hit"] for row in scored),
+        ),
         "unique_trees": len(times),
         "map_seconds_median": statistics.median(times) if times else None,
         "map_seconds_max": max(times) if times else None,

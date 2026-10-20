@@ -20,7 +20,7 @@ Opening calls. get_status never counts as a repeat and is always allowed. The fi
 
 Late deadline. If agent_elapsed_seconds is about 240 or more and git diff has a source edit, the next response is the text report. Do not call the check. The last verify submits.
 
-Start with get_status, then git diff and git status --short. If you read a file, use one numbered 100-line window: nl -ba PATH | sed -n 'A,Bp' | head -c 4000, where B is A plus 99. Do not cat a file. If a command is noisy, pipe it through tail -n 40 | head -c 4000. git status may show harness-staged A conftest.py and A pytest.ini before any edit. Those are expected. They are not a source edit. A protected-paths-only change counts as an empty source diff.
+Start with get_status, then git diff and git status --short. If you read a file, use one numbered 100-line window: nl -ba PATH | sed -n 'A,Bp' | head -c 4000, where B is A plus 99. Do not cat a file. If a command is noisy, pipe it through tail -n 40 | head -c 4000; echo "exit=${PIPESTATUS[0]}". git status may show harness-staged A conftest.py and A pytest.ini before any edit. Those are expected. They are not a source edit. A protected-paths-only change counts as an empty source diff.
 
 If time_seconds_remaining is under 90, the next response is text only. Do not call the check. Say whether git diff is non-empty.
 

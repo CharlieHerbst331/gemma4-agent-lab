@@ -12,10 +12,10 @@ from gemma_lab.hygiene import lint_candidate
 
 V131 = Path("agents/structured-v13-1")
 V14 = Path("agents/structured-v14")
-ARCHIVE = "1fd3227d23da56900cdfca23fc5ff5a73cf9da6a5ffa7d613fbb3b83fc3e9336"
+ARCHIVE = "8eeae0c1859766bc08afafe2b6139e4ea4ebd82ab52b42c04bd01836e4e361bf"
 ROLES = ("repair_1", "repair_2", "repair_3", "verify_1", "verify_2", "verify_3")
 WINDOW = "nl -ba PATH | sed -n 'A,Bp' | head -c 4000, where B is A plus 99"
-NARROW = "tail -n 40 | head -c 4000"
+NARROW = 'tail -n 40 | head -c 4000; echo "exit=${PIPESTATUS[0]}"'
 STATUS = "get_status never counts as a repeat and is always allowed."
 READERS = ("repair_1", "repair_2", "verify_1", "verify_2")
 
@@ -67,6 +67,13 @@ def test_map_stays_inside_the_token_budget_and_is_deterministic(tmp_path):
     _write(tmp_path / "tests" / "test_mod.py", "class TestMod:\n    pass\n")
     _write(tmp_path / "docs" / "guide.py", "class Guide:\n    pass\n")
     _write(tmp_path / "docs_src" / "snippet.py", "class Snippet:\n    pass\n")
+    _write(tmp_path / "build" / "tool.py", "class BuildTool:\n    pass\n")
+    _write(tmp_path / "example" / "demo.py", "class ExampleDemo:\n    pass\n")
+    _write(tmp_path / "testing" / "helper.py", "class TestingHelper:\n    pass\n")
+    _write(tmp_path / "test" / "helper.py", "class TestHelper:\n    pass\n")
+    _write(tmp_path / "node_modules" / "lib.py", "class NodeSkip:\n    pass\n")
+    _write(tmp_path / "site-packages" / "lib.py", "class SiteSkip:\n    pass\n")
+    (tmp_path / "pkg" / "bin.py").write_bytes(b"class BinarySecret:\n    pass\n\x00")
     first = module.render(tmp_path)
     second = module.render(tmp_path)
     assert first == second
@@ -78,13 +85,106 @@ def test_map_stays_inside_the_token_budget_and_is_deterministic(tmp_path):
     assert "Dotted" not in first
     assert "Vendor" not in first
     assert "Third" not in first
-    assert "TestMod" not in first
-    assert "Guide" not in first
-    assert "Snippet" not in first
+    assert "NodeSkip" not in first
+    assert "SiteSkip" not in first
+    assert "BinarySecret" not in first
+    assert "Guide" in first
+    assert "Snippet" in first
+    assert "BuildTool" in first
+    assert "ExampleDemo" in first
+    assert "docs_src files=" in first
+    assert "tests files=" in first
+    assert "testing files=" in first
+    assert "test files=" in first
+    assert "build files=" in first
+    assert "example files=" in first
     assert "Class000" in first
     started = time.perf_counter()
     module.render(tmp_path)
     assert time.perf_counter() - started < 2.0
+
+
+def test_map_summary_covers_late_directories(tmp_path):
+    module = _map()
+    for index in range(150):
+        name = "N" + ("Y" * 80)
+        _write(
+            tmp_path / f"d{index:03d}" / "m.py",
+            f"class {name}:\n    def run(self):\n        return {index}\n",
+        )
+    first = module.render(tmp_path)
+    second = module.render(tmp_path)
+    summary, signatures = first.split("signatures:\n", 1)
+    assert first == second
+    assert len(first) <= module.CHAR_BUDGET
+    assert "truncated=1" in first.splitlines()[0]
+    assert "truncated: " in first
+    assert "whole tree" in first
+    assert "d000 files=" in summary
+    assert "d149 files=" in summary
+    assert "d000/m.py:" in signatures
+    assert "d149/m.py:" not in signatures
+
+
+def test_map_keywords_then_fallback_and_time_budget(tmp_path):
+    module = _map()
+    _write(tmp_path / "pkg" / "a.py", "class Early:\n    pass\n")
+    _write(
+        tmp_path / "pkg" / "nested" / "models.py",
+        "class RequestTimeout:\n    pass\n",
+    )
+    plain = module.render(tmp_path, keywords=set())
+    plain_sigs = plain.split("signatures:\n", 1)[1]
+    assert plain_sigs.index("pkg/a.py") < plain_sigs.index("pkg/nested/models.py")
+    keyed = module.render(tmp_path, keywords={"requesttimeout"})
+    keyed_sigs = keyed.split("signatures:\n", 1)[1]
+    assert keyed_sigs.index("pkg/nested/models.py") < keyed_sigs.index("pkg/a.py")
+    empty = module.render(tmp_path / "missing-repo")
+    assert "files=0" in empty.splitlines()[0]
+    assert "signatures=0" in empty.splitlines()[0]
+    prose = tmp_path / "notes"
+    prose.mkdir()
+    (prose / "README").write_text("not python\n")
+    text = module.render(prose)
+    assert "signatures=0" in text.splitlines()[0]
+    assert "py=0" in text
+    calls = {"n": 0}
+
+    def clock():
+        calls["n"] += 1
+        return 0.0 if calls["n"] == 1 else 100.0
+
+    partial = module.render(tmp_path, clock=clock)
+    assert "truncated=1" in partial.splitlines()[0]
+    assert "time budget" in partial
+    assert len(partial) <= module.CHAR_BUDGET
+    triage = _prompt(V14, "triage")
+    assert "If the map errors, times out, prints files=0 or signatures=0" in triage
+    assert "workspace layout" in triage
+    assert "Finish well under 20 seconds." in triage
+    assert "Do not invent file paths or claim you read a file." in triage
+    assert "A bare issue number, such as Fix #3104" in triage
+    assert "not on a signature line" in triage
+    assert "choose only from the lines it printed" not in triage
+
+
+def test_map_twenty_thousand_files_finish_under_the_time_budget(tmp_path):
+    module = _map()
+    payload = "def f():\n    return 0\n"
+    for directory in range(20):
+        folder = tmp_path / "pkg" / f"d{directory:02d}"
+        folder.mkdir(parents=True)
+        for index in range(1000):
+            (folder / f"f{index:04d}.py").write_text(payload)
+    started = time.perf_counter()
+    text = module.render(tmp_path)
+    elapsed = time.perf_counter() - started
+    assert elapsed < module.TIME_BUDGET
+    assert len(text) <= module.CHAR_BUDGET
+    assert "truncated=1" in text.splitlines()[0]
+    assert "pkg/d00 files=" in text
+    assert "pkg/d19 files=" in text
+    assert text == module.render(tmp_path)
 
 
 def test_map_signatures_and_ignored_args(tmp_path, capsys, monkeypatch):

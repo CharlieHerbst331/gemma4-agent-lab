@@ -17,61 +17,88 @@ The cap stays 300 seconds, with 220 calls and 320 turns. The guarded heredoc,
 the empty-diff net, the 180/240 second handoffs, and the repeat-ban wording
 stay at v13-1. `get_status` never counts as a repeat.
 
-Triage's only call is the map skill. It names at most three files and the
-class or function copied from the map, before repair reads. Repair and verify
+Triage calls the map once, then names at most three files. Repair and verify
 reads are `nl -ba PATH | sed -n 'A,Bp' | head -c 4000` with a 100-line window.
-Noisy commands go through `tail -n 40 | head -c 4000`. Those commands are
-plain `bash -c` tools. The map script is Python and does not read shell rc
-files.
+Noisy commands go through `tail -n 40 | head -c 4000; echo "exit=${PIPESTATUS[0]}"`.
+That echo runs in `bash -c` and keeps the first command's status. The map
+script is Python and does not read shell rc files.
 
-The map walks the task repo at run time. It skips dotfiles, vendored
-directories, and test, docs, and example directories, including `docs_src`.
-It prints every kept path it can, then class and function signatures until
-12000 characters. Truncation is deterministic: files stay in sorted order,
-and signature names stop when the next name would pass the budget. Nothing
-is precomputed for a public repo.
+The map prints a per-directory summary for the whole visited tree, then class
+and function signatures until 12000 characters. Rendering keeps a running
+length. It does not rebuild the text once per file. An internal 3 second
+budget stops the walk and still prints the partial summary. Truncation is a
+`truncated=1` header plus a `truncated:` line.
+
+Signature order uses issue keywords only when `GEMMA_MAP_KEYWORDS` is set or
+the caller passes them. The shipped call is zero-arg and does not set that
+variable, so the order is top-level package files (shallower paths first).
+Nothing is precomputed for a public repo.
+
+Skipped directories are dotfiles, vendored trees, `site-packages`,
+`node_modules`, and virtualenv or bytecode caches. `docs_src`, `test`,
+`testing`, `tests`, `build`, and `example` are kept. Binary and large files
+are counted and not parsed.
+
+If the map errors, times out, prints `files=0` or `signatures=0`, or the repo
+is non-Python, triage writes the brief from the issue text and the workspace
+layout. A path in the directory summary or the workspace layout may be named
+even when it has no signature line. Triage still finishes well under 20
+seconds, does not invent paths, and still gives a best-guess file list for a
+bare issue number such as Fix #3104.
 
 ## Offline file-hit
 
 Method. Train IDs are the 95 IDs in `configs/splits/public-v1.json`. The
 competition `tasks.jsonl` is not in this checkout, so each ID was read as a
-public GitHub pull request (`fastapi_11355` is `fastapi/fastapi` pull 11355,
-and the same for Rich, Requests, and HTTPX). The gold set is the pull
-request's `.py` files outside the directories the map skips. Three pulls
-changed only those skipped paths, so they are not in the denominator.
-Dev and holdout IDs were not used. Gold paths were not written into the
-agent.
+public GitHub pull request. The gold set is every `.py` file in that pull
+request. No pull was dropped for its directory. Dev and holdout IDs were not
+used. Gold paths were not written into the agent. The zero-arg map was called
+with no keywords.
 
 This is not a model. Both arms rank three paths by identifier overlap with
-the pull-request title and body. The baseline uses the full map-eligible
-path listing and no signatures. The map arm uses the skill output, so a
-file that the budget dropped cannot be chosen, and a signature token can
-raise a file's score. Ties break by path. A hit means one gold source file
-is in the three paths.
+the pull-request title and body, over the full Python listing. The map arm
+adds overlap with signature tokens the map printed. Ties break by path. A
+hit means one gold `.py` file is in the three paths. A separate directory
+check asks whether any gold file's directory, or an ancestor printed after
+roll-up, appears in the summary.
 
 | Arm | Hits | n | Rate |
 |---|---:|---:|---:|
-| Baseline listing | 31 | 92 | 33.7% |
-| Map output | 33 | 92 | 35.9% |
+| Baseline listing | 26 | 95 | 27.4% |
+| Map output | 26 | 95 | 27.4% |
 
-Both hit on 20. The map alone hit on 13. The listing alone hit on 11.
-Neither hit on 48.
+Both hit on 19. The map alone hit on 7. The listing alone hit on 7.
+Neither hit on 62. Discordant counts are 7 vs 7. The exact two-sided
+McNemar p is 1.0. The directory summary covered a gold file's directory
+on 95 of 95.
 
-Map wall time is the second render, after the tree was already checked out.
-Across 91 unique base commits the median was 0.071 seconds, the mean was
-0.083 seconds, and the max was 0.147 seconds. The longest output was 12000
-characters.
+The earlier proxy, before this fix, was 33/92 vs 31/92. That gap is two
+tasks: discordant 13 vs 11, exact McNemar p ≈ 0.84. Noise. Those 92 also
+dropped fastapi_14487, fastapi_14492, and fastapi_15023, the three train
+pulls whose only `.py` changes sit in `docs_src` and tests. The old map
+skipped those directories, so dropping the pulls hid cases the map could
+not name. This run scores all 95. On those three, neither arm's top 3
+hit, and the new summary does include their directories.
+
+Map wall time is a warm render, after checkout. Across 94 train trees the
+median was 0.118 seconds and the max was 0.135 seconds. A synthetic
+20,000-file tree, measured three times, took 0.592, 0.592, and 0.597
+seconds. Putting those three next to the 94 train renders gives n=97,
+median 0.119 seconds, max 0.597 seconds. The longest train output was
+11999 characters. The 20,000-file output was 11991 characters, with all
+20 directories listed and `truncated=1`.
 
 Limits. The proxy misses a paraphrase that does not reuse an identifier.
 Pull-request files are not the competition gold patch. The base commit is
-the pull request's base SHA. Checkout time is not in the map timing. n=92
-is not a resolve rate, and it does not measure the 59/118 no-edit claim.
+the pull request's base SHA. Checkout time is not in the map timing. The
+skill does not see the issue text, so keyword priority was not used here.
+n=95 is not a resolve rate, and it does not measure the 59/118 no-edit claim.
 
 ## Record
 
 - Base git revision: `06c0344323f6ee561451379ee216506af717e61e`
 - Archive SHA256:
-  `1fd3227d23da56900cdfca23fc5ff5a73cf9da6a5ffa7d613fbb3b83fc3e9336`
+  `8eeae0c1859766bc08afafe2b6139e4ea4ebd82ab52b42c04bd01836e4e361bf`
 - Frozen split: `configs/splits/public-v1.json`, train IDs only. No cohort
   was executed.
 - Hardware: none. No GPU run.

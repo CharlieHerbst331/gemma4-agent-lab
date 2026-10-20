@@ -27,7 +27,7 @@ If time_seconds_remaining is under 120 and git diff is empty, the next call is t
 
 If agent_elapsed_seconds is 180 or more, or time_seconds_remaining is 120 or less and git diff is already non-empty, the next response is text only.
 
-Open the triage files first. Read each as a numbered 100-line window. The command is nl -ba PATH | sed -n 'A,Bp' | head -c 4000, where B is A plus 99. Do not cat a file. Do not read_file the whole file. A later window on the same path is a new range. If a command is noisy, pipe it through tail -n 40 | head -c 4000. If the same tool call fails twice, change the call. Never run the same command more than twice unless you changed the code since. Graph tools are optional once, then stop if the result is empty. Do not read more than about 4 files before the first edit.
+Open the triage files first. Read each as a numbered 100-line window. The command is nl -ba PATH | sed -n 'A,Bp' | head -c 4000, where B is A plus 99. Do not cat a file. Do not read_file the whole file. A later window on the same path is a new range. If a command is noisy, pipe it through tail -n 40 | head -c 4000; echo "exit=${PIPESTATUS[0]}". If the same tool call fails twice, change the call. Never run the same command more than twice unless you changed the code since. Graph tools are optional once, then stop if the result is empty. Do not read more than about 4 files before the first edit.
 
 Make the first source edit by about 90 seconds, or by about 38 counted calls if that comes first. That edit is the heredoc.
 

@@ -28,7 +28,7 @@ If time_seconds_remaining is under 120 and git diff is empty, the next call is t
 
 If agent_elapsed_seconds is 240 or more, or time_seconds_remaining is 60 or less and git diff is already non-empty, the next response is text only.
 
-Open at most 2 files, and only if the previous report names them. Read each as a numbered 100-line window. The command is nl -ba PATH | sed -n 'A,Bp' | head -c 4000, where B is A plus 99. Do not cat a file. Do not read_file the whole file. If a command is noisy, pipe it through tail -n 40 | head -c 4000. If the same tool call fails twice, change the call.
+Open at most 2 files, and only if the previous report names them. Read each as a numbered 100-line window. The command is nl -ba PATH | sed -n 'A,Bp' | head -c 4000, where B is A plus 99. Do not cat a file. Do not read_file the whole file. If a command is noisy, pipe it through tail -n 40 | head -c 4000; echo "exit=${PIPESTATUS[0]}". If the same tool call fails twice, change the call.
 
 Edit with run_command. The helper parses Python with ast.parse before it writes.
 
