@@ -1,4 +1,4 @@
-"""structured-v13-1 exempts each role's opening status calls from the repeat ban."""
+"""structured-v13-1 exempts opening git diff and git status, and never bans get_status."""
 
 from pathlib import Path
 
@@ -8,35 +8,40 @@ from gemma_lab.hygiene import lint_candidate
 
 V13 = Path("agents/structured-v13")
 V131 = Path("agents/structured-v13-1")
-ARCHIVE = "0c8aef814e0b8a3837d5fd489c22c538babc2e51b6bd0384baa8d5dc6ed0f86b"
+ARCHIVE = "74a6e27904e88d4d73d3ca1846f5ad228eb9e27ec431c347517b60f79b1e52fe"
 ROLES = ("repair_1", "repair_2", "repair_3", "verify_1", "verify_2", "verify_3")
+STATUS = "get_status never counts as a repeat and is always allowed."
 OPENING = (
-    "The first get_status, the first git diff, and the first git status "
-    "when this role starts are allowed even if an earlier role made that same call and no "
-    "source edit has happened since."
+    "The first git diff and the first git status when this role starts are allowed "
+    "even if an earlier role made that same call and no source edit has happened since."
 )
-LATER = "A later repeat of that same call in this role, with no source edit since, is still banned."
-BLOCK = f"Opening calls. {OPENING} {LATER}\n\n"
+LATER = (
+    "A later identical git diff or git status in this role, with no source edit since, "
+    "is still banned."
+)
+BLOCK = f"Opening calls. {STATUS} {OPENING} {LATER}\n\n"
 
 
 def _prompt(root, name):
     return (root / "sub_agents" / f"{name}.md").read_text()
 
 
-def test_opening_status_calls_are_allowed_and_later_repeats_stay_banned():
+def test_get_status_is_never_a_repeat_and_diff_status_keep_the_exemption():
     for name in ROLES:
         text = _prompt(V131, name)
         parent = _prompt(V13, name)
+        assert text.count(STATUS) == 1
         assert text.count(OPENING) == 1
         assert text.count(LATER) == 1
-        assert text.index(OPENING) < text.index(LATER)
-        assert "Opening calls. " + OPENING in text
-        assert LATER in text
+        assert text.index(STATUS) < text.index(OPENING) < text.index(LATER)
+        assert "Opening calls. " + STATUS in text
+        assert "git diff" in OPENING and "git status" in OPENING
+        assert "git diff" in LATER and "git status" in LATER
+        assert "get_status" not in LATER
+        assert "A later repeat of that same call" not in text
+        assert STATUS not in parent
         assert OPENING not in parent
         assert LATER not in parent
-        assert "still banned" in LATER
-        assert "no source edit since" in LATER
-        assert "when this role starts are allowed" in OPENING
 
 
 def test_only_the_name_and_opening_exemption_differ_from_v13():

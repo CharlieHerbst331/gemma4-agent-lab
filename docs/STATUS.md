@@ -11,13 +11,17 @@ structured-v8 remains the scored best, at 0.10 and, on the same archive,
 0.13. structured-v12 scored 0.06. structured-v13 is submitted and its score
 is pending (Kaggle ref 57412943).
 
-Hypothesis: v13's identical-call ban skips a role's opening `get_status`,
-`git diff`, and `git status` when an earlier role already made that call and
-no source edit has happened since. v13-1 allows the first of each when the
-role starts, and still bans a later repeat of that same call inside the role
-when no source edit has happened since. Write-up: `docs/STRUCTURED_V13_1.md`.
+Hypothesis: v13's identical-call ban skips a role's opening `git diff` and
+`git status` when an earlier role already ran that command and no source edit
+has happened since. `get_status` never counts as a repeat and is always
+allowed. The first `git diff` and the first `git status` when a role starts
+stay allowed. A later identical `git diff` or `git status` in that role, with
+no source edit since, stays banned. Submitted v13 has the same literal
+conflict in a weaker form: its identical-call sentence can be read as covering
+`get_status`, while repair_1 also calls `get_status` before each edit.
+Write-up: `docs/STRUCTURED_V13_1.md`.
 Archive SHA256
-`0c8aef814e0b8a3837d5fd489c22c538babc2e51b6bd0384baa8d5dc6ed0f86b`.
+`74a6e27904e88d4d73d3ca1846f5ad228eb9e27ec431c347517b60f79b1e52fe`.
 
 ## structured-v13 submitted, score pending
 

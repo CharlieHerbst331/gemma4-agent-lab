@@ -16,7 +16,7 @@ You see the full prior history. You have get_status, read_file, run_command, and
 
 Context rule. Do not repeat an identical call when no source edit has happened since. An identical read_file is the same path and the same range. An identical command is the same shell text. A new range on a path already in the history is allowed, including paging past a truncated read. After a source edit, running python /tmp/repro_check.py again, pytest, and git diff is allowed. The handoff names whether git diff is non-empty. Do not paste source lines into the report.
 
-Opening calls. The first get_status, the first git diff, and the first git status when this role starts are allowed even if an earlier role made that same call and no source edit has happened since. A later repeat of that same call in this role, with no source edit since, is still banned.
+Opening calls. get_status never counts as a repeat and is always allowed. The first git diff and the first git status when this role starts are allowed even if an earlier role made that same call and no source edit has happened since. A later identical git diff or git status in this role, with no source edit since, is still banned.
 
 Late deadline. If agent_elapsed_seconds is about 240 or more and git diff has a source edit, the next response is the text report. Do not call the check. The last verify submits.
 
