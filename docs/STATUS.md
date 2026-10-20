@@ -2,12 +2,37 @@
 
 Last updated: October 19, 2026.
 
-## Unevaluated structured-v13
+## Unevaluated structured-v13-1
 
-`agents/structured-v13` is a new candidate copied from `agents/structured-v8`.
-Existing agent directories were not modified. No score is claimed. No Kaggle
-push and no GPU run. structured-v8 remains the scored best, at 0.10 and, on
-the same archive, 0.13. structured-v12 scored 0.06.
+`agents/structured-v13-1` (`structured_v13_1`) is a copy of
+`agents/structured-v13`. Existing agent directories were not modified. No
+score is claimed. No Kaggle push and no GPU run for this candidate.
+structured-v8 remains the scored best, at 0.10 and, on the same archive,
+0.13. structured-v12 scored 0.06. structured-v13 is submitted and its score
+is pending (Kaggle ref 57412943).
+
+Hypothesis: v13's identical-call ban skips a role's opening `git diff` and
+`git status` when an earlier role already ran that command and no source edit
+has happened since. `get_status` never counts as a repeat and is always
+allowed. The first `git diff` and the first `git status` when a role starts
+stay allowed. A later identical `git diff` or `git status` in that role, with
+no source edit since, stays banned. Submitted v13 has the same literal
+conflict in a weaker form: its identical-call sentence can be read as covering
+`get_status`, while repair_1 also calls `get_status` before each edit.
+Write-up: `docs/STRUCTURED_V13_1.md`.
+Archive SHA256
+`74a6e27904e88d4d73d3ca1846f5ad228eb9e27ec431c347517b60f79b1e52fe`.
+
+## structured-v13 submitted, score pending
+
+`agents/structured-v13` was submitted. Kaggle ref 57412943. Score pending. No
+score is claimed. Archive SHA256
+`5ff4c0b3671cb1ff32cfbcb714b079e7a6f72177959c72d36c578fee1fb30dde`.
+
+`agents/structured-v13` is a candidate copied from `agents/structured-v8`.
+Existing agent directories were not modified when it was built. No GPU run
+was recorded for it in this checkout. structured-v8 remains the scored best,
+at 0.10 and, on the same archive, 0.13. structured-v12 scored 0.06.
 
 The v8 smoke5 mean of 293.3 seconds is four cap hits (302.5, 303.5, 304.7,
 307.6) plus fastapi_11194 at 248.3. The short task pulls the mean down.
