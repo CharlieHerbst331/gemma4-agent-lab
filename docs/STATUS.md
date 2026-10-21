@@ -2,6 +2,29 @@
 
 Last updated: October 20, 2026.
 
+## Unevaluated structured-v15
+
+`agents/structured-v15` (`structured_v15`) is a copy of
+`agents/structured-v14`. Existing agent directories were not modified. No
+score is claimed. No Kaggle push and no GPU run. The dev-13 notebook was
+not executed. structured-v8 remains the scored best, at 0.10 and, on the
+same archive, 0.13. structured-v12 scored 0.06. structured-v13 is submitted
+and its score is pending (Kaggle ref 57412943). structured-v13-1 and
+structured-v14 are unevaluated.
+
+Hypothesis: code deadlines, a forced edit, and a pre-submit revert should
+make verify and submit run on every task and should catch a rich_4070-style
+import deletion. The taxonomy's own estimate is 0-1 flips on the reachable
+empty timeouts. That comparison was not run. The cap stays 300 seconds, 220
+calls, and 320 turns. The internal block still needs a mean of at most 260
+seconds (`120 * (mean + 70) <= 39600`). v13-1's dev-13 mean of 279.6 seconds
+fails it (`120 * (279.6 + 70) = 41952`). The capture check can add up to 20
+seconds. A plain zip does not run the gates: the public runner compiles
+without a callback registry, and the names are dropped. The dev-13 notebook
+registers them. Write-up: `docs/STRUCTURED_V15.md`. Notebook:
+`notebooks/structured-v15-dev13.ipynb`. Archive SHA256
+`c70b05eaeb6cfcaf05e5fec107e2f32bf789abdf6a6559eb6d9dac692dc6ae7d`.
+
 ## Unevaluated structured-v14
 
 `agents/structured-v14` (`structured_v14`) is a copy of

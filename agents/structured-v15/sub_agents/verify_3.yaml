@@ -1,0 +1,24 @@
+agent_class: LlmAgent
+name: verify_3
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Required flat check, then submit. Under 45 seconds, submit the current diff.
+instruction: !include verify_3.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  max_output_tokens: 2048
+  thinking_config: !include thinking.yaml
+tools:
+- get_status
+- run_command
+- submit_patch
+include_contents: default
+skills:
+- skills/check
+before_tool_callbacks:
+- v15_before_tool
+after_tool_callbacks:
+- v15_after_tool
+before_model_callbacks:
+- v15_before_model
