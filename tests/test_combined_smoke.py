@@ -79,6 +79,7 @@ AGENT_DIRS = {
     "structured-v14",
     "structured-v15",
     "structured-v16",
+    "structured-v16-1",
     "single-v1",
     "single-v1t0",
     "single-v2",
@@ -123,10 +124,10 @@ def _budgets():
     }
 
 
-def test_agent_directories_stay_at_thirty_two():
+def test_agent_directories_stay_at_thirty_three():
     found = {path.name for path in Path("agents").iterdir() if path.is_dir()}
     assert found == AGENT_DIRS
-    assert len(found) == 32
+    assert len(found) == 33
     assert "single-v7-lenient" not in found
 
 

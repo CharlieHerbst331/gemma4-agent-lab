@@ -2,6 +2,41 @@
 
 Last updated: October 21, 2026.
 
+## Unevaluated structured-v16.1
+
+`agents/structured-v16-1` (`structured_v16_1`) is a copy of
+`agents/structured-v16`. Existing agent directories were not modified. No
+score is claimed. No Kaggle push and no GPU run. The dev-13 notebook was
+not executed. structured-v8 remains the scored best, at 0.10 and, on the
+same archive, 0.13. structured-v12 scored 0.06, and that 0.06 was on a
+250 second cap. This candidate's cap is 240 seconds, which is shorter.
+structured-v13 is submitted and its score is pending (Kaggle ref
+57412943). structured-v13-1, structured-v14, structured-v15, and
+structured-v16 are unevaluated.
+
+Hypothesis: a 240 second cap, reads only through a clocked `run_command`,
+and a repair_1 text hand-off at a prefix of 100 seconds, at 6 reads, or
+at 120 seconds of agent time, should let repair_2 edit before the cap.
+repair_1 does not edit on the normal path. repair_2 reads one 40-line
+window of the HYPOTHESIS target, then the next call is the heredoc.
+verify_3 submits at 200 seconds. The missed-hand-off net is scaled to
+remaining under 96 and at least 36. Two non-failing repros means stop
+reproducing. The steering paragraph at `repair_1.md:96` was tuned on
+rich_3934, so a dev-13 gain there is in-sample. The smoke7 resolve
+rich_3454 was a repair_1 edit; that task is not expected to stay resolved
+on this path. v16 smoke7 resolved 1 of 7 with a mean wall of 302.7
+seconds, and its worst case `1170 + 129 * 334.8 = 44359` was over the 12
+hour limit of 43200. A 240 second cap gives a worst wall of about 279
+seconds: `1170 + 129 * 279 = 37161`, which passes. Measured overhead on
+this host is about 19 seconds, so a capped task is about 259 seconds and
+gate 1 is `120 * (259 + 70) = 39480`. `120 * ((240 + 8) + 70) = 38160`
+assumes 8 seconds of overhead. The mean must stay at most 260 seconds.
+v12's 250 second cap scored 0.06, so a shorter cap is a known risk, not
+a predicted score. The map skill stays out. Write-up:
+`docs/STRUCTURED_V16_1.md`. Notebook:
+`notebooks/structured-v16-1-dev13/evaluation.ipynb`. Archive SHA256
+`2bcee926e39c71c7ca4c8b8443195c7a78fc563f3ab3b4fe0b051c61f2ad7159`.
+
 ## Unevaluated structured-v16
 
 `agents/structured-v16` (`structured_v16`) is a copy of
