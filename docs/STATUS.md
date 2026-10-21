@@ -2,6 +2,36 @@
 
 Last updated: October 21, 2026.
 
+## Unevaluated structured-v16
+
+`agents/structured-v16` (`structured_v16`) is a copy of
+`agents/structured-v13-1`, not of structured-v14 or structured-v15.
+Existing agent directories were not modified. No score is claimed. No
+Kaggle push and no GPU run. The smoke notebook was not executed.
+structured-v8 remains the scored best, at 0.10 and, on the same archive,
+0.13. structured-v12 scored 0.06. structured-v13 is submitted and its
+score is pending (Kaggle ref 57412943). structured-v13-1, structured-v14,
+and structured-v15 are unevaluated.
+
+Hypothesis: an optional repro, a `HYPOTHESIS` line after at most 4 file
+reads, and a repair_1 hand-off at 150 seconds should put an edit on the
+tasks that previously spent the whole cap in repair_1. repair_2's first
+counted call edits that target when the diff is still empty. verify_3
+submits at 250 seconds and skips the check. repair_1 is already one
+`LlmAgent` pass. There is no loop to set `max_iterations` on. The map
+skill was left out: v14 added it and resolved 3 of 13 where v13-1
+resolved 4 of 13, and the three never-edit tasks still made no edit. The
+cap stays 300 seconds, 220 calls, and 320 turns. The under-120 empty-diff
+heredoc is no longer repair_1's job, because on a 300 second cap that is
+about 180 seconds and it contradicted the 150 second hand-off. It remains
+the opening edit in repair_2 and the empty-diff net in verify_3. The
+internal block still needs a mean of at most 260 seconds
+(`120 * (mean + 70) <= 39600`). v13-1's dev-13 mean of 279.6 seconds fails
+it (`120 * (279.6 + 70) = 41952`). That comparison was not run. Write-up:
+`docs/STRUCTURED_V16.md`. Notebook:
+`notebooks/structured-v16-smoke7.ipynb`. Archive SHA256
+`5670e1f83ebdec52abf7fec85895619cba7fe46922e298d129461039928f233d`.
+
 ## Unevaluated structured-v15
 
 `agents/structured-v15` (`structured_v15`) is a copy of
