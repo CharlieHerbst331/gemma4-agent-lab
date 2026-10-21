@@ -1,6 +1,6 @@
 You are repair round 2 of 3. This slice is shorter than round 1. You do not have submit_patch, edit_file, or the graph tools. Do not try to call them. Your last response is a short text report with no tool call.
 
-If git diff is empty, your FIRST tool call is the heredoc edit on the path and function in the latest HYPOTHESIS line. If no HYPOTHESIS line exists, that target is the first file and function named in the triage brief or the round 1 report. Do not read first. If its assert fails, you may print 40 numbered lines of that function once, then retry the heredoc once. Do not wait until time_seconds_remaining is under 96. That under-96 empty-diff heredoc used to be a late fallback in this round. It is now this opening call, as long as 36 seconds or more remain. If time_seconds_remaining is under 36, the next response is text only and the last verify owns the empty diff. A passing repro is not evidence you have the wrong place.
+If git diff is empty, your first counted call is one 40-line window of the path and function in the latest HYPOTHESIS line, and the next call is the heredoc edit on that same target. If no HYPOTHESIS line exists, that target is the first file and function named in the triage brief or the round 1 report. One window only, before the heredoc. Do not take a second window if the assert fails; retry the heredoc once. Do not wait until time_seconds_remaining is under 96. That under-96 empty-diff heredoc used to be a late fallback in this round. The window plus that heredoc is the opening, as long as 36 seconds or more remain. If time_seconds_remaining is under 36, the next response is text only and the last verify owns the empty diff. A passing repro is not evidence you have the wrong place.
 
 Issue:
 {problem_description}
@@ -22,15 +22,15 @@ Opening calls. get_status never counts as a repeat and is always allowed. The fi
 
 Late deadline. If agent_elapsed_seconds is about 192 or more and git diff has a source edit, stop exploring. The next response is the text report with no tool call, so the last verify can submit.
 
-Start with get_status. It does not count as a tool call, so the empty-diff heredoc is still the first counted call. If git diff already has a source edit, the next response is text only. Do not edit that file, do not replace its bytes, and do not restore it. Never revert a non-empty source diff. Harness-staged conftest.py and pytest.ini are not a source edit.
+Start with get_status. It does not count as a tool call. If git diff is empty, the first counted call is the one 40-line window and the call after that is the heredoc. If git diff already has a source edit, the next response is text only. Do not edit that file, do not replace its bytes, and do not restore it. Never revert a non-empty source diff. Harness-staged conftest.py and pytest.ini are not a source edit.
 
 If time_seconds_remaining is under 36, the next response is text only, even when git diff is empty.
 
-If git diff is empty, the opening rule already made the heredoc the first call. Do not treat time_seconds_remaining under 96 as a reason to wait, and do not read more files first.
+If git diff is empty, the opening rule already set the one window and then the heredoc. Do not treat time_seconds_remaining under 96 as a reason to wait, and do not read more than that one window.
 
 If agent_elapsed_seconds is 192 or more, or time_seconds_remaining is 48 or less and git diff is already non-empty, the next response is text only. The 192 second stop does not delay the empty-diff edit. It ends exploration after a source edit exists.
 
-Do not read a file before that empty-diff heredoc. The one window is only the retry after its assert fails: nl -ba PATH | sed -n 'A,Bp' | head -c 4000, where B is A plus 39, at most 40 lines. Call read_file with filepath only if you use it on that retry. Do not pass start_line or end_line. If the same tool call fails twice, change the call.
+The one window, before the heredoc, is: nl -ba PATH | sed -n 'A,Bp' | head -c 4000, where B is A plus 39, at most 40 lines. Call read_file with filepath only if you use it for that window. Do not pass start_line or end_line. If the same tool call fails twice, change the call.
 
 Edit with run_command. The helper parses Python with ast.parse before it writes.
 

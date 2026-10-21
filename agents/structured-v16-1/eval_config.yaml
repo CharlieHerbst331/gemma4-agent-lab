@@ -7,7 +7,10 @@ evaluation:
   # post is about 279 s: 1170 + 129 * 279 = 37161, and 417 + 129 * 279 =
   # 36408. Both pass 43200. The internal block is
   # 120 * (mean + 70) <= 39600, so the mean must stay at most 260 s.
-  # 120 * ((240 + 8) + 70) = 38160, which passes. v12 used a 250 s cap and
+  # 120 * ((240 + 8) + 70) = 38160 assumes 8 s of overhead. This host
+  # measured about 19 s, so a capped task is about 259 s and gate 1 is
+  # 120 * (259 + 70) = 39480. That still passes, with a 120 s margin.
+  # v12 used a 250 s cap and
   # scored 0.06. This cap is shorter than that. 220 calls and 320 turns
   # stay. The 120 and 200 second lines are prompt hand-offs, not a second cap.
   timeout_seconds: 240

@@ -20,15 +20,21 @@ seconds (`max_time_minutes: 4.0`, `timeout_seconds: 240`). Call and turn
 caps stay 220 and 320. repair_1 loses `read_file`, so every read is a
 `run_command` that prints `[elapsed]`. At a prefix of 100 seconds, at 6
 reads, or at 120 seconds of agent time, repair_1 writes `HYPOTHESIS` and
-ends the round with a text report. repair_2's first counted call edits
-that target. verify_3 submits at 200 seconds and skips the check. A repro
+ends the round with a text report. On the normal path repair_1 does not
+edit. repair_2 reads one 40-line window of that target, then the next call
+is the heredoc. verify_3 submits at 200 seconds and skips the check. A repro
 is still optional and still costs at most 2 calls. Two non-failing repros
-means stop reproducing. The steering paragraph tells the model to compare
-`repr()` of captured output with the issue title and to read a cleanup
-method before a render path. It names no library and no task.
+means stop reproducing. The steering paragraph at `repair_1.md:96` tells
+the model to compare `repr()` of captured output with the issue title and
+to read a cleanup method before a render path. That paragraph was tuned on
+rich_3934. The wording names no library and no task, but a dev-13 gain on
+rich_3934 is in-sample and is not evidence of generalization.
 
-This is a hypothesis. The smoke7 analysis judged an expected 1.5 to 2 of 7
-against 1 of 7, within noise at n=7 and temperature 1.0. That judgment is
+This is a hypothesis. The only smoke7 resolve was rich_3454, a repair_1
+edit at about 87 agent-seconds. The analysis expected that task to stay
+resolved because that edit landed inside repair_1. That expectation does
+not hold here: repair_1 no longer edits on the normal path, and the edit
+moves to repair_2 after one 40-line window. The judged 1.5 to 2 of 7 is
 not a v16.1 measurement. A 240 second cap cuts late solves. No cohort was
 run.
 
@@ -61,8 +67,10 @@ Scale from the 300 second cap is 240/300. Word caps ("under 120 words",
 "under 160 words", "under 100 words", "under 80 words") are words and are
 unchanged. The old "next call is the heredoc" happy path inside repair_1
 is gone. Six reads or a prefix of 100 ends the round so repair_2 edits.
-The empty-diff heredoc remains only as the missed-hand-off net, for the
-run that never returns, and on repair_2, repair_3, and verify_3.
+On an empty diff, repair_2's opening is one 40-line window and then the
+heredoc, while 36 seconds or more remain. The missed-hand-off heredoc
+remains inside repair_1 for the run that never returns, and on repair_3
+and verify_3.
 
 | Clock | Who | What |
 | --- | --- | --- |
@@ -71,7 +79,7 @@ run that never returns, and on repair_2, repair_3, and verify_3.
 | remaining under 36 while repair_1 is still running | repair_1 | text only. Do not run that heredoc. verify_3 owns the empty diff. Under 36 is not overridden by the 36 to 96 window |
 | re-entry: a round 1 report already exists, or a source edit exists | repair_1 | text only. Do not edit. Never revert |
 | about 192, and a source edit exists | repair_1, repair_2, repair_3, verify_1, verify_2 | stop exploring and write the text report. Scaled from 240. Does not extend repair_1 |
-| repair_2, diff empty, remaining >= 36 | repair_2 | first counted call is the heredoc on the `HYPOTHESIS` target. If that line is missing, the first file and function in the triage brief or the round 1 report. Do not read first. Do not wait for remaining under 96. `get_status` does not count. One 40-line window only if the assert fails, then one retry |
+| repair_2, diff empty, remaining >= 36 | repair_2 | first counted call is one 40-line window of the `HYPOTHESIS` target, and the next call is the heredoc on that same target. If that line is missing, the first file and function in the triage brief or the round 1 report. One window only, before the heredoc. Do not take a second window if the assert fails; retry the heredoc once. Do not wait for remaining under 96. `get_status` does not count |
 | repair_2, diff non-empty, or elapsed about 192, or remaining <= 48 and the diff is non-empty | repair_2 | text only. Do not revert |
 | repair_2, remaining under 36 | repair_2 | text only. verify_3 owns the empty diff |
 | verify_1 and verify_2, remaining under 72 | verify | text only. No check. Scaled from 90 |
@@ -95,8 +103,10 @@ Text-only gaps are median about 5 seconds.
 
 After repair_1 returns, five roles remain: verify_1, repair_2, verify_2,
 repair_3, verify_3. Each starts with `get_status` and then answers, so the
-floor is 10 turns. An empty diff adds repair_2's heredoc and one retry,
-about 12 turns.
+floor is 10 turns. An empty diff adds one 40-line window and then the
+heredoc, which is the same 12-turn floor. A retry of that heredoc is a
+13th turn. Those turn counts were not remeasured. The arithmetic below
+keeps that 10-turn and 12-turn floor.
 
 - Median: `10 * 3.9 = 39` seconds, `12 * 3.9 = 46.8` seconds.
 - Mean: `10 * 6.6 = 66` seconds, `12 * 6.6 = 79.2` seconds.
@@ -129,13 +139,15 @@ Smoke7, which is a v16 measurement, not a v16.1 measurement:
 
 With a 240 second agent cap, worst wall is about `240 + 34 + 5 = 279`
 seconds. `1170 + 129 * 279 = 37161` and `417 + 129 * 279 = 36408`. Both
-pass 43200. A capped task on that host is about `240 + 15 + 4 = 259`
-seconds. The analysis estimated a mean of 250 to 258 seconds. That
-estimate was not measured. Gate 1 at a mean of 255 is
-`120 * (255 + 70) = 39000`, which passes 39600 with a thin margin. The
-mean must stay at most 260 seconds (`120 * (260 + 70) = 39600`).
-`120 * ((240 + 8) + 70) = 38160`, which passes. Gate 2 at that estimate
-is `1170 + 129 * 255 = 34065`, which passes 38880.
+pass 43200. Measured overhead on this host is about 19 seconds (about 15
+seconds pre-session and 4 seconds post). A capped task is about
+`240 + 19 = 259` seconds. Gate 1 is `120 * (259 + 70) = 39480`, which
+passes 39600 with a 120 second margin. `120 * ((240 + 8) + 70) = 38160`
+assumes 8 seconds of overhead. That is not this host's measured overhead.
+The mean must stay at most 260 seconds (`120 * (260 + 70) = 39600`).
+The analysis estimated a mean of 250 to 258 seconds. That estimate was
+not measured. Gate 1 at a mean of 255 is `120 * (255 + 70) = 39000`.
+Gate 2 at that estimate is `1170 + 129 * 255 = 34065`, which passes 38880.
 
 v13-1's dev-13 mean of 279.6 seconds fails the internal block
 (`120 * (279.6 + 70) = 41952`). v12 used a 250 second cap and scored 0.06.
@@ -153,12 +165,18 @@ callback registry and it does not need a checkout of this repo. Task ids
 are the dev-13 cohort and are not under `agents/`. The evaluator loop
 keeps `results/traces/trace_<id>.json`. A report cell prints resolved
 count, wall time, no-edit runs, calls to the first edit, whether
+`HYPOTHESIS:` appeared, the first `[elapsed]` value at which
 `HYPOTHESIS:` appeared, whether repair_1 returned before the 240 second
-cap, and the elapsed time of that hand-off. The notebook was not run.
+cap, and the elapsed time of that hand-off. Kernel metadata mounts only
+`google/gemma-4/Other/gemma-4-31b-it-qat-w4a16-ct/2`, sets `machine_shape`
+to `NvidiaL4`, uses the official starter `docker_image`, and pins the
+wheelhouse at `metric/gemma-4-developer-agent-wheelhouse/30`. Provenance
+was generated from a clean commit of this candidate. The notebook was not
+run.
 
 ## Archive
 
-SHA256 `dff316a37290895d377574bbedfd43d0b962f9871e700974b2c1b663be7f6c38`.
+SHA256 `2bcee926e39c71c7ca4c8b8443195c7a78fc563f3ab3b4fe0b051c61f2ad7159`.
 20 files. Portable validation passed. Plain-zip compile with no registry
 was checked on adk-submission 0.2.12 and 0.2.13. structured-v16's archive
 is unchanged at

@@ -17,21 +17,25 @@ structured-v16 are unevaluated.
 Hypothesis: a 240 second cap, reads only through a clocked `run_command`,
 and a repair_1 text hand-off at a prefix of 100 seconds, at 6 reads, or
 at 120 seconds of agent time, should let repair_2 edit before the cap.
+repair_1 does not edit on the normal path. repair_2 reads one 40-line
+window of the HYPOTHESIS target, then the next call is the heredoc.
 verify_3 submits at 200 seconds. The missed-hand-off net is scaled to
 remaining under 96 and at least 36. Two non-failing repros means stop
-reproducing. The steering text is generic. v16 smoke7 resolved 1 of 7
-with a mean wall of 302.7 seconds, and its worst case
-`1170 + 129 * 334.8 = 44359` was over the 12 hour limit of 43200. A 240
-second cap gives a worst wall of about 279 seconds:
-`1170 + 129 * 279 = 37161`, which passes. The internal block still needs
-a mean of at most 260 seconds (`120 * (mean + 70) <= 39600`). The
-smoke7 analysis estimated a mean of 250 to 258 seconds
-(`120 * (255 + 70) = 39000`). That estimate was not measured, and neither
-was the judged 1.5 to 2 of 7. v12's 250 second cap scored 0.06, so a
-shorter cap is a known risk, not a predicted score. The map skill stays
-out. Write-up: `docs/STRUCTURED_V16_1.md`. Notebook:
+reproducing. The steering paragraph at `repair_1.md:96` was tuned on
+rich_3934, so a dev-13 gain there is in-sample. The smoke7 resolve
+rich_3454 was a repair_1 edit; that task is not expected to stay resolved
+on this path. v16 smoke7 resolved 1 of 7 with a mean wall of 302.7
+seconds, and its worst case `1170 + 129 * 334.8 = 44359` was over the 12
+hour limit of 43200. A 240 second cap gives a worst wall of about 279
+seconds: `1170 + 129 * 279 = 37161`, which passes. Measured overhead on
+this host is about 19 seconds, so a capped task is about 259 seconds and
+gate 1 is `120 * (259 + 70) = 39480`. `120 * ((240 + 8) + 70) = 38160`
+assumes 8 seconds of overhead. The mean must stay at most 260 seconds.
+v12's 250 second cap scored 0.06, so a shorter cap is a known risk, not
+a predicted score. The map skill stays out. Write-up:
+`docs/STRUCTURED_V16_1.md`. Notebook:
 `notebooks/structured-v16-1-dev13/evaluation.ipynb`. Archive SHA256
-`dff316a37290895d377574bbedfd43d0b962f9871e700974b2c1b663be7f6c38`.
+`2bcee926e39c71c7ca4c8b8443195c7a78fc563f3ab3b4fe0b051c61f2ad7159`.
 
 ## Unevaluated structured-v16
 

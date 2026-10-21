@@ -20,7 +20,13 @@ V16 = Path("agents/structured-v16").resolve()
 V161 = Path("agents/structured-v16-1").resolve()
 V131 = Path("agents/structured-v13-1").resolve()
 NOTEBOOK = Path("notebooks/structured-v16-1-dev13/evaluation.ipynb").resolve()
-ARCHIVE = "dff316a37290895d377574bbedfd43d0b962f9871e700974b2c1b663be7f6c38"
+KERNEL_META = Path("notebooks/structured-v16-1-dev13/kernel-metadata.json").resolve()
+PROVENANCE = Path("notebooks/structured-v16-1-dev13/provenance.json").resolve()
+DOCKER_IMAGE = (
+    "gcr.io/kaggle-private-byod/python@sha256:"
+    "37c64f7dd9c54116ecd1bcc88817c5469b88387388fade02bfa8bf3fc647d461"
+)
+ARCHIVE = "2bcee926e39c71c7ca4c8b8443195c7a78fc563f3ab3b4fe0b051c61f2ad7159"
 V16_ARCHIVE = "6b8920c396f4e84fe14e7b7a907c1771436a55b840fae7464b3ce6f7cac13491"
 V131_ARCHIVE = "74a6e27904e88d4d73d3ca1846f5ad228eb9e27ec431c347517b60f79b1e52fe"
 DEV13 = (
@@ -54,6 +60,16 @@ LIBRARY_TERMS = (
     re.compile(r"progress\.py", re.IGNORECASE),
     re.compile(r"get_body_field"),
     re.compile(r"request_body_to_args"),
+)
+BARE_DEV13_NUMBERS = re.compile(
+    r"\b(11194|14246|14262|14356|14786|14794|3105|3454|3472|3934|3938|3944|4070)\b"
+)
+MODULE_TERMS = (
+    re.compile(r"pretty\.py", re.IGNORECASE),
+    re.compile(r"live_render", re.IGNORECASE),
+    re.compile(r"routing\.py", re.IGNORECASE),
+    re.compile(r"params\.py", re.IGNORECASE),
+    re.compile(r"dependencies/utils"),
 )
 COMPILER_FILES = (
     "adk_submission/__init__.py",
@@ -146,10 +162,13 @@ def test_thresholds_scale_to_the_240_second_cap():
     assert "time_seconds_remaining is under 36" in repair_1
     assert "Do not run the missed-hand-off heredoc." in repair_1
     assert "about 192 seconds" in repair_1
-    assert "your FIRST tool call is the heredoc edit" in repair_2
+    assert "your first counted call is one 40-line window" in repair_2
+    assert "the next call is the heredoc edit on that same target" in repair_2
+    assert "One window only, before the heredoc." in repair_2
+    assert "Do not take a second window if the assert fails" in repair_2
     assert "latest HYPOTHESIS line" in repair_2
     assert "first file and function named in the triage brief or the round 1 report" in repair_2
-    assert "Do not read first." in repair_2
+    assert "read one 40-line window of the HYPOTHESIS target, then heredoc" in _prompt("verify_1")
     assert "under 96" in repair_2
     assert "36 seconds or more remain" in repair_2
     assert "about 192" in _prompt("verify_1")
@@ -177,7 +196,9 @@ def test_agent_dir_has_no_dev13_ids_or_library_terms():
         for task_id in DEV13:
             if task_id in text:
                 hits.append(f"{path.name}: {task_id}")
-        for pattern in LIBRARY_TERMS:
+        if BARE_DEV13_NUMBERS.search(text):
+            hits.append(f"{path.name}: bare dev-13 number")
+        for pattern in (*LIBRARY_TERMS, *MODULE_TERMS):
             if pattern.search(text):
                 hits.append(f"{path.name}: {pattern.pattern}")
     assert hits == []
@@ -200,7 +221,19 @@ def test_notebook_embeds_the_archive_and_keeps_traces():
     assert "no_edit" in source
     assert "repair_1_returned_before_cap" in source
     assert "handoff_elapsed" in source
+    assert "hypothesis_elapsed" in source
     assert "CAP_SECONDS = 240" in source
+    metadata = json.loads(KERNEL_META.read_text())
+    assert metadata["model_sources"] == ["google/gemma-4/Other/gemma-4-31b-it-qat-w4a16-ct/2"]
+    assert metadata["machine_shape"] == "NvidiaL4"
+    assert metadata["docker_image"] == DOCKER_IMAGE
+    assert metadata["dataset_sources"] == ["metric/gemma-4-developer-agent-wheelhouse/30"]
+    provenance = json.loads(PROVENANCE.read_text())
+    assert provenance["bundle"]["worktree_dirty"] is False
+    assert provenance["bundle"]["candidate_source_dirty"] is False
+    assert re.fullmatch(r"[0-9a-f]{40}", provenance["bundle"]["candidate_source_commit"])
+    assert not str(provenance["git_revision"]).endswith("-dirty")
+    assert provenance["bundle"]["sha256"] == ARCHIVE
     for task_id in DEV13:
         assert task_id in source
     notebook = json.loads(source)
@@ -246,6 +279,15 @@ def test_notebook_handoff_uses_the_240_second_cap(tmp_path, monkeypatch):
         260,
     )
     assert late == {"returned_before_cap": False, "handoff_elapsed": 250.0}
+    marked = namespace["hypothesis_elapsed"](
+        {
+            "events": [
+                {"author": "repair_1", "output": "[elapsed 102s]\nnl window"},
+                {"author": "repair_1", "text": "HYPOTHESIS: stop leaves a newline"},
+            ]
+        }
+    )
+    assert marked == 102
 
 
 def test_hygiene_and_validation():

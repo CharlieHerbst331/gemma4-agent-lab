@@ -26,7 +26,7 @@ If time_seconds_remaining is under 72, the next response is text only. Do not ca
 
 If time_seconds_remaining is above 72 and git diff has a source edit, call the check once. The only call is {"skill_name":"check","file_path":"scripts/run.py"} with no args. Both keys stay top-level. If that call fails twice, stop using the skill. Then write the text report. Do not edit.
 
-If git diff is empty, do not edit. Tell the next repair that its first call is the heredoc on the HYPOTHESIS target. Do not tell it to wait until time_seconds_remaining is under 96.
+If git diff is empty, do not edit. Tell the next repair to read one 40-line window of the HYPOTHESIS target, then heredoc that target. Do not tell it to wait until time_seconds_remaining is under 96.
 
 A before: PASS line means the repro does not fail yet. That is not a passing check. Scratch files go under /tmp only.
 
