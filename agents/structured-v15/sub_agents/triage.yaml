@@ -11,13 +11,7 @@ generate_content_config:
   max_output_tokens: 1024
   thinking_config: !include thinking.yaml
 include_contents: default
-tools: []
 output_key: triage_brief
+tools: []
 skills:
 - skills/map
-before_tool_callbacks:
-- v15_before_tool
-after_tool_callbacks:
-- v15_after_tool
-before_model_callbacks:
-- v15_before_model

@@ -1,6 +1,6 @@
 # Project status
 
-Last updated: October 20, 2026.
+Last updated: October 21, 2026.
 
 ## Unevaluated structured-v15
 
@@ -12,18 +12,23 @@ same archive, 0.13. structured-v12 scored 0.06. structured-v13 is submitted
 and its score is pending (Kaggle ref 57412943). structured-v13-1 and
 structured-v14 are unevaluated.
 
-Hypothesis: code deadlines, a forced edit, and a pre-submit revert should
-make verify and submit run on every task and should catch a rich_4070-style
-import deletion. The taxonomy's own estimate is 0-1 flips on the reachable
-empty timeouts. That comparison was not run. The cap stays 300 seconds, 220
-calls, and 320 turns. The internal block still needs a mean of at most 260
-seconds (`120 * (mean + 70) <= 39600`). v13-1's dev-13 mean of 279.6 seconds
-fails it (`120 * (279.6 + 70) = 41952`). The capture check can add up to 20
-seconds. A plain zip does not run the gates: the public runner compiles
-without a callback registry, and the names are dropped. The dev-13 notebook
-registers them. Write-up: `docs/STRUCTURED_V15.md`. Notebook:
-`notebooks/structured-v15-dev13.ipynb`. Archive SHA256
-`c70b05eaeb6cfcaf05e5fec107e2f32bf789abdf6a6559eb6d9dac692dc6ae7d`.
+Hypothesis: loop step caps, no read tools on the later roles, and a
+prompt-mandated gate before submit should leave verify and submit a chance
+to run. The hosted path does not run callbacks or tool wrappers.
+`agent_runner.py` lines 334-346 call `compile_submission` with no callback
+registry, and `resolvers/callbacks.py` lines 84-85 drop those names. The
+150 second and 240 second figures are `15 * 10` and `24 * 10` from the
+SINGLE_V5 timing model (about 10 seconds per obedient step). `LoopAgent`
+does not interrupt a step that keeps calling tools, so those are not hard
+ends. The gate prints PASS or FAIL and restores a file only on `py_compile`
+failure when a `/tmp/pre_` backup exists. Import and test failures are not
+reverted. The cap stays 300 seconds, 220 calls, and 320 turns. The internal
+block still needs a mean of at most 260 seconds
+(`120 * (mean + 70) <= 39600`). v13-1's dev-13 mean of 279.6 seconds fails
+it (`120 * (279.6 + 70) = 41952`). That comparison was not run. Write-up:
+`docs/STRUCTURED_V15.md`. Notebook: `notebooks/structured-v15-dev13.ipynb`.
+Archive SHA256
+`9b9e3bb1f3b500811358d00c608def24573ed12f8090ebb59a0900168636e072`.
 
 ## Unevaluated structured-v14
 

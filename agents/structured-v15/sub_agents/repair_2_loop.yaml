@@ -1,0 +1,6 @@
+agent_class: LoopAgent
+name: repair_2_loop
+description: Six repair_2 steps. With repair_1 and repair_3 this aims at about 240 seconds.
+max_iterations: 6
+sub_agents:
+- config_path: repair_2.yaml

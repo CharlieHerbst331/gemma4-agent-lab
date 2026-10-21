@@ -1,4 +1,4 @@
-"""structured-v15 enforces deadlines, an edit, and a pre-submit check in code."""
+"""structured-v15 ships only levers the hosted compiler executes."""
 
 import importlib.util
 import json
@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
-import urllib.request
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -16,12 +16,16 @@ from gemma_lab.bundle import load_yaml, pack, validate
 from gemma_lab.common import sha256
 from gemma_lab.hygiene import lint_candidate
 
-V14 = Path("agents/structured-v14")
-V15 = Path("agents/structured-v15")
+V14 = Path("agents/structured-v14").resolve()
+V15 = Path("agents/structured-v15").resolve()
+NOTEBOOK = Path("notebooks/structured-v15-dev13.ipynb").resolve()
+ARCHIVE = "9b9e3bb1f3b500811358d00c608def24573ed12f8090ebb59a0900168636e072"
 V14_ARCHIVE = "8eeae0c1859766bc08afafe2b6139e4ea4ebd82ab52b42c04bd01836e4e361bf"
-V15_ARCHIVE = "c70b05eaeb6cfcaf05e5fec107e2f32bf789abdf6a6559eb6d9dac692dc6ae7d"
-NOTEBOOK = Path("notebooks/structured-v15-dev13.ipynb")
-DEV13 = [
+STEP_SECONDS = 10
+REPAIR_ITERS = {"repair_1_loop": 15, "repair_2_loop": 6, "repair_3_loop": 3}
+READ_TOOLS = {"read_file", "search_similar_code", "get_code_neighbors", "get_code_subgraph"}
+LATE_ROLES = ("repair_2", "repair_3", "verify_1", "verify_2", "verify_3")
+DEV13 = (
     "fastapi_11194",
     "fastapi_14246",
     "fastapi_14262",
@@ -35,22 +39,8 @@ DEV13 = [
     "rich_3938",
     "rich_3944",
     "rich_4070",
-]
-UNCHANGED = (
-    "sub_agents/thinking.yaml",
-    "sub_agents/repair_thinking.yaml",
-    "sub_agents/triage.md",
-    "sub_agents/repair_1.md",
-    "sub_agents/repair_2.md",
-    "sub_agents/repair_3.md",
-    "sub_agents/verify_1.md",
-    "sub_agents/verify_2.md",
-    "sub_agents/verify_3.md",
-    "skills/check/SKILL.md",
-    "skills/check/scripts/run.py",
-    "skills/map/SKILL.md",
-    "skills/map/scripts/run.py",
 )
+UNREACHABLE = {"fastapi_14246", "fastapi_14262", "fastapi_14356"}
 COMPILER_FILES = (
     "adk_submission/__init__.py",
     "adk_submission/compiler.py",
@@ -74,387 +64,298 @@ COMPILER_FILES = (
     "adk_submission/resolvers/tools.py",
 )
 COMPILER_URL = "https://raw.githubusercontent.com/happyc0der/gemma-swe-agent/main/harness/official/"
-ADK_PY = Path("/tmp/adk-py")
 COMPILER_CACHE = Path("/tmp/adk011")
+ADK_PY = Path("/tmp/adk-py")
 
 
-def _callbacks():
-    spec = importlib.util.spec_from_file_location("structured_v15_callbacks", V15 / "callbacks.py")
+def _yaml(name):
+    return load_yaml(V15 / "sub_agents" / name, V15)
+
+
+def _prompt(name):
+    return (V15 / "sub_agents" / f"{name}.md").read_text()
+
+
+def _load(path):
+    spec = importlib.util.spec_from_file_location(f"v15_gate_{path.stat().st_ino}", path)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    prior = sys.dont_write_bytecode
+    sys.dont_write_bytecode = True
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = prior
     return module
 
 
-class _Tool:
-    def __init__(self, name):
-        self.name = name
+def _gate(tmp_path):
+    dest = tmp_path / "gate_run.py"
+    shutil.copy(V15 / "skills/gate/scripts/run.py", dest)
+    return _load(dest)
 
 
-class _Ctx:
-    def __init__(self, role, invocation="task"):
-        self.agent_name = role
-        self.invocation_id = invocation
-        self.end_invocation = False
-        self._invocation_context = self
-        self.agent = type("Agent", (), {"name": role})()
+def _git(root, *args):
+    subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
 
 
-def _arm(callbacks, ctx, start=0.0):
-    box = {"now": start}
-    callbacks.set_clock(lambda: box["now"])
-    callbacks.reset_states()
-    state = callbacks._state_for(ctx)
-    state.elapsed()
-    return box, state
-
-
-def _git(repo, *args):
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
-
-
-def _repo(tmp_path):
-    repo = tmp_path / "repo"
-    pkg = repo / "pkg"
-    tests = repo / "tests"
-    pkg.mkdir(parents=True)
-    tests.mkdir()
+def _repo(path):
+    path.mkdir(parents=True)
+    _git(path, "init", "-q")
+    _git(path, "config", "user.email", "t@example.com")
+    _git(path, "config", "user.name", "Test")
+    pkg = path / "pkg"
+    pkg.mkdir()
     (pkg / "__init__.py").write_text("")
-    (pkg / "console.py").write_text(
-        "import getpass\n\ndef read_secret():\n    return getpass.getuser()\n"
-    )
-    (tests / "test_console.py").write_text(
-        "import pkg.console as console\n"
-        "def test_secret():\n"
-        "    if not console.read_secret():\n"
-        "        raise SystemExit(1)\n"
-        "test_secret()\n"
-    )
-    _git(repo, "init", "-q")
-    _git(repo, "config", "user.email", "v15@example.com")
-    _git(repo, "config", "user.name", "v15")
-    _git(repo, "add", ".")
-    _git(repo, "commit", "-q", "-m", "base")
-    return repo
+    (pkg / "mod.py").write_text("VALUE = 1\n")
+    _git(path, "add", ".")
+    _git(path, "commit", "-qm", "base")
+    return path
 
 
-def test_v15_keeps_the_cap_and_the_v14_prompts():
+def test_caps_stay_at_v14_and_loops_target_150_and_240():
+    loaded = load_yaml(V15 / "eval_config.yaml", V15)
+    assert loaded["evaluation"]["timeout_seconds"] == 300
+    assert loaded["evaluation"]["max_tool_calls"] == 220
+    assert loaded["evaluation"]["max_time_minutes"] == 5
+    assert loaded["evaluation"]["max_turns"] == 320
+    assert sum(REPAIR_ITERS.values()) * STEP_SECONDS == 240
+    assert REPAIR_ITERS["repair_1_loop"] * STEP_SECONDS == 150
+    assert (V15 / "callbacks.py").exists() is False
+
+
+def test_role_tool_lists_drop_reads_on_late_roles():
+    triage = _yaml("triage.yaml")
+    repair_1 = _yaml("repair_1.yaml")
+    assert triage["tools"] == []
+    assert triage["skills"] == ["skills/map"]
+    assert triage["generate_content_config"]["max_output_tokens"] == 1024
+    assert repair_1["tools"] == [
+        "get_status",
+        "read_file",
+        "run_command",
+        "search_similar_code",
+        "get_code_neighbors",
+        "get_code_subgraph",
+    ]
+    assert repair_1["generate_content_config"]["max_output_tokens"] == 2048
+    assert _yaml("repair_2.yaml")["tools"] == ["get_status", "run_command"]
+    assert _yaml("repair_3.yaml")["tools"] == ["get_status", "run_command"]
+    assert _yaml("verify_1.yaml")["tools"] == ["get_status", "run_command"]
+    assert _yaml("verify_2.yaml")["tools"] == ["get_status", "run_command"]
+    assert _yaml("verify_3.yaml")["tools"] == ["get_status", "run_command", "submit_patch"]
+    assert _yaml("verify_1.yaml")["skills"] == ["skills/check"]
+    assert _yaml("verify_2.yaml")["skills"] == ["skills/check"]
+    assert _yaml("verify_3.yaml")["skills"] == ["skills/gate"]
+    assert _yaml("verify_1.yaml")["generate_content_config"]["max_output_tokens"] == 512
+    assert _yaml("verify_3.yaml")["generate_content_config"]["max_output_tokens"] == 1024
+    for name, iters in REPAIR_ITERS.items():
+        loop = _yaml(f"{name}.yaml")
+        assert loop["agent_class"] == "LoopAgent"
+        assert loop["max_iterations"] == iters
     root = load_yaml(V15 / "agent.yaml", V15)
-    assert root["name"] == "structured_v15"
     assert root["agent_class"] == "SequentialAgent"
-    assert [child["config_path"] for child in root["sub_agents"]] == [
+    assert [item["config_path"] for item in root["sub_agents"]] == [
         "sub_agents/triage.yaml",
-        "sub_agents/repair_1.yaml",
+        "sub_agents/repair_1_loop.yaml",
         "sub_agents/verify_1.yaml",
-        "sub_agents/repair_2.yaml",
+        "sub_agents/repair_2_loop.yaml",
         "sub_agents/verify_2.yaml",
-        "sub_agents/repair_3.yaml",
+        "sub_agents/repair_3_loop.yaml",
         "sub_agents/verify_3.yaml",
     ]
-    budgets = load_yaml(V15 / "eval_config.yaml", V15)["evaluation"]
-    assert budgets["timeout_seconds"] == 300
-    assert budgets["max_tool_calls"] == 220
-    assert budgets["max_turns"] == 320
-    assert budgets["max_time_minutes"] == 5
-    assert type(budgets["max_time_minutes"]) is int
-    for rel in UNCHANGED:
+    for path in V15.rglob("*.yaml"):
+        text = path.read_text()
+        assert "before_tool_callbacks" not in text
+        assert "after_tool_callbacks" not in text
+        assert "before_model_callbacks" not in text
+
+
+def test_prompts_use_get_status_and_require_the_gate():
+    prefix = "printf '[elapsed %ss]\\n'"
+    for name in ("repair_1", "repair_2", "repair_3", "verify_1", "verify_2", "verify_3"):
+        text = _prompt(name)
+        assert "agent_elapsed_seconds" in text
+        assert prefix in text
+        assert "A write under /tmp is not a source edit." in text
+    assert "15 times" in _prompt("repair_1")
+    assert "150 or more" in _prompt("repair_1")
+    assert "6 times" in _prompt("repair_2")
+    assert "3 times" in _prompt("repair_3")
+    assert "240 second" in _prompt("repair_3")
+    for name in LATE_ROLES:
+        text = _prompt(name)
+        assert "read_file" in text
+        assert "do not have" in text.lower()
+    verify_3 = _prompt("verify_3")
+    assert '{"skill_name":"gate","file_path":"scripts/run.py"}' in verify_3
+    assert "submit_patch" in verify_3
+    assert "skills/check" not in (V15 / "sub_agents" / "verify_3.yaml").read_text()
+    gate = (V15 / "skills/gate/scripts/run.py").read_text()
+    assert "git rev-parse" in gate
+    assert "git show" not in gate
+    assert "end_invocation" not in gate
+    body = gate.split("def repo_root", 1)[1].split("\ndef ", 1)[0]
+    assert "/workspace" not in body
+    agent_text = "\n".join(path.read_text() for path in V15.rglob("*") if path.is_file())
+    for task_id in UNREACHABLE:
+        assert task_id not in agent_text
+
+
+def test_map_and_check_stay_byte_identical_to_v14():
+    for rel in (
+        "skills/map/SKILL.md",
+        "skills/map/scripts/run.py",
+        "skills/check/SKILL.md",
+        "skills/check/scripts/run.py",
+        "sub_agents/thinking.yaml",
+        "sub_agents/repair_thinking.yaml",
+    ):
         assert (V15 / rel).read_bytes() == (V14 / rel).read_bytes()
-    yaml_blob = "\n".join(path.read_text() for path in V15.rglob("*.yaml"))
-    assert "ParallelAgent" not in yaml_blob
-    for name in ("triage", "repair_1", "repair_2", "repair_3", "verify_1", "verify_2", "verify_3"):
-        role = load_yaml(V15 / "sub_agents" / f"{name}.yaml", V15)
-        assert role["before_tool_callbacks"] == ["v15_before_tool"]
-        assert role["after_tool_callbacks"] == ["v15_after_tool"]
-        assert role["before_model_callbacks"] == ["v15_before_model"]
-    assert len(validate(V15)) == 23
-    report = lint_candidate(V15)
-    assert report["gate"] == "pass", report["findings"]
 
 
-def test_every_tool_result_carries_the_clock():
-    callbacks = _callbacks()
-    ctx = _Ctx("repair_1")
-    box, _state = _arm(callbacks, ctx)
-    box["now"] = 12
-    stamped = callbacks.after_tool(
-        tool=_Tool("read_file"),
-        args={"path": "pkg/console.py", "start_line": 1, "end_line": 100},
-        tool_context=ctx,
-        tool_response={"output": "line"},
-    )
-    assert stamped["output"].endswith("[elapsed 12s / remaining 288s]")
-    box["now"] = 40
-    status = callbacks.after_tool(
-        tool=_Tool("get_status"),
-        args={},
-        tool_context=ctx,
-        tool_response="ok",
-    )
-    assert status.endswith("[elapsed 40s / remaining 260s]")
+def test_repo_root_uses_rev_parse_and_not_the_lab_checkout(tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    skill_dir = tmp_path / "skill"
+    skill_dir.mkdir()
+    monkeypatch.chdir(skill_dir)
+    monkeypatch.delenv("GEMMA_CHECK_ROOT", raising=False)
+    monkeypatch.setenv("PYTHONPATH", str(repo))
+    monkeypatch.setenv("PWD", str(skill_dir))
+    module = _gate(tmp_path)
+    assert module.repo_root() == repo.resolve()
 
 
-def test_repair_deadlines_end_the_role_and_leave_verify_running():
-    callbacks = _callbacks()
-    repair = _Ctx("repair_1")
-    box, _state = _arm(callbacks, repair)
-    box["now"] = 150
-    blocked = callbacks.before_tool(
-        tool=_Tool("read_file"), args={"path": "a.py"}, tool_context=repair
-    )
-    assert blocked["result"] == "repair_1 ended at 150s so verify and submit can run"
-    assert repair.end_invocation is True
-    verify = _Ctx("verify_3", invocation="task")
-    verify_box = {"now": 150}
-    callbacks.set_clock(lambda: verify_box["now"])
-    # Same invocation keeps the clock. verify is not a repair role.
-    allowed = callbacks.before_tool(
-        tool=_Tool("run_command"),
-        args={"command": "git diff"},
-        tool_context=verify,
-    )
-    assert allowed is None
-    assert verify.end_invocation is False
-    repair2 = _Ctx("repair_2", invocation="later")
-    box2, _state2 = _arm(callbacks, repair2)
-    box2["now"] = 240
-    ended = callbacks.before_tool(
-        tool=_Tool("read_file"), args={"path": "a.py"}, tool_context=repair2
-    )
-    assert "repair_2 ended at 240s" in ended["result"]
-    assert repair2.end_invocation is True
-    model = callbacks.before_model(callback_context=repair2)
-    text = model["ended"] if isinstance(model, dict) else model.content.parts[0].text
-    assert text == "repair_2 ended at 240s so verify and submit can run"
+def test_tmp_writes_are_not_edits_and_empty_diff_stays(tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    (scratch / "note.py").write_text("VALUE = 2\n")
+    monkeypatch.chdir(scratch)
+    monkeypatch.setenv("PYTHONPATH", str(repo))
+    module = _gate(tmp_path)
+    assert module.is_tmp_path(repo, "pkg/mod.py") is False
+    assert module.is_tmp_path(repo, "tmp/note.py") is True
+    assert module.handle() == "PASS empty"
+    assert (repo / "pkg" / "mod.py").read_text() == "VALUE = 1\n"
 
 
-def test_empty_diff_forces_an_edit_at_120s_or_30_calls_then_compile():
-    callbacks = _callbacks()
-    ctx = _Ctx("repair_1", invocation="force-time")
-    box, state = _arm(callbacks, ctx)
-    box["now"] = 119
-    early = callbacks.before_tool(tool=_Tool("read_file"), args={"path": "a.py"}, tool_context=ctx)
-    assert early is None
-    box["now"] = 120
-    rejected = callbacks.before_tool(
-        tool=_Tool("search_similar_code"), args={"query": "x"}, tool_context=ctx
-    )
-    assert rejected["result"] == "next call must be an edit"
-    status = callbacks.before_tool(tool=_Tool("get_status"), args={}, tool_context=ctx)
-    assert status is None
-    edit = callbacks.before_tool(
-        tool=_Tool("run_command"),
-        args={"command": "cat > /tmp/line_fix.py <<'EOF'\nprint(1)\nEOF"},
-        tool_context=ctx,
-    )
-    assert edit is None
-    calls = _Ctx("repair_2", invocation="force-calls")
-    box2, state2 = _arm(callbacks, calls)
-    box2["now"] = 1
-    for index in range(30):
-        result = callbacks.before_tool(
-            tool=_Tool("read_file"),
-            args={"path": f"f{index}.py"},
-            tool_context=calls,
-        )
-        assert result is None
-    assert state2.calls == 30
-    blocked = callbacks.before_tool(
-        tool=_Tool("read_file"), args={"path": "new.py"}, tool_context=calls
-    )
-    assert blocked["result"] == "next call must be an edit"
-    assert state.has_edit is False
-
-
-def test_identical_reads_are_already_seen_and_get_status_is_not(tmp_path, monkeypatch):
-    callbacks = _callbacks()
-    monkeypatch.setenv("V15_REPO", str(tmp_path / "missing"))
-    ctx = _Ctx("repair_1", invocation="repeat")
-    _box, state = _arm(callbacks, ctx)
-    args = {"path": "pkg/console.py", "start_line": 1, "end_line": 100}
-    assert callbacks.before_tool(tool=_Tool("read_file"), args=args, tool_context=ctx) is None
-    callbacks.after_tool(
-        tool=_Tool("read_file"),
-        args=args,
-        tool_context=ctx,
-        tool_response={"output": "class Console"},
-    )
-    again = callbacks.before_tool(tool=_Tool("read_file"), args=args, tool_context=ctx)
-    assert again["result"] == "already seen: class Console"
-    page = callbacks.before_tool(
-        tool=_Tool("read_file"),
-        args={"path": "pkg/console.py", "start_line": 101, "end_line": 200},
-        tool_context=ctx,
-    )
-    assert page is None
-    for _ in range(3):
-        assert callbacks.before_tool(tool=_Tool("get_status"), args={}, tool_context=ctx) is None
-    diff = {"command": "git diff"}
-    assert callbacks.before_tool(tool=_Tool("run_command"), args=diff, tool_context=ctx) is None
-    callbacks.after_tool(
-        tool=_Tool("run_command"),
-        args=diff,
-        tool_context=ctx,
-        tool_response={"output": "empty"},
-    )
-    banned = callbacks.before_tool(tool=_Tool("run_command"), args=diff, tool_context=ctx)
-    assert banned["result"].startswith("already seen:")
-    other = _Ctx("repair_2", invocation="repeat")
-    opened = callbacks.before_tool(tool=_Tool("run_command"), args=diff, tool_context=other)
-    assert opened is None
-    state.has_edit = True
-    rerun = callbacks.before_tool(tool=_Tool("run_command"), args=diff, tool_context=ctx)
-    assert rerun is None
-
-
-def test_rich_4070_style_import_deletion_is_reverted(tmp_path, monkeypatch):
-    callbacks = _callbacks()
-    repo = _repo(tmp_path)
-    monkeypatch.setenv("V15_REPO", str(repo))
-    source = repo / "pkg" / "console.py"
-    source.write_text("def read_secret():\n    return getpass.getuser()\n")
-    state = callbacks.GateState()
-    state.t0 = 0
-    callbacks.set_clock(lambda: 1)
-    ok, detail = callbacks.review_tree(repo, state, timeout=20)
-    assert ok is False
-    assert "getpass" in detail or "check failed" in detail
-    restored = source.read_text()
-    assert "import getpass" in restored
-    assert callbacks.source_diff(repo)[0] == ""
-    ok_again, _detail = callbacks.review_tree(repo, state, timeout=20)
-    assert ok_again is True
-
-
-def test_a_passing_check_is_the_snapshot_a_later_failure_restores(tmp_path, monkeypatch):
-    callbacks = _callbacks()
-    repo = _repo(tmp_path)
-    monkeypatch.setenv("V15_REPO", str(repo))
-    callbacks.set_clock(lambda: 1)
-    state = callbacks.GateState()
-    state.t0 = 0
-    source = repo / "pkg" / "console.py"
-    source.write_text("import getpass\n\ndef read_secret():\n    return getpass.getuser() or 'x'\n")
-    ok, _detail = callbacks.review_tree(repo, state, timeout=20)
-    assert ok is True
-    assert state.good_files
-    source.write_text("def read_secret():\n    return missing_name()\n")
-    ok, detail = callbacks.review_tree(repo, state, timeout=20)
-    assert ok is False
-    assert "import getpass" in source.read_text()
-    assert "restored" in detail
-    ctx = _Ctx("verify_3", invocation="submit")
-    callbacks.reset_states()
-    held = callbacks._state_for(ctx)
-    held.t0 = 0
-    held.good_files = None
-    source.write_text("def read_secret():\n    return missing_name()\n")
-    blocked = callbacks.before_tool(tool=_Tool("submit_patch"), args={}, tool_context=ctx)
-    assert blocked is not None
-    assert "import getpass" in source.read_text()
-    assert ctx.end_invocation is False
-
-
-def test_callbacks_swallow_errors():
-    callbacks = _callbacks()
-
-    def boom(*_args, **_kwargs):
-        raise RuntimeError("branch")
-
-    original_before = callbacks._before
-    original_after = callbacks._after
-    callbacks._before = boom
-    callbacks._after = boom
+def test_py_compile_failure_restores_only_a_tmp_backup(tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    target = repo / "pkg" / "mod.py"
+    target.write_text("def broken(:\n")
+    backup = Path(os.environ.get("TMPDIR", "/tmp")) / "pre_pkg_mod.py"
+    backup.write_text("VALUE = 1\n")
     try:
-        ctx = _Ctx("repair_1")
-        assert callbacks.before_tool(tool=_Tool("read_file"), args={}, tool_context=ctx) is None
-        assert (
-            callbacks.after_tool(
-                tool=_Tool("read_file"),
-                args={},
-                tool_context=ctx,
-                tool_response={},
-            )
-            is None
-        )
-        assert callbacks.before_model(callback_context=None) is None
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("PYTHONPATH", str(repo))
+        module = _gate(tmp_path)
+        text = module.handle()
+        assert "compile FAIL pkg/mod.py restored" in text
+        assert target.read_text() == "VALUE = 1\n"
+        assert "git show" not in text
     finally:
-        callbacks._before = original_before
-        callbacks._after = original_after
+        backup.unlink(missing_ok=True)
 
 
-def test_shell_is_noninteractive_bash_and_sync_docker_exec():
-    callbacks = _callbacks()
-    assert callbacks.command_argv("git diff") == [
-        "bash",
-        "--noprofile",
-        "--norc",
-        "-c",
-        "git diff",
-    ]
-    assert callbacks.command_argv("git diff", "box") == [
-        "docker",
-        "exec",
-        "-i",
-        "box",
-        "bash",
-        "--noprofile",
-        "--norc",
-        "-c",
-        "git diff",
-    ]
-    assert "-t" not in callbacks.command_argv("true", "box")
+def test_py_compile_failure_without_backup_is_left_in_place(tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    target = repo / "pkg" / "mod.py"
+    target.write_text("def broken(:\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTHONPATH", str(repo))
+    text = _gate(tmp_path).handle()
+    assert "compile FAIL pkg/mod.py left" in text
+    assert target.read_text() == "def broken(:\n"
+    assert text.endswith("FAIL")
 
 
-def test_dev13_report_counts_edits_and_the_reachable_ceiling():
-    callbacks = _callbacks()
-    rows = [
-        {"instance_id": "rich_3454", "resolved": True, "duration_seconds": 200},
-        {"instance_id": "rich_3934", "resolved": False, "duration_seconds": 303},
-        {"instance_id": "fastapi_14246", "resolved": False, "duration_seconds": 308},
-    ]
-    traces = {
-        "rich_3454": {
-            "steps": [
-                {"tool_calls": [{"name": "read_file", "arguments": {"path": "a.py"}}]},
-                {
-                    "tool_calls": [
-                        {
-                            "name": "run_command",
-                            "arguments": {"command": "cat > /tmp/line_fix.py"},
-                        }
-                    ]
-                },
-            ]
-        },
-        "rich_3934": {"steps": [{"name": "read_file", "args": {"path": "live.py"}}]},
-        "fastapi_14246": {"tool_calls": [{"name": "read_file", "arguments": {}}]},
-    }
-    report = callbacks.dev13_report(rows, traces)
-    assert report["n"] == 3
-    assert report["resolved"] == 1
-    assert report["reachable_ceiling"] == 10
-    assert report["reachable_resolved"] == 1
-    assert report["no_edit_runs"] == 2
-    by_id = {item["instance_id"]: item for item in report["tasks"]}
-    assert by_id["rich_3454"]["calls_to_first_edit"] == 2
-    assert by_id["rich_3454"]["wall_seconds"] == 200
-    assert by_id["rich_3934"]["no_edit"] is True
-    assert by_id["rich_3934"]["calls_to_first_edit"] is None
+def test_import_and_test_failures_do_not_revert(tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    broken = "raise RuntimeError('missing dep')\n"
+    target = repo / "pkg" / "mod.py"
+    target.write_text(broken)
+    tests = repo / "tests"
+    tests.mkdir()
+    (tests / "test_mod.py").write_text("raise SystemExit('should not run')\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTHONPATH", str(repo))
+    text = _gate(tmp_path).handle()
+    assert "import FAIL pkg/mod.py" in text
+    assert "restored" not in text
+    assert target.read_text() == broken
+    assert text.endswith("FAIL")
 
 
-def test_dev13_notebook_lists_the_cohort_and_keeps_traces():
-    notebook = json.loads(NOTEBOOK.read_text())
-    source = "\n".join("".join(cell["source"]) for cell in notebook["cells"])
+def test_src_layout_import_passes_without_a_wipe(tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    src = repo / "src" / "pkg"
+    src.mkdir(parents=True)
+    module_path = src / "mod.py"
+    module_path.write_text("VALUE = 3\n")
+    (src / "__init__.py").write_text("")
+    (repo / "src" / "__init__.py").write_text("")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTHONPATH", str(repo))
+    text = _gate(tmp_path).handle()
+    assert "import PASS pkg.mod" in text or "import PASS src.pkg.mod" in text
+    assert module_path.read_text() == "VALUE = 3\n"
+    assert text.endswith("PASS")
+
+
+def test_touched_module_test_failure_keeps_the_edit(tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    target = repo / "pkg" / "mod.py"
+    target.write_text("VALUE = 4\n")
+    tests = repo / "tests"
+    tests.mkdir()
+    (tests / "test_mod.py").write_text("raise SystemExit(1)\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTHONPATH", str(repo))
+    text = _gate(tmp_path).handle()
+    assert "test FAIL tests/test_mod.py exit=1" in text
+    assert target.read_text() == "VALUE = 4\n"
+    assert text.endswith("FAIL")
+
+
+def test_hygiene_has_no_block_and_validation_passes():
+    report = lint_candidate(V15)
+    blocked = [item for item in report["findings"] if item.get("severity") == "block"]
+    assert blocked == []
+    assert validate(V15)
+
+
+def test_notebook_compiles_the_plain_zip_with_nothing_registered():
+    source = NOTEBOOK.read_text()
+    assert "register_callbacks" not in source
+    assert "CallbackRegistry" not in source
+    assert "callback_registry" not in source
+    assert "compile_submission" in source
     for task_id in DEV13:
         assert task_id in source
-    assert "structured-v15" in source
-    assert "compile_submission" in source
-    assert "register_callbacks" in source
-    assert "reachable_ceiling" in source
-    assert "no_edit" in source
+    assert "reachable ceiling" in source
     assert "calls_to_first_edit" in source
-    assert "task_results.jsonl" in source
-    assert "traces" in source
-    assert "Do not submit" in source
+
+
+def test_archive_pins_v15_and_leaves_v14_unchanged(tmp_path):
+    archive = tmp_path / "structured-v15.zip"
+    manifest = pack(V15, archive)
+    assert manifest["sha256"] == ARCHIVE
+    assert sha256(archive) == ARCHIVE
+    assert len(manifest["files"]) == 27
+    assert "callbacks.py" not in manifest["files"]
+    assert "skills/gate/scripts/run.py" in manifest["files"]
+    with zipfile.ZipFile(archive) as packed:
+        script = packed.read("skills/gate/scripts/run.py")
+    assert script == (V15 / "skills/gate/scripts/run.py").read_bytes()
+    assert pack(V14, tmp_path / "structured-v14.zip")["sha256"] == V14_ARCHIVE
+    assert not list(V15.rglob("__pycache__"))
 
 
 def _ensure_compiler_source():
@@ -462,6 +363,8 @@ def _ensure_compiler_source():
     if schema.is_file() and "ge=1" in schema.read_text():
         return COMPILER_CACHE
     COMPILER_CACHE.mkdir(parents=True, exist_ok=True)
+    import urllib.request
+
     for rel in COMPILER_FILES:
         dest = COMPILER_CACHE / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -472,13 +375,7 @@ def _ensure_compiler_source():
 def _ensure_adk():
     if (ADK_PY / "google" / "adk" / "__init__.py").is_file():
         return ADK_PY
-    ADK_PY.mkdir(parents=True, exist_ok=True)
-    try:
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--target", str(ADK_PY), "google-adk==1.36.1"]
-        )
-    except (OSError, subprocess.CalledProcessError):
-        pytest.skip("google-adk 1.36.1 pip install failed; compile test skipped offline")
+    pytest.skip("google-adk 1.36.1 is not installed under /tmp/adk-py")
     return ADK_PY
 
 
@@ -500,7 +397,30 @@ def _schema_tree(version, ge):
     return root
 
 
-def test_compiles_on_adk_submission_0_2_12_and_0_2_13(tmp_path):
+def _run_compiler(pkg_root, script, *args):
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join([str(pkg_root), str(_ensure_adk())])
+    env["PYTHONWARNINGS"] = "ignore"
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    completed = subprocess.run(
+        [sys.executable, str(script), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
+    if completed.returncode != 0:
+        raise AssertionError(completed.stderr[-4000:] or completed.stdout[-4000:])
+    return json.loads(completed.stdout)
+
+
+def test_plain_archive_compiles_with_no_registry(tmp_path):
+    archive = tmp_path / "structured-v15.zip"
+    pack(V15, archive)
+    unpacked = tmp_path / "unpacked"
+    with zipfile.ZipFile(archive) as packed:
+        packed.extractall(unpacked)
     script = tmp_path / "compile_v15.py"
     script.write_text(
         textwrap.dedent(
@@ -509,7 +429,6 @@ def test_compiles_on_adk_submission_0_2_12_and_0_2_13(tmp_path):
             import sys
             from pathlib import Path
 
-            from adk_submission import CallbackRegistry
             from adk_submission import GenerationConstraints
             from adk_submission import ModelRegistry
             from adk_submission import NumericRange
@@ -518,128 +437,108 @@ def test_compiles_on_adk_submission_0_2_12_and_0_2_13(tmp_path):
             from adk_submission import compile_submission
 
             SOURCE = Path(sys.argv[1])
-            sys.path.insert(0, str(SOURCE))
-            from callbacks import register_callbacks
-
             LIMITS = SubmissionLimits(
                 allowed_file_extensions=frozenset({".yaml", ".yml", ".md", ".txt", ".py", ".json"})
             )
 
 
-            def registries():
-                models = ModelRegistry()
-                models.register("gemma-4-31b-it-qat-w4a16-ct", "gemma-4-31b-it-qat-w4a16-ct")
-                tools = ToolRegistry()
-                for name in (
-                    "get_status",
-                    "read_file",
-                    "run_command",
-                    "search_similar_code",
-                    "get_code_neighbors",
-                    "get_code_subgraph",
-                    "submit_patch",
-                ):
-                    tools.register(name, lambda *args, **kwargs: None)
-                callbacks = CallbackRegistry()
-                register_callbacks(callbacks)
-                return tools, models, callbacks
+            def tool(name):
+                def _fn(*args, **kwargs):
+                    return None
+                _fn.__name__ = name
+                return _fn
 
 
-            def constraints():
-                return GenerationConstraints(
-                    allowed_fields=None,
-                    max_output_tokens=NumericRange(1, 32768),
-                    thinking_budget=NumericRange(0, 32768),
-                    defaults={
-                        "max_output_tokens": 16384,
-                        "thinking_config": {"thinking_budget": 4096},
-                    },
-                )
+            def walk(agent, rows):
+                config = getattr(agent, "generate_content_config", None)
+                tokens = None if config is None else getattr(config, "max_output_tokens", None)
+                tools = []
+                skills = []
+                for item in getattr(agent, "tools", []) or []:
+                    if type(item).__name__ == "SkillToolset":
+                        skills.extend(sorted(item._skills))
+                    else:
+                        tools.append(getattr(item, "__name__", type(item).__name__))
+                rows.append({
+                    "name": agent.name,
+                    "kind": type(agent).__name__,
+                    "max_iterations": getattr(agent, "max_iterations", None),
+                    "tools": tools,
+                    "skills": skills,
+                    "max_output_tokens": tokens,
+                    "before_tool": bool(getattr(agent, "before_tool_callback", None)),
+                    "after_tool": bool(getattr(agent, "after_tool_callback", None)),
+                    "before_model": bool(getattr(agent, "before_model_callback", None)),
+                })
+                for child in getattr(agent, "sub_agents", []) or []:
+                    walk(child, rows)
 
 
-            tools, models, callbacks = registries()
+            tools = ToolRegistry()
+            for name in (
+                "get_status",
+                "read_file",
+                "run_command",
+                "search_similar_code",
+                "get_code_neighbors",
+                "get_code_subgraph",
+                "submit_patch",
+            ):
+                tools.register(name, tool(name))
+            models = ModelRegistry()
+            models.register("gemma-4-31b-it-qat-w4a16-ct", "gemma-4-31b-it-qat-w4a16-ct")
             agent = compile_submission(
                 SOURCE,
                 tools,
                 models,
-                callback_registry=callbacks,
                 limits=LIMITS,
-                generation_constraints=constraints(),
+                generation_constraints=GenerationConstraints(
+                    allowed_fields=None,
+                    max_output_tokens=NumericRange(1, 32768),
+                    thinking_budget=NumericRange(0, 32768),
+                    defaults={"max_output_tokens": 16384},
+                ),
             )
-            roles = {}
-            for child in agent.sub_agents:
-                before = getattr(child, "before_tool_callback", None) or []
-                after = getattr(child, "after_tool_callback", None) or []
-                model_cb = getattr(child, "before_model_callback", None) or []
-                roles[child.name] = {
-                    "before": [fn.__name__ for fn in before],
-                    "after": [fn.__name__ for fn in after],
-                    "model": [fn.__name__ for fn in model_cb],
-                }
+            rows = []
+            walk(agent, rows)
             print(json.dumps({
                 "version": __import__("adk_submission").__version__,
-                "root": type(agent).__name__,
-                "name": agent.name,
-                "roles": roles,
+                "rows": rows,
             }))
             """
         )
     )
-    env_base = {
-        **os.environ,
-        "PYTHONWARNINGS": "ignore",
-    }
-    for version, ge in (("0.2.12", 0), ("0.2.13", 0)):
-        tree = _schema_tree(version, ge)
-        env = dict(env_base)
-        env["PYTHONPATH"] = os.pathsep.join([str(tree), str(_ensure_adk())])
-        completed = subprocess.run(
-            [sys.executable, str(script), str(V15.resolve())],
-            check=False,
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=120,
-        )
-        if completed.returncode != 0:
-            raise AssertionError(completed.stderr[-2000:] or completed.stdout[-2000:])
-        payload = json.loads(completed.stdout)
+    payloads = {}
+    for version in ("0.2.12", "0.2.13"):
+        tree = _schema_tree(version, 0)
+        payloads[version] = _run_compiler(tree, script, str(unpacked))
+    for version, payload in payloads.items():
         assert payload["version"] == version
-        assert payload["root"] == "SequentialAgent"
-        assert payload["name"] == "structured_v15"
-        roles = (
-            "triage",
-            "repair_1",
-            "repair_2",
-            "repair_3",
-            "verify_1",
-            "verify_2",
-            "verify_3",
-        )
-        for role in roles:
-            assert payload["roles"][role] == {
-                "before": ["before_tool"],
-                "after": ["after_tool"],
-                "model": ["before_model"],
-            }
-
-
-def test_archive_pins_v15_and_leaves_v14_unchanged(tmp_path):
-    archive = tmp_path / "structured-v15.zip"
-    manifest = pack(V15, archive)
-    assert manifest["sha256"] == V15_ARCHIVE
-    assert sha256(archive) == V15_ARCHIVE
-    assert len(manifest["files"]) == 23
-    assert pack(V14, tmp_path / "structured-v14.zip")["sha256"] == V14_ARCHIVE
-
-
-def test_runtime_gate_math_keeps_300_seconds():
-    cap = 300
-    mean_limit = 260
-    assert 120 * (mean_limit + 70) == 39600
-    assert 120 * ((cap + 8) + 70) > 39600
-    check = 20
-    assert check <= 20
-    # v13-1 dev-13 mean. Not a v15 measurement.
-    measured = 279.6
-    assert 120 * (measured + 70) > 39600
+        rows = {row["name"]: row for row in payload["rows"]}
+        assert rows["structured_v15"]["kind"] == "SequentialAgent"
+        assert rows["repair_1_loop"]["max_iterations"] == 15
+        assert rows["repair_2_loop"]["max_iterations"] == 6
+        assert rows["repair_3_loop"]["max_iterations"] == 3
+        assert rows["triage"]["tools"] == []
+        assert rows["triage"]["skills"] == ["map"]
+        assert rows["triage"]["max_output_tokens"] == 1024
+        assert rows["repair_1"]["tools"] == [
+            "get_status",
+            "read_file",
+            "run_command",
+            "search_similar_code",
+            "get_code_neighbors",
+            "get_code_subgraph",
+        ]
+        assert rows["repair_1"]["max_output_tokens"] == 2048
+        for name in LATE_ROLES:
+            assert READ_TOOLS.isdisjoint(rows[name]["tools"])
+        assert rows["verify_3"]["tools"] == ["get_status", "run_command", "submit_patch"]
+        assert rows["verify_3"]["skills"] == ["gate"]
+        assert rows["verify_1"]["skills"] == ["check"]
+        assert rows["verify_1"]["max_output_tokens"] == 512
+        for row in payload["rows"]:
+            assert row["before_tool"] is False
+            assert row["after_tool"] is False
+            assert row["before_model"] is False
+    assert not list(V15.rglob("__pycache__"))

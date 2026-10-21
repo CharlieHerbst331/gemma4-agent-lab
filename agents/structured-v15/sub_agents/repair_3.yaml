@@ -1,22 +1,16 @@
 agent_class: LlmAgent
 name: repair_3
 model: gemma-4-31b-it-qat-w4a16-ct
-description: Last repair round. One heredoc at most, then hand off. No reads.
+description: One repair_3 step. No read tool. One command, then the report.
 instruction: !include repair_3.md
 generate_content_config:
   temperature: 1.0
   top_p: 0.95
   top_k: 64
-  max_output_tokens: 2048
+  max_output_tokens: 1024
   thinking_config: !include repair_thinking.yaml
 tools:
 - get_status
 - run_command
 include_contents: default
 output_key: repair_3_report
-before_tool_callbacks:
-- v15_before_tool
-after_tool_callbacks:
-- v15_after_tool
-before_model_callbacks:
-- v15_before_model
