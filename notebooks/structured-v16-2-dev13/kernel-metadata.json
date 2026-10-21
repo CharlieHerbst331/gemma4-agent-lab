@@ -1,0 +1,21 @@
+{
+  "code_file": "evaluation.ipynb",
+  "competition_sources": [
+    "gemma-4-developer-agent"
+  ],
+  "dataset_sources": [
+    "metric/gemma-4-developer-agent-wheelhouse/30"
+  ],
+  "docker_image": "gcr.io/kaggle-private-byod/python@sha256:37c64f7dd9c54116ecd1bcc88817c5469b88387388fade02bfa8bf3fc647d461",
+  "enable_gpu": true,
+  "enable_internet": false,
+  "id": "charlesaherbst/structured-v16-2-dev13",
+  "is_private": true,
+  "kernel_type": "notebook",
+  "language": "python",
+  "machine_shape": "NvidiaL4",
+  "model_sources": [
+    "google/gemma-4/Other/gemma-4-31b-it-qat-w4a16-ct/2"
+  ],
+  "title": "structured v16 2 dev13"
+}
