@@ -1,0 +1,10 @@
+evaluation:
+  # 300 seconds stays. Do not shrink this cap. Repair loops are 8, 3,
+  # and 2 passes from measured v8 turn times, not a shorter task cap.
+  # The v8 smoke5 mean was 293.3 s because 4 of 5 tasks hit this cap.
+  # The host enforces 12 hours total only. 220 calls and 320 turns match v8.
+  # timeout_seconds matches the cap.
+  timeout_seconds: 300
+  max_tool_calls: 220
+  max_time_minutes: 5
+  max_turns: 320

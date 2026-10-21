@@ -1,0 +1,6 @@
+agent_class: LoopAgent
+name: repair_2_loop
+description: Three repair_2 passes. One 40-line window, then an edit or DONE. Idle passes still run.
+max_iterations: 3
+sub_agents:
+- config_path: repair_2.yaml

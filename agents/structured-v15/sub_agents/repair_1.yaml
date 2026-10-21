@@ -1,0 +1,22 @@
+agent_class: LlmAgent
+name: repair_1
+model: gemma-4-31b-it-qat-w4a16-ct
+description: One repair_1 pass. Several reads and an edit. DONE with no tools once a diff exists.
+instruction: !include repair_1.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  # 2048 leaves room for one heredoc. A full generation is about 55 s at
+  # 2.05 s plus 26 ms per token, before the 256-token thinking add.
+  max_output_tokens: 2048
+  thinking_config: !include repair_thinking.yaml
+tools:
+- get_status
+- read_file
+- run_command
+- search_similar_code
+- get_code_neighbors
+- get_code_subgraph
+include_contents: default
+output_key: repair_1_report

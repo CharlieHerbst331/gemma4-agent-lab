@@ -1,6 +1,49 @@
 # Project status
 
-Last updated: October 20, 2026.
+Last updated: October 21, 2026.
+
+## Unevaluated structured-v15
+
+`agents/structured-v15` (`structured_v15`) is a copy of
+`agents/structured-v14`. Existing agent directories were not modified. No
+score is claimed. No Kaggle push and no GPU run. The dev-13 notebook was
+not executed. structured-v8 remains the scored best, at 0.10 and, on the
+same archive, 0.13. structured-v12 scored 0.06. structured-v13 is submitted
+and its score is pending (Kaggle ref 57412943). structured-v13-1 and
+structured-v14 are unevaluated.
+
+Hypothesis: fewer loop restarts, several calls inside one `repair_1` pass,
+and a prompt-mandated gate before submit should leave verify and submit a
+chance to run. The hosted path does not run callbacks or tool wrappers.
+`agent_runner.py` lines 334-346 call `compile_submission` with no callback
+registry, and `resolvers/callbacks.py` lines 84-85 drop those names. Loop
+caps are 8, 3, and 2. Those are restart counts. A pass may make several
+tool calls. `get_status` does not count and is called at the start of a
+role and before an edit, not before every read. v8 smoke5 model turns were
+median 3.9 seconds, mean 6.6 seconds, p90 13.8 seconds (206 steps). A
+`get_status` plus one tool plus a report is 2 or 3 turns, about 13 to 20
+seconds, and 15 of those steps stay under the 16-call and 21-call first
+edits, so that pattern is not used. `LoopAgent` cannot skip an iteration.
+The idle floor before `verify_3` is 17 turns: `2 + 8 + 1 + 3 + 1 + 2`.
+That is 66.3 seconds at the 3.9 second median, 85 seconds at the 5 second
+text-only median, 112.2 seconds at the 6.6 second mean, and 234.6 seconds
+at the 13.8 second p90. The previous 15/6/3 floor was 28 turns, about 109
+to 185 seconds at 3.9 to 6.6 seconds. v8 cap-hit tasks (about 302 to 308
+seconds) often never left repair_1, so `verify_3` did not run. A pass that
+keeps calling tools is still not interrupted. fastapi_11194's first edit
+was call 16 at 173 seconds. The 118-trace median is 21 calls to the first
+edit (`21 * 6.6 = 138.6` seconds). The first `repair_1` pass can hold both.
+The prompt does not stop an empty diff at 150 seconds. The gate runs
+`pytest -x -q` with a 20 second timeout on the touched test and prints
+`test NOOP pytest missing` when pytest cannot be imported. It restores a
+file only on `py_compile` failure when a `/tmp/pre_` backup exists. The
+cap stays 300 seconds, 220 calls, and 320 turns. The internal block still
+needs a mean of at most 260 seconds (`120 * (mean + 70) <= 39600`).
+v13-1's dev-13 mean of 279.6 seconds fails it
+(`120 * (279.6 + 70) = 41952`). That comparison was not run. Write-up:
+`docs/STRUCTURED_V15.md`. Notebook: `notebooks/structured-v15-dev13.ipynb`.
+Archive SHA256
+`194cf0d42e7088d760da3a36d7da27ac82b1e66551843bb1579c108e8c03ce45`.
 
 ## Unevaluated structured-v14
 
