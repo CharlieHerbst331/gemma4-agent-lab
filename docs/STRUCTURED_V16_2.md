@@ -24,13 +24,26 @@ The change is prompt text and repair_1's generate config. Caps stay 240
 seconds, 220 calls, and 320 turns. The shell prefix, which ships in the
 zip, adds 25 seconds before it prints `[elapsed]`. At a displayed 100 it
 also prints `HAND-OFF DUE: reply now with HYPOTHESIS and END_ROUND_1, no
-tool call`. The prompt stops on that banner or on 10 tool calls of any
-kind, including `get_status`. repair_1's `generate_content_config` sets
-`stop_sequences` to `END_ROUND_1`, `max_output_tokens` to 1024, and
-thinking off (`thinking_budget` 0, `include_thoughts` false). Graph tools
-are removed from repair_1. The missed-hand-off heredoc is removed from
-repair_1 because it told the model to make another tool call after the
-trigger. repair_2 still reads one 40-line window and then edits.
+tool call`. The shell source splits that marker as `END_""ROUND_1`, so
+the command text the model generates does not contain the contiguous
+stop string. The prompt still tells the model that the exact last line
+of the text reply is `END_ROUND_1`. The prompt stops on that banner or
+on 10 tool calls of any kind, including `get_status`. repair_1's
+`generate_content_config` sets `stop_sequences` to `END_ROUND_1`,
+`max_output_tokens` to 1024, and thinking off (`thinking_budget` 0,
+`include_thoughts` false). Graph tools are removed from repair_1. The
+missed-hand-off heredoc is removed from repair_1 because it told the
+model to make another tool call after the trigger. repair_2 still reads
+one 40-line window and then edits.
+
+Nothing structural stops repair_1. If it never returns, that role leaves
+an empty diff: the heredoc net is gone, and no other edit runs inside
+repair_1. On v16.1, 10 of 13 tasks made at least 4 calls after the
+trigger, 2 of 13 held repair_1 to the cap, and the old net fired 0 of
+13 times. Those two cap holds were already empty diffs. This candidate's
+never-returns path is that same empty diff whenever the model ignores
+the banner and the 10-call rule. repair_2's window and heredoc run only
+after repair_1 returns.
 
 This is a hypothesis. A hand-off near 100 to 125 seconds would leave
 repair_2 about 60 to 100 seconds more than the v16.1 hand-offs. That
@@ -48,11 +61,20 @@ plus `nl -ba PATH | sed -n 'A,Bp' | head -c 4000`.
 The prefix is:
 
 ```
-test -f /tmp/t0 || date +%s > /tmp/t0; e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); printf '[elapsed %ss]\n' "$e"; [ "$e" -ge 100 ] && echo 'HAND-OFF DUE: reply now with HYPOTHESIS and END_ROUND_1, no tool call';
+test -f /tmp/t0 || date +%s > /tmp/t0; e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); printf '[elapsed %ss]\n' "$e"; [ "$e" -ge 100 ] && echo "HAND-OFF DUE: reply now with HYPOTHESIS and END_""ROUND_1, no tool call";
 ```
 
+The echo is two adjacent quoted strings. Bash prints one `END_ROUND_1`.
+The characters in the tool argument are `END_""ROUND_1`, which is not
+the stop sequence, so vLLM does not cut the command. The final text
+reply still ends with the exact line `END_ROUND_1`.
+
 Displayed 100 is raw elapsed plus 25. With the measured lag of 19.3 to
-34.1 seconds, that is about 95 to 109 seconds of agent time.
+34.1 seconds, that is about 95 to 109 seconds of agent time. Every role
+that calls `run_command` starts with the same +25 clock and the same
+`/tmp/t0`. Later roles do not print the hand-off banner. Their limits
+still use `agent_elapsed_seconds` and `time_seconds_remaining`. Those
+thresholds were not rescaled.
 
 `END_ROUND_1` is the last line of the reply and is not part of the
 `HYPOTHESIS` line. OpenAI-compatible `stop` drops the stop string and
@@ -60,8 +82,12 @@ keeps the text before it. The `HYPOTHESIS` line stays in the history, and
 repair_2 still looks for the latest `HYPOTHESIS` line. Putting the marker
 inside the `HYPOTHESIS` line would cut that line. The prompt forbids that.
 
-repair_1 thinking uses `thinking.yaml` (budget 0). repair_2 and repair_3
-still use `repair_thinking.yaml` (budget 256). `max_output_tokens` is
+repair_1 thinking uses `thinking.yaml` (budget 0). That change is
+unmeasured for localization. There is no paired run of this repair shape
+with budget 0 against budget 256. The v16.1 traces showed about 3,358 to
+6,870 completion tokens on repair_1; that is not a thinking ablation.
+repair_2 and repair_3 still use `repair_thinking.yaml` (budget 256).
+`max_output_tokens` is
 1024 only on repair_1. The other roles stay at 2048. On adk-submission
 0.2.12 and 0.2.13 the no-registry compile attaches `stop_sequences`
 `["END_ROUND_1"]`, `max_output_tokens` 1024, and `thinking_budget` 0 on
@@ -110,7 +136,8 @@ are the dev-13 cohort and are not under `agents/`. Traces stay at
 (resolved, wall, no-edit runs, calls to the first edit, whether
 `HYPOTHESIS:` appeared, the first `[elapsed]` at that line, whether
 repair_1 returned before 240 seconds, and the hand-off elapsed) and also
-whether `HAND-OFF DUE` was printed and whether `END_ROUND_1` was observed.
+whether `HAND-OFF DUE` was printed, whether `END_ROUND_1` was observed,
+and how many repair_1 tool calls look truncated or malformed.
 The stop string is consumed by the API, so a hand-off can be real while
 `END_ROUND_1` is absent from the trace. Kernel metadata mounts only
 `google/gemma-4/Other/gemma-4-31b-it-qat-w4a16-ct/2`, sets `machine_shape`
@@ -121,7 +148,7 @@ run.
 
 ## Archive
 
-SHA256 `0539bdcd5094f1c47af6b2653bc7dff30a8ab8a1c2e4af9042daa56cb8843c27`.
+SHA256 `62937003fe519fa62e4c48f317abd6534d8ab80df25485e0929b18ede76c206d`.
 20 files. Portable validation passed. Plain-zip compile with no registry
 was checked on adk-submission 0.2.12 and 0.2.13. structured-v16.1's
 archive is unchanged at

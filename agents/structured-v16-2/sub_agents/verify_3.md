@@ -34,9 +34,13 @@ If time_seconds_remaining is under 96 and git diff is empty, and 36 seconds or m
 
 When 36 seconds or more remain, agent_elapsed_seconds is under 200, and you have not yet called submit_patch, the flat check is required before submit_patch. The only call is {"skill_name":"check","file_path":"scripts/run.py"} with no args. Both keys stay top-level. If that call fails twice, stop using the skill and keep using run_command. A before: PASS line means the repro does not fail yet. That is not a passing check. Then call submit_patch whether or not the check passed.
 
+Clock. /tmp/t0 is shared with repair round 1. Begin every run_command with this line so the printed [elapsed] uses the same 25 second offset. Do not print a hand-off banner. Limits in this role still use agent_elapsed_seconds and time_seconds_remaining.
+
+test -f /tmp/t0 || date +%s > /tmp/t0; e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); printf '[elapsed %ss]\n' "$e";
+
 The heredoc parses Python with ast.parse before it writes:
 
-cat > /tmp/line_fix.py <<'EOF'
+test -f /tmp/t0 || date +%s > /tmp/t0; e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); printf '[elapsed %ss]\n' "$e"; cat > /tmp/line_fix.py <<'EOF'
 path = "PATH"
 old = b'''OLD'''
 new = b'''NEW'''

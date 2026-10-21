@@ -30,11 +30,15 @@ If git diff is empty, the opening rule already set the one window and then the h
 
 If agent_elapsed_seconds is 192 or more, or time_seconds_remaining is 48 or less and git diff is already non-empty, the next response is text only. The 192 second stop does not delay the empty-diff edit. It ends exploration after a source edit exists.
 
-The one window, before the heredoc, is: nl -ba PATH | sed -n 'A,Bp' | head -c 4000, where B is A plus 39, at most 40 lines. Call read_file with filepath only if you use it for that window. Do not pass start_line or end_line. If the same tool call fails twice, change the call.
+Clock. /tmp/t0 is shared with repair round 1. Begin every run_command with this line so the printed [elapsed] uses the same 25 second offset. Do not print a hand-off banner. Limits in this role still use agent_elapsed_seconds and time_seconds_remaining.
+
+test -f /tmp/t0 || date +%s > /tmp/t0; e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); printf '[elapsed %ss]\n' "$e";
+
+The one window, before the heredoc, is that clock line, then nl -ba PATH | sed -n 'A,Bp' | head -c 4000, where B is A plus 39, at most 40 lines. Call read_file with filepath only if you use it for that window. Do not pass start_line or end_line. If the same tool call fails twice, change the call.
 
 Edit with run_command. The helper parses Python with ast.parse before it writes.
 
-cat > /tmp/line_fix.py <<'EOF'
+test -f /tmp/t0 || date +%s > /tmp/t0; e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); printf '[elapsed %ss]\n' "$e"; cat > /tmp/line_fix.py <<'EOF'
 path = "PATH"
 old = b'''OLD'''
 new = b'''NEW'''

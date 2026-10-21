@@ -22,7 +22,7 @@ V162 = Path("agents/structured-v16-2").resolve()
 NOTEBOOK = Path("notebooks/structured-v16-2-dev13/evaluation.ipynb").resolve()
 KERNEL_META = Path("notebooks/structured-v16-2-dev13/kernel-metadata.json").resolve()
 PROVENANCE = Path("notebooks/structured-v16-2-dev13/provenance.json").resolve()
-ARCHIVE = "0539bdcd5094f1c47af6b2653bc7dff30a8ab8a1c2e4af9042daa56cb8843c27"
+ARCHIVE = "62937003fe519fa62e4c48f317abd6534d8ab80df25485e0929b18ede76c206d"
 V161_ARCHIVE = "2bcee926e39c71c7ca4c8b8443195c7a78fc563f3ab3b4fe0b051c61f2ad7159"
 V16_ARCHIVE = "6b8920c396f4e84fe14e7b7a907c1771436a55b840fae7464b3ce6f7cac13491"
 DOCKER_IMAGE = (
@@ -33,8 +33,13 @@ PREFIX = (
     "test -f /tmp/t0 || date +%s > /tmp/t0; "
     "e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); "
     "printf '[elapsed %ss]\\n' \"$e\"; "
-    '[ "$e" -ge 100 ] && echo \'HAND-OFF DUE: reply now with HYPOTHESIS and '
-    "END_ROUND_1, no tool call';"
+    '[ "$e" -ge 100 ] && echo "HAND-OFF DUE: reply now with HYPOTHESIS and '
+    'END_""ROUND_1, no tool call";'
+)
+CLOCK = (
+    "test -f /tmp/t0 || date +%s > /tmp/t0; "
+    "e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); "
+    "printf '[elapsed %ss]\\n' \"$e\";"
 )
 DEV13 = (
     "fastapi_11194",
@@ -139,7 +144,8 @@ def test_repair_1_clock_banner_and_ten_calls():
     assert "nl -ba PATH | sed -n 'A,Bp' | head -c 4000" in text
     assert "When any output shows HAND-OFF DUE, or you have made 10 tool calls of any kind" in text
     assert "then END_ROUND_1. No tool call." in text
-    assert "Do not put END_ROUND_1 inside the HYPOTHESIS line." in text
+    assert "The exact marker to emit, as its own last line, is END_ROUND_1." in text
+    assert "END_ROUND_1" not in PREFIX
     assert "6 reads" not in text
     assert "line_fix" not in text
     assert "search_similar_code" not in text
@@ -152,6 +158,73 @@ def test_repair_1_clock_banner_and_ten_calls():
     assert budgets["max_turns"] == 320
     root = load_yaml(V162 / "agent.yaml", V162)
     assert root["name"] == "structured_v16_2"
+
+
+def _command_templates(text):
+    """Shell lines and example tool calls the model is told to copy."""
+    chunks = []
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if re.search(r"\{[^{}]*skill_name[^{}]*\}", stripped):
+            chunks.append(stripped)
+        starts = stripped.startswith(
+            ("test ", "cat ", "python", "cd ", "git ", "nl ", "pytest", "echo ", "printf ")
+        )
+        if starts or stripped.startswith("test -f /tmp/t0"):
+            block = [stripped]
+            if "<<" in stripped:
+                index += 1
+                while index < len(lines) and lines[index].strip() != "EOF":
+                    block.append(lines[index])
+                    index += 1
+                if index < len(lines):
+                    block.append(lines[index])
+            chunks.append("\n".join(block))
+        index += 1
+    return chunks
+
+
+def _configured_stops():
+    stops = []
+    for path in sorted((V162 / "sub_agents").glob("*.yaml")):
+        loaded = load_yaml(path, V162)
+        if not isinstance(loaded, dict):
+            continue
+        config = loaded.get("generate_content_config") or {}
+        for sequence in config.get("stop_sequences") or []:
+            stops.append((path.name, sequence))
+    return stops
+
+
+def test_command_templates_do_not_contain_stop_sequences():
+    stops = [sequence for _, sequence in _configured_stops()]
+    assert stops == ["END_ROUND_1"]
+    hits = []
+    for path in sorted((V162 / "sub_agents").glob("*.md")):
+        for chunk in _command_templates(path.read_text()):
+            for sequence in stops:
+                if sequence in chunk:
+                    hits.append(f"{path.name}: {sequence}")
+    assert hits == []
+    banner = _command_templates(_prompt("repair_1"))
+    assert any('END_""ROUND_1' in chunk for chunk in banner)
+    printed = subprocess.run(
+        [
+            "bash",
+            "-c",
+            'echo "HAND-OFF DUE: reply now with HYPOTHESIS and END_""ROUND_1, no tool call"',
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert printed.stdout.strip() == (
+        "HAND-OFF DUE: reply now with HYPOTHESIS and END_ROUND_1, no tool call"
+    )
+    for name in ("repair_2", "repair_3", "verify_1", "verify_2", "verify_3"):
+        assert CLOCK in _prompt(name)
 
 
 def test_stop_sequence_keeps_the_hypothesis_line():
@@ -171,7 +244,7 @@ def test_stop_sequence_keeps_the_hypothesis_line():
         ["END_ROUND_1"],
     )
     assert "drops the rest" not in truncated
-    assert "Do not put END_ROUND_1 inside the HYPOTHESIS line." in _prompt("repair_1")
+    assert "Do not put the end marker inside the HYPOTHESIS line." in _prompt("repair_1")
 
 
 def test_agent_dir_has_no_dev13_ids_or_library_terms():
@@ -213,6 +286,7 @@ def test_notebook_embeds_the_archive_and_keeps_traces():
     assert "end_round_1" in source
     assert "HAND-OFF DUE" in source
     assert "END_ROUND_1" in source
+    assert "malformed_repair_1_calls" in source
     assert "CAP_SECONDS = 240" in source
     for task_id in DEV13:
         assert task_id in source
@@ -289,6 +363,18 @@ def test_notebook_report_sees_banner_and_consumed_stop(tmp_path, monkeypatch):
     )["tasks"][0]
     assert observed["end_round_1"] is True
     assert observed["handoff_due"] is False
+    broken = namespace["summarize"](
+        rows,
+        {
+            "sample": {
+                "events": [
+                    {"author": "repair_1", "text": "get_status{}<tool_call|>"},
+                    {"author": "repair_1", "tool": "run_command", "args": {"command": "git diff"}},
+                ]
+            }
+        },
+    )["tasks"][0]
+    assert broken["malformed_repair_1_calls"] == 1
 
 
 def test_hygiene_and_validation():

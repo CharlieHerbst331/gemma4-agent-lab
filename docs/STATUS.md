@@ -15,19 +15,26 @@ Hypothesis: add 25 seconds inside the shipped `[elapsed]` prefix, print
 `HAND-OFF DUE` once that display reaches 100, stop repair_1 after 10 tool
 calls of any kind, and end the reply with `END_ROUND_1`
 (`stop_sequences`, thinking off, `max_output_tokens` 1024, graph tools
-removed). The v16.1 dev-13 hand-off was late on every task because the
-prefix starts 19.3 to 34.1 seconds behind the agent clock and the model
-kept calling tools after the trigger. A hand-off near 100 to 125 seconds
-would give repair_2 more edit time. That effect is not measured.
-`END_ROUND_1` is consumed by the API and is not part of the `HYPOTHESIS`
-line, so repair_2 still sees the target. The schema cannot cap calls
-inside one `LlmAgent`. The steering paragraph is the v16.1 paragraph
-tuned on rich_3934, so a dev-13 gain there is in-sample. v16.1 resolved
-3 of 13; this candidate does not inherit that result. v12's 250 second
-cap scored 0.06, so the shorter cap remains a known risk. Write-up:
-`docs/STRUCTURED_V16_2.md`. Notebook:
+removed). The command that prints the banner splits the marker as
+`END_""ROUND_1`, so the generated tool text does not contain the stop
+string. The final text reply still ends with the exact line
+`END_ROUND_1`. Every `run_command` role uses the same +25 clock. The
+v16.1 dev-13 hand-off was late on every task because the prefix starts
+19.3 to 34.1 seconds behind the agent clock and the model kept calling
+tools after the trigger. A hand-off near 100 to 125 seconds would give
+repair_2 more edit time. That effect is not measured. Thinking off on
+repair_1 is unmeasured for localization. If repair_1 never returns, the
+diff from that role stays empty: v16.1 had 10 of 13 tasks continue past
+the trigger, 2 of 13 hit the cap, and the old heredoc net fired 0 of 13
+times. `END_ROUND_1` is consumed by the API and is not part of the
+`HYPOTHESIS` line, so repair_2 still sees the target. The schema cannot
+cap calls inside one `LlmAgent`. The steering paragraph is the v16.1
+paragraph tuned on rich_3934, so a dev-13 gain there is in-sample.
+v16.1 resolved 3 of 13; this candidate does not inherit that result.
+v12's 250 second cap scored 0.06, so the shorter cap remains a known
+risk. Write-up: `docs/STRUCTURED_V16_2.md`. Notebook:
 `notebooks/structured-v16-2-dev13/evaluation.ipynb`. Archive SHA256
-`0539bdcd5094f1c47af6b2653bc7dff30a8ab8a1c2e4af9042daa56cb8843c27`.
+`62937003fe519fa62e4c48f317abd6534d8ab80df25485e0929b18ede76c206d`.
 
 ## structured-v16.1 dev-13
 

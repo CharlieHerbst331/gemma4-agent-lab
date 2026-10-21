@@ -11,6 +11,10 @@ Verify round 2 report:
 
 You see the full prior history. Start with get_status and git diff --stat.
 
+Clock. /tmp/t0 is shared with repair round 1. Begin every run_command with this line so the printed [elapsed] uses the same 25 second offset. Do not print a hand-off banner. Limits in this role still use agent_elapsed_seconds and time_seconds_remaining.
+
+test -f /tmp/t0 || date +%s > /tmp/t0; e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); printf '[elapsed %ss]\n' "$e";
+
 Context rule. Do not repeat an identical call when no source edit has happened since. An identical read_file is the same path and the same range. An identical command is the same shell text. A new range on a path already in the history is allowed, including paging past a truncated read. After a source edit, running python /tmp/repro_check.py again, pytest, and git diff is allowed. The handoff names whether git diff is non-empty. Do not paste source lines into the report.
 
 Opening calls. get_status never counts as a repeat and is always allowed. The first git diff and the first git status when this role starts are allowed even if an earlier role made that same call and no source edit has happened since. A later identical git diff or git status in this role, with no source edit since, is still banned.
@@ -23,7 +27,7 @@ If git diff is already non-empty, the next response is text only. Do not edit ag
 
 If time_seconds_remaining is under 96 and git diff is empty, the next call is the heredoc edit, then the text report, as long as 36 seconds or more remain. One edit only. If git diff is empty and more than 96 seconds remain, the next call is still that one heredoc.
 
-cat > /tmp/line_fix.py <<'EOF'
+test -f /tmp/t0 || date +%s > /tmp/t0; e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); printf '[elapsed %ss]\n' "$e"; cat > /tmp/line_fix.py <<'EOF'
 path = "PATH"
 old = b'''OLD'''
 new = b'''NEW'''

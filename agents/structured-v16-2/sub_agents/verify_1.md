@@ -20,6 +20,10 @@ Opening calls. get_status never counts as a repeat and is always allowed. The fi
 
 Late deadline. If agent_elapsed_seconds is about 192 or more and git diff has a source edit, the next response is the text report. Do not call the check. The last verify submits.
 
+Clock. /tmp/t0 is shared with repair round 1. Begin every run_command with this line so the printed [elapsed] uses the same 25 second offset. Do not print a hand-off banner. Limits in this role still use agent_elapsed_seconds and time_seconds_remaining.
+
+test -f /tmp/t0 || date +%s > /tmp/t0; e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); printf '[elapsed %ss]\n' "$e";
+
 Start with get_status, then git diff and git status --short. git status may show harness-staged A conftest.py and A pytest.ini before any edit. Those are expected. They are not a source edit. A protected-paths-only change counts as an empty source diff.
 
 If time_seconds_remaining is under 72, the next response is text only. Do not call the check. Say whether git diff is non-empty.

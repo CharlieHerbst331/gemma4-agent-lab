@@ -21,11 +21,11 @@ The task cap is 240 seconds. Start with get_status. Fields that matter: tool_cal
 
 Hand-off. Every command starts with the clock line. /tmp/t0 is created on the first command, so the raw clock runs about 19 to 34 seconds behind the agent clock. The shell adds 25 seconds before it prints. A displayed [elapsed] of 100 is about 95 to 109 seconds of agent time. Begin every run_command, including reads, greps, and the probe, with:
 
-test -f /tmp/t0 || date +%s > /tmp/t0; e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); printf '[elapsed %ss]\n' "$e"; [ "$e" -ge 100 ] && echo 'HAND-OFF DUE: reply now with HYPOTHESIS and END_ROUND_1, no tool call';
+test -f /tmp/t0 || date +%s > /tmp/t0; e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); printf '[elapsed %ss]\n' "$e"; [ "$e" -ge 100 ] && echo "HAND-OFF DUE: reply now with HYPOTHESIS and END_""ROUND_1, no tool call";
 
 Read with that same prefix, then the window:
 
-test -f /tmp/t0 || date +%s > /tmp/t0; e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); printf '[elapsed %ss]\n' "$e"; [ "$e" -ge 100 ] && echo 'HAND-OFF DUE: reply now with HYPOTHESIS and END_ROUND_1, no tool call'; nl -ba PATH | sed -n 'A,Bp' | head -c 4000
+test -f /tmp/t0 || date +%s > /tmp/t0; e=$(( $(date +%s) - $(cat /tmp/t0) + 25 )); printf '[elapsed %ss]\n' "$e"; [ "$e" -ge 100 ] && echo "HAND-OFF DUE: reply now with HYPOTHESIS and END_""ROUND_1, no tool call"; nl -ba PATH | sed -n 'A,Bp' | head -c 4000
 
 When any output shows HAND-OFF DUE, or you have made 10 tool calls of any kind, your next reply is the HYPOTHESIS line, the round: 1 report, then END_ROUND_1. No tool call. The same stop applies when agent_elapsed_seconds is 120 or more. Reply even if git diff is empty. Do not edit after that trigger.
 
@@ -39,7 +39,7 @@ Hypothesis rule. When any output shows HAND-OFF DUE, or you have made 10 tool ca
 
 HYPOTHESIS: <path>:<function> - <one-sentence change>
 
-Write that line before END_ROUND_1. Do not put END_ROUND_1 inside the HYPOTHESIS line. END_ROUND_1 is the last line of the reply. The API consumes that marker and keeps the text before it, so repair_2 still sees the HYPOTHESIS line. repair_2 makes the edit. An imperfect target is better than more reading. Do not keep reading. Do not wait for a later clock. Ten tool calls, or HAND-OFF DUE, ends this round.
+Write that line before the end marker. Do not put the end marker inside the HYPOTHESIS line. The exact marker to emit, as its own last line, is END_ROUND_1. The API consumes that marker and keeps the text before it, so repair_2 still sees the HYPOTHESIS line. repair_2 makes the edit. An imperfect target is better than more reading. Do not keep reading. Do not wait for a later clock. Ten tool calls, or HAND-OFF DUE, ends this round.
 
 Before the first repro, run the import-origin probe once. Prefix the clock line, then replace PKG with the task package.
 
