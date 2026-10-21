@@ -1,0 +1,19 @@
+agent_class: LlmAgent
+name: repair_1
+model: gemma-4-31b-it-qat-w4a16-ct
+description: First repair round. One pass. No read_file and no graph tools. End with HYPOTHESIS then END_ROUND_1. Do not edit.
+instruction: !include repair_1.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  # 1024 bounds one completion. A longer repair_1 turn on the previous candidate ran about 36 seconds.
+  max_output_tokens: 1024
+  thinking_config: !include thinking.yaml
+  stop_sequences:
+  - END_ROUND_1
+tools:
+- get_status
+- run_command
+include_contents: default
+output_key: repair_1_report

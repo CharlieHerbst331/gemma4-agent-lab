@@ -1,0 +1,9 @@
+# Thinking off. repair_1, triage, and verify include this file.
+# repair_2 and repair_3 include repair_thinking.yaml instead.
+# Each LlmAgent has its own thinking_config, so this file is not a
+# global knob. include_thoughts false alone does not turn thinking off on
+# adk-submission 0.2.13. A missing budget is replaced by 4096. thinking_budget
+# 0 turns thinking off on 0.2.12 and 0.2.13. A budget of 0 does not compile
+# on 0.2.11.
+include_thoughts: false
+thinking_budget: 0

@@ -1,0 +1,12 @@
+evaluation:
+  # Caps are unchanged from structured-v16-1: 240 seconds, 220 calls, 320 turns.
+  # v16.1 dev-13 mean wall was 237.05 s and max was 246.76 s (n=13).
+  # 120 * (237.05 + 70) = 36846, which passes 39600.
+  # If every task hits the measured max, 120 * (246.76 + 70) = 38011.
+  # With L=1170, 1170 + 129 * 246.76 = 33002, which passes 43200.
+  # v12 used a 250 s cap and scored 0.06. This cap is shorter than that.
+  # The hand-off lines are prompt text, not a second cap.
+  timeout_seconds: 240
+  max_tool_calls: 220
+  max_time_minutes: 4.0
+  max_turns: 320
