@@ -2,6 +2,42 @@
 
 Last updated: October 21, 2026.
 
+## Unevaluated structured-v16
+
+`agents/structured-v16` (`structured_v16`) is a copy of
+`agents/structured-v13-1`, not of structured-v14 or structured-v15.
+Existing agent directories were not modified. No score is claimed. No
+Kaggle push and no GPU run. The smoke notebook was not executed.
+structured-v8 remains the scored best, at 0.10 and, on the same archive,
+0.13. structured-v12 scored 0.06. structured-v13 is submitted and its
+score is pending (Kaggle ref 57412943). structured-v13-1, structured-v14,
+and structured-v15 are unevaluated.
+
+Hypothesis: an optional repro, a `HYPOTHESIS` line after at most 4 file
+reads, and a repair_1 hand-off at 150 seconds should put an edit on the
+tasks that previously spent the whole cap in repair_1. repair_2's first
+counted call edits that target when the diff is still empty. verify_3
+submits at 250 seconds and skips the check. repair_1 is already one
+`LlmAgent` pass. There is no loop to set `max_iterations` on. The map
+skill was left out because the smallest change adds no tools. v14 at 3 of
+13 and v13-1 at 4 of 13 is one task on n=13. That is noise, the same way
+structured-v8 is 0.10 and 0.13 on one archive, and it is not evidence for
+dropping the map. The cap stays 300 seconds, 220 calls, and 320 turns.
+If repair_1 is still running with an empty diff and between 45 and 120
+seconds remain, it writes the HYPOTHESIS line and the next call is the
+heredoc. The 150 second hand-off is still the intended stop. The floor
+after that hand-off is about 10 to 12 turns, because each later role
+calls `get_status` and then answers: 39 to 47 seconds at the 3.9 second
+median, 66 to 79 seconds at the 6.6 second mean, and 138 to 166 seconds
+at the 13.8 second p90. At the p90, verify_3 starts near 288 to 316
+seconds and often misses the 300 second cap. The internal block still
+needs a mean of at most 260 seconds
+(`120 * (mean + 70) <= 39600`). v13-1's dev-13 mean of 279.6 seconds fails
+it (`120 * (279.6 + 70) = 41952`). That comparison was not run. Write-up:
+`docs/STRUCTURED_V16.md`. Notebook:
+`notebooks/structured-v16-smoke7.ipynb`. Archive SHA256
+`6b8920c396f4e84fe14e7b7a907c1771436a55b840fae7464b3ce6f7cac13491`.
+
 ## Unevaluated structured-v15
 
 `agents/structured-v15` (`structured_v15`) is a copy of
