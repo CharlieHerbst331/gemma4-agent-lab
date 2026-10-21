@@ -2,14 +2,46 @@
 
 Last updated: October 21, 2026.
 
-## Unevaluated structured-v16.1
+## Unevaluated structured-v16.2
+
+`agents/structured-v16-2` (`structured_v16_2`) is a copy of
+`agents/structured-v16-1`. Existing agent directories were not modified.
+No score is claimed. No Kaggle push and no GPU run of this candidate. The
+dev-13 notebook was not executed. structured-v8 remains the scored best,
+at 0.10 and, on the same archive, 0.13. structured-v12 scored 0.06 on a
+250 second cap. This candidate keeps the 240 second cap.
+
+Hypothesis: add 25 seconds inside the shipped `[elapsed]` prefix, print
+`HAND-OFF DUE` once that display reaches 100, stop repair_1 after 10 tool
+calls of any kind, and end the reply with `END_ROUND_1`
+(`stop_sequences`, thinking off, `max_output_tokens` 1024, graph tools
+removed). The v16.1 dev-13 hand-off was late on every task because the
+prefix starts 19.3 to 34.1 seconds behind the agent clock and the model
+kept calling tools after the trigger. A hand-off near 100 to 125 seconds
+would give repair_2 more edit time. That effect is not measured.
+`END_ROUND_1` is consumed by the API and is not part of the `HYPOTHESIS`
+line, so repair_2 still sees the target. The schema cannot cap calls
+inside one `LlmAgent`. The steering paragraph is the v16.1 paragraph
+tuned on rich_3934, so a dev-13 gain there is in-sample. v16.1 resolved
+3 of 13; this candidate does not inherit that result. v12's 250 second
+cap scored 0.06, so the shorter cap remains a known risk. Write-up:
+`docs/STRUCTURED_V16_2.md`. Notebook:
+`notebooks/structured-v16-2-dev13/evaluation.ipynb`. Archive SHA256
+`0539bdcd5094f1c47af6b2653bc7dff30a8ab8a1c2e4af9042daa56cb8843c27`.
+
+## structured-v16.1 dev-13
 
 `agents/structured-v16-1` (`structured_v16_1`) is a copy of
 `agents/structured-v16`. Existing agent directories were not modified. No
-score is claimed. No Kaggle push and no GPU run. The dev-13 notebook was
-not executed. structured-v8 remains the scored best, at 0.10 and, on the
-same archive, 0.13. structured-v12 scored 0.06, and that 0.06 was on a
-250 second cap. This candidate's cap is 240 seconds, which is shorter.
+leaderboard score is claimed. No Kaggle submission. Testing ran the
+dev-13 notebook after the first write-up. Archive
+`2bcee926e39c71c7ca4c8b8443195c7a78fc563f3ab3b4fe0b051c61f2ad7159`,
+commit `a722a0f`. Resolved 3 of 13 (fastapi_14786, fastapi_14794,
+rich_3454). Mean wall 237.05 seconds, max 246.76 seconds. That is a
+dev-13 result, not a competition score. structured-v8 remains the scored
+best, at 0.10 and, on the same archive, 0.13. structured-v12 scored
+0.06, and that 0.06 was on a 250 second cap. This candidate's cap is 240
+seconds, which is shorter.
 structured-v13 is submitted and its score is pending (Kaggle ref
 57412943). structured-v13-1, structured-v14, structured-v15, and
 structured-v16 are unevaluated.

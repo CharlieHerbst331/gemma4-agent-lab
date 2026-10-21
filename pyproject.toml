@@ -30,6 +30,7 @@ select = ["E", "F", "I", "B"]
 "src/gemma_lab/paired.py" = ["I001"]
 # Official starter cells plus the embedded archive. gemma-lab notebook emits them.
 "notebooks/structured-v16-1-dev13/evaluation.ipynb" = ["E401", "E402", "E501", "F401", "I001"]
+"notebooks/structured-v16-2-dev13/evaluation.ipynb" = ["E401", "E402", "E501", "F401", "I001"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
