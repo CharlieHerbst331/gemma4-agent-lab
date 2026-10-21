@@ -1,0 +1,17 @@
+{
+  "code_file": "evaluation.ipynb",
+  "competition_sources": [
+    "gemma-4-developer-agent"
+  ],
+  "dataset_sources": [
+    "metric/gemma-4-developer-agent-wheelhouse"
+  ],
+  "enable_gpu": true,
+  "enable_internet": false,
+  "id": "charlesaherbst/structured-v16-1-dev13",
+  "is_private": true,
+  "model_sources": [
+    "official/model/2"
+  ],
+  "title": "structured v16 1 dev13"
+}

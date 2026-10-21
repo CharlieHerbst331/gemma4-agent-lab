@@ -2,6 +2,37 @@
 
 Last updated: October 21, 2026.
 
+## Unevaluated structured-v16.1
+
+`agents/structured-v16-1` (`structured_v16_1`) is a copy of
+`agents/structured-v16`. Existing agent directories were not modified. No
+score is claimed. No Kaggle push and no GPU run. The dev-13 notebook was
+not executed. structured-v8 remains the scored best, at 0.10 and, on the
+same archive, 0.13. structured-v12 scored 0.06, and that 0.06 was on a
+250 second cap. This candidate's cap is 240 seconds, which is shorter.
+structured-v13 is submitted and its score is pending (Kaggle ref
+57412943). structured-v13-1, structured-v14, structured-v15, and
+structured-v16 are unevaluated.
+
+Hypothesis: a 240 second cap, reads only through a clocked `run_command`,
+and a repair_1 text hand-off at a prefix of 100 seconds, at 6 reads, or
+at 120 seconds of agent time, should let repair_2 edit before the cap.
+verify_3 submits at 200 seconds. The missed-hand-off net is scaled to
+remaining under 96 and at least 36. Two non-failing repros means stop
+reproducing. The steering text is generic. v16 smoke7 resolved 1 of 7
+with a mean wall of 302.7 seconds, and its worst case
+`1170 + 129 * 334.8 = 44359` was over the 12 hour limit of 43200. A 240
+second cap gives a worst wall of about 279 seconds:
+`1170 + 129 * 279 = 37161`, which passes. The internal block still needs
+a mean of at most 260 seconds (`120 * (mean + 70) <= 39600`). The
+smoke7 analysis estimated a mean of 250 to 258 seconds
+(`120 * (255 + 70) = 39000`). That estimate was not measured, and neither
+was the judged 1.5 to 2 of 7. v12's 250 second cap scored 0.06, so a
+shorter cap is a known risk, not a predicted score. The map skill stays
+out. Write-up: `docs/STRUCTURED_V16_1.md`. Notebook:
+`notebooks/structured-v16-1-dev13/evaluation.ipynb`. Archive SHA256
+`dff316a37290895d377574bbedfd43d0b962f9871e700974b2c1b663be7f6c38`.
+
 ## Unevaluated structured-v16
 
 `agents/structured-v16` (`structured_v16`) is a copy of

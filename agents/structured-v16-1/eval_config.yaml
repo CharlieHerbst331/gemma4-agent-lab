@@ -1,0 +1,16 @@
+evaluation:
+  # 240 seconds is the task cap. structured-v16 smoke7 mean wall was 302.7 s
+  # (n=7) and 6 of 7 tasks ran past 300 s. Worst wall 334.8 s with this
+  # host's vLLM start L=1170 s is 1170 + 129 * 334.8 = 44359, over the
+  # 12 hour host limit of 43200. The same worst case with L=417 is 43606,
+  # also over 43200. A 240 s agent cap plus about 34 s pre-session and 5 s
+  # post is about 279 s: 1170 + 129 * 279 = 37161, and 417 + 129 * 279 =
+  # 36408. Both pass 43200. The internal block is
+  # 120 * (mean + 70) <= 39600, so the mean must stay at most 260 s.
+  # 120 * ((240 + 8) + 70) = 38160, which passes. v12 used a 250 s cap and
+  # scored 0.06. This cap is shorter than that. 220 calls and 320 turns
+  # stay. The 120 and 200 second lines are prompt hand-offs, not a second cap.
+  timeout_seconds: 240
+  max_tool_calls: 220
+  max_time_minutes: 4.0
+  max_turns: 320
