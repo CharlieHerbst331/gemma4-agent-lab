@@ -18,7 +18,7 @@ from gemma_lab.hygiene import lint_candidate
 V131 = Path("agents/structured-v13-1").resolve()
 V16 = Path("agents/structured-v16").resolve()
 NOTEBOOK = Path("notebooks/structured-v16-smoke7.ipynb").resolve()
-ARCHIVE = "5670e1f83ebdec52abf7fec85895619cba7fe46922e298d129461039928f233d"
+ARCHIVE = "6b8920c396f4e84fe14e7b7a907c1771436a55b840fae7464b3ce6f7cac13491"
 V131_ARCHIVE = "74a6e27904e88d4d73d3ca1846f5ad228eb9e27ec431c347517b60f79b1e52fe"
 SMOKE = (
     "rich_3934",
@@ -80,8 +80,8 @@ def test_repair_1_hands_off_at_150_and_is_already_one_pass():
     assert "shows 150 or more, stop." in text
     assert "even if git diff is empty." in text
     assert "Repair round 2 owns the edit." in text
-    assert "not this round's job" in text
-    assert "time_seconds_remaining is under 120 and git diff is empty, the next call" not in text
+    assert "not this round's job" not in text
+    assert "Do not run the heredoc in this round once 150 seconds have passed." not in text
     root = load_yaml(V16 / "agent.yaml", V16)
     assert root["name"] == "structured_v16"
     assert root["agent_class"] == "SequentialAgent"
@@ -92,10 +92,25 @@ def test_repair_1_hands_off_at_150_and_is_already_one_pass():
     assert list(V16.rglob("*loop*")) == []
 
 
+def test_repair_1_missed_handoff_still_heredocs_an_empty_diff():
+    text = _prompt("repair_1")
+    sentence = (
+        "If you are still in this round, git diff is empty, and "
+        "time_seconds_remaining is under 120 and at least 45 seconds remain, "
+        "write the HYPOTHESIS line and the next call is the heredoc."
+    )
+    assert sentence in text
+    assert "Do not run the missed-hand-off heredoc." in text
+    assert text.index("shows 150 or more, stop.") < text.index(sentence)
+    assert text.index(sentence) < text.index("Do not run the missed-hand-off heredoc.")
+
+
 def test_repair_2_edits_the_hypothesis_first():
     text = _prompt("repair_2")
     assert "your FIRST tool call is the heredoc edit" in text
     assert "latest HYPOTHESIS line" in text
+    assert "If no HYPOTHESIS line exists" in text
+    assert "first file and function named in the triage brief or the round 1 report" in text
     assert "Do not read first." in text
     assert "40 numbered lines" in text
     assert "Do not wait until time_seconds_remaining is under 120." in text
@@ -145,6 +160,8 @@ def test_notebook_lists_the_smoke_and_compiles_without_a_registry():
     assert "HYPOTHESIS" in source
     assert "calls_to_first_edit" in source
     assert "no_edit" in source
+    assert "repair_1_returned_before_cap" in source
+    assert "handoff_elapsed" in source
     for task_id in SMOKE:
         assert task_id in source
     notebook = json.loads(source)
@@ -156,6 +173,44 @@ def test_notebook_lists_the_smoke_and_compiles_without_a_registry():
     assert listed is not None
     for task_id in SMOKE:
         assert task_id in listed
+
+
+def test_notebook_handoff_uses_later_roles_and_elapsed():
+    notebook = json.loads(NOTEBOOK.read_text())
+    source = ""
+    for cell in notebook["cells"]:
+        text = "".join(cell["source"])
+        if "def repair_1_handoff" in text:
+            source = text
+    assert "repair_1_returned_before_cap" in source
+    assert "handoff_elapsed" in source
+    namespace = {}
+    exec(source, namespace)
+    stuck = namespace["repair_1_handoff"](
+        {"events": [{"author": "repair_1", "extra": {"elapsed_s": 302}}]},
+        302,
+    )
+    assert stuck == {"returned_before_cap": False, "handoff_elapsed": None}
+    early = namespace["repair_1_handoff"](
+        {
+            "events": [
+                {"author": "repair_1", "extra": {"elapsed_s": 148}, "text": "round: 1"},
+                {"author": "verify_1", "extra": {"elapsed_s": 160}},
+            ]
+        },
+        302,
+    )
+    assert early == {"returned_before_cap": True, "handoff_elapsed": 148.0}
+    late = namespace["repair_1_handoff"](
+        {
+            "steps": [
+                {"extra": {"author": "repair_1", "elapsed_s": 310}},
+                {"extra": {"author": "verify_1", "elapsed_s": 315}},
+            ]
+        },
+        315,
+    )
+    assert late == {"returned_before_cap": False, "handoff_elapsed": 310.0}
 
 
 def test_hygiene_and_validation():

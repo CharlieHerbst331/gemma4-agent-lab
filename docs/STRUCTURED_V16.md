@@ -41,10 +41,11 @@ child to completion, and `max_iterations` does not interrupt a child that
 keeps calling tools. The hand-off is the text report. After the heredoc,
 the prompt says the next response is that report.
 
-The map skill was not ported. Testing's smallest change adds no tools.
-v14, which did add the map, resolved 3 of 13 on the same dev cohort where
-v13-1 resolved 4 of 13, and the three never-edit tasks still made no edit.
-Triage stays the v13-1 tool-free brief.
+The map skill was not ported. That is the smallest change: Testing's plan
+adds no tools, and triage stays the v13-1 tool-free brief. v14 at 3 of 13
+and v13-1 at 4 of 13 is one task on n=13. That is noise, the same way
+structured-v8 is 0.10 and 0.13 on one archive. It is not evidence for
+dropping the map.
 
 Caps stay 300 seconds, 220 calls, and 320 turns. The heredoc still asserts
 `s.count(old) == 1` and parses before it writes. `get_status` never counts
@@ -53,18 +54,24 @@ as a repeat. The empty-diff net stays on verify_3.
 ## Clock reconciliation
 
 On a 300 second cap, `time_seconds_remaining` under 120 is about 180
-seconds elapsed. That was repair_1's empty-diff heredoc, and it sat after
-the 150 second hand-off. It is removed from repair_1. Repair round 2 owns
-that edit and does not wait for the under-120 line.
+seconds elapsed. The 150 second hand-off is still the stop when repair_1
+notices the clock. If it is still running, the diff is empty, and between
+45 and 120 seconds remain, it writes the HYPOTHESIS line and the next call
+is the heredoc. That is the missed-hand-off net. repair_1 never returning
+is the common case in the deep dive, so later roles' nets do not cover it.
+Repair round 2 still edits an empty diff first and does not wait for the
+under-120 line. If no HYPOTHESIS line exists, that edit uses the first file
+and function named in the triage brief or the round 1 report.
 
 | Clock | Who | What |
 | --- | --- | --- |
 | 4 file reads, elapsed under 150 | repair_1 | `HYPOTHESIS` with no tool call, then the heredoc, then the text report |
 | about 90 seconds, or about 38 calls, still under 150, no edit yet | repair_1 | same hypothesis and heredoc, even with fewer than 4 reads |
-| elapsed >= 150 | repair_1 | text report, including `HYPOTHESIS`, even if the diff is empty. No heredoc. Replaces the 180 second stop |
+| elapsed >= 150, and remaining still above 120 | repair_1 | text report, including `HYPOTHESIS`, even if the diff is empty. No heredoc. Replaces the 180 second stop |
+| still in repair_1, diff empty, remaining under 120 and at least 45 | repair_1 | write `HYPOTHESIS`, then the heredoc. The missed-hand-off net. About 180 to 255 seconds elapsed |
 | about 240, and a source edit exists, and repair_1 is still running | repair_1 | text report. Does not extend the round |
-| remaining under 45 while repair_1 is still running | repair_1 | text only. Only if the 150 second hand-off was missed |
-| repair_2, diff empty, remaining >= 45 | repair_2 | first counted call is the heredoc on the HYPOTHESIS target. `get_status` does not count. One 40-line window only if the assert fails, then one retry |
+| remaining under 45 while repair_1 is still running | repair_1 | text only. The missed-hand-off heredoc does not run |
+| repair_2, diff empty, remaining >= 45 | repair_2 | first counted call is the heredoc on the HYPOTHESIS target, or the first file and function in triage or the round 1 report if that line is missing. `get_status` does not count. One 40-line window only if the assert fails, then one retry |
 | repair_2, diff non-empty, or elapsed about 240 with a source edit | repair_2 | text only. Do not revert. 240 does not delay the empty-diff edit |
 | repair_2, remaining under 45 | repair_2 | text only. verify_3 owns the empty diff |
 | verify_3, elapsed >= 180, diff non-empty, remaining above 90 | verify_3 | the check, then submit. Unchanged |
@@ -82,15 +89,26 @@ remeasured here: median 3.9 seconds, mean 6.6 seconds, p90 13.8 seconds.
 Text-only gaps are median about 5 seconds.
 
 There is no leftover loop. After repair_1 returns, five roles remain:
-verify_1, repair_2, verify_2, repair_3, verify_3. If each is one short
-turn, that floor is `5 * 3.9 = 19.5` seconds at the median, `5 * 5 = 25`
-seconds at the text-only median, `5 * 6.6 = 33` seconds at the mean, and
-`5 * 13.8 = 69` seconds at the p90. An empty diff adds repair_2's heredoc
-and at most one retry, about two more turns: `7 * 3.9 = 27.3`,
-`7 * 6.6 = 46.2`, `7 * 13.8 = 96.6` seconds. A repair_1 hand-off at 150
-seconds of wall time would put verify_3 near 177 to 247 seconds on that
-arithmetic. A role that keeps calling tools is still not interrupted, so
-the 250 second submit is the backstop, not a guarantee.
+verify_1, repair_2, verify_2, repair_3, verify_3. Each of those roles
+starts with `get_status`, then still has to answer, so the floor is two
+turns per role, 10 turns, not one. An empty diff adds repair_2's heredoc
+and at most one retry, about two more turns, 12 in all.
+
+- Median: `10 * 3.9 = 39` seconds, `12 * 3.9 = 46.8` seconds.
+- Text-only median: `10 * 5 = 50` seconds, `12 * 5 = 60` seconds.
+- Mean: `10 * 6.6 = 66` seconds, `12 * 6.6 = 79.2` seconds.
+- p90: `10 * 13.8 = 138` seconds, `12 * 13.8 = 165.6` seconds.
+
+If repair_1 hands off at 150 seconds, verify_3 starts near 189 to 197
+seconds at the median and 216 to 229 seconds at the mean. The check is
+another 1 to 3 turns, about 10 to 20 seconds, so a submit around 215 to
+260 seconds is inside the 300 second cap at the median and the mean. At
+the p90 the same floor is 138 to 166 seconds, so verify_3 starts near 288
+to 316 seconds and is often already past the cap. A role that keeps
+calling tools is still not interrupted. The 250 second submit is the
+backstop when verify_3 does run, not a guarantee that it runs. If repair_1
+never returns, verify_3 is not reached. That is the v8 smoke5 pattern and
+the deep dive's 9 runs.
 
 The internal 120-task block is `120 * (mean + 70) <= 39600`, so the mean
 must be at most 260 seconds. `120 * ((300 + 8) + 70) = 45360`, which
@@ -109,12 +127,13 @@ rich_3938, rich_3472, rich_3944, fastapi_11194, and rich_3454. Those ids
 are not under `agents/`. `compile_plain` calls `compile_submission` with
 no callback registry. The report cell reads `task_results.jsonl` and trace
 JSON and prints resolved count, per-task wall time, no-edit runs, calls to
-the first edit, and whether `HYPOTHESIS:` appeared. It does not delete
-traces. It was not run.
+the first edit, whether `HYPOTHESIS:` appeared, whether repair_1 returned
+before the 300 second cap, and the elapsed time of that hand-off. It does
+not delete traces. It was not run.
 
 ## Archive
 
-SHA256 `5670e1f83ebdec52abf7fec85895619cba7fe46922e298d129461039928f233d`.
+SHA256 `6b8920c396f4e84fe14e7b7a907c1771436a55b840fae7464b3ce6f7cac13491`.
 20 files. Portable validation passed. structured-v13-1's archive is
 unchanged at
 `74a6e27904e88d4d73d3ca1846f5ad228eb9e27ec431c347517b60f79b1e52fe`.

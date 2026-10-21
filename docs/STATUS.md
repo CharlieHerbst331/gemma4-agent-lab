@@ -19,18 +19,24 @@ tasks that previously spent the whole cap in repair_1. repair_2's first
 counted call edits that target when the diff is still empty. verify_3
 submits at 250 seconds and skips the check. repair_1 is already one
 `LlmAgent` pass. There is no loop to set `max_iterations` on. The map
-skill was left out: v14 added it and resolved 3 of 13 where v13-1
-resolved 4 of 13, and the three never-edit tasks still made no edit. The
-cap stays 300 seconds, 220 calls, and 320 turns. The under-120 empty-diff
-heredoc is no longer repair_1's job, because on a 300 second cap that is
-about 180 seconds and it contradicted the 150 second hand-off. It remains
-the opening edit in repair_2 and the empty-diff net in verify_3. The
-internal block still needs a mean of at most 260 seconds
+skill was left out because the smallest change adds no tools. v14 at 3 of
+13 and v13-1 at 4 of 13 is one task on n=13. That is noise, the same way
+structured-v8 is 0.10 and 0.13 on one archive, and it is not evidence for
+dropping the map. The cap stays 300 seconds, 220 calls, and 320 turns.
+If repair_1 is still running with an empty diff and between 45 and 120
+seconds remain, it writes the HYPOTHESIS line and the next call is the
+heredoc. The 150 second hand-off is still the intended stop. The floor
+after that hand-off is about 10 to 12 turns, because each later role
+calls `get_status` and then answers: 39 to 47 seconds at the 3.9 second
+median, 66 to 79 seconds at the 6.6 second mean, and 138 to 166 seconds
+at the 13.8 second p90. At the p90, verify_3 starts near 288 to 316
+seconds and often misses the 300 second cap. The internal block still
+needs a mean of at most 260 seconds
 (`120 * (mean + 70) <= 39600`). v13-1's dev-13 mean of 279.6 seconds fails
 it (`120 * (279.6 + 70) = 41952`). That comparison was not run. Write-up:
 `docs/STRUCTURED_V16.md`. Notebook:
 `notebooks/structured-v16-smoke7.ipynb`. Archive SHA256
-`5670e1f83ebdec52abf7fec85895619cba7fe46922e298d129461039928f233d`.
+`6b8920c396f4e84fe14e7b7a907c1771436a55b840fae7464b3ce6f7cac13491`.
 
 ## Unevaluated structured-v15
 

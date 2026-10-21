@@ -20,17 +20,19 @@ Late deadline. 150 seconds is the hand-off, including when git diff is empty. Th
 The task cap is 300 seconds. This round hands off at 150 seconds. That replaces ending at about 60 percent of the budget, which was 180 seconds. Start with get_status. Fields that matter: tool_calls_used, agent_elapsed_seconds, time_seconds_remaining. Call get_status again before you decide to keep reading. Call get_status before each edit. get_status does not count as a tool call.
 
 Hand-off. Begin every run_command with the [elapsed] prefix: test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))";
-When the [elapsed] line or agent_elapsed_seconds shows 150 or more, stop. Reply with the text report, including the HYPOTHESIS line, even if git diff is empty. Repair round 2 owns the edit. Do not run the heredoc in this round once 150 seconds have passed. The remaining-under-120 empty-diff heredoc is not this round's job. On a 300 second cap that line used to fire after about 180 seconds. Repair round 2 makes that edit.
+When the [elapsed] line or agent_elapsed_seconds shows 150 or more, stop. Reply with the text report, including the HYPOTHESIS line, even if git diff is empty. Repair round 2 owns the edit.
+
+Missed hand-off. If you are still in this round, git diff is empty, and time_seconds_remaining is under 120 and at least 45 seconds remain, write the HYPOTHESIS line and the next call is the heredoc. This applies before the round: 1 report exists. On a 300 second cap, remaining under 120 is about 180 seconds elapsed, which is after the 150 second hand-off. The hand-off is still the stop when you notice it. This net is for the run that did not stop. Do not read more files first.
 
 If the history already contains a round: 1 report, this role is running again. When git diff has a source edit, or agent_elapsed_seconds is 150 or more, the next response is text only. Do not edit. Never revert a non-empty source diff. Harness-staged conftest.py and pytest.ini are not a source edit.
 
-If time_seconds_remaining is under 45, the next response is text only, even when git diff is empty. That applies only if this round is still running near the cap because the 150 second hand-off was missed. The last verify owns that edit and the submit.
+If time_seconds_remaining is under 45, the next response is text only, even when git diff is empty. Do not run the missed-hand-off heredoc. That applies only if this round is still running near the cap because the 150 second hand-off was missed. The last verify owns that edit and the submit.
 
 Open the triage files first. Call read_file with filepath only. Do not pass start_line or end_line. Use grep -n, then sed -n 'A,Bp' path | head -c 4000. If a read returns the same first lines twice, use sed. If the same tool call fails twice, change the call. Never run the same command more than twice unless you changed the code since. Graph tools are optional once, then stop if the result is empty. Bound shell output with head -n 40 and head -c 4000.
 
 Hypothesis rule. After at most 4 file reads, write one line with no tool call:
 HYPOTHESIS: <path>:<function> - <one-sentence change>
-Your very next tool call is the heredoc edit on that function. An imperfect edit is better than no edit: a later round can refine it, an empty diff scores zero. After that heredoc, the next response is the text report. Do not keep reading. If agent_elapsed_seconds is already 150 or more, skip the heredoc and hand off with the HYPOTHESIS line.
+Your very next tool call is the heredoc edit on that function. An imperfect edit is better than no edit: a later round can refine it, an empty diff scores zero. After that heredoc, the next response is the text report. Do not keep reading. If agent_elapsed_seconds is already 150 or more and time_seconds_remaining is still above 120, hand off with the HYPOTHESIS line and do not heredoc. If you are still in this round with an empty diff and remaining is under 120 and at least 45, the missed-hand-off net is the heredoc.
 
 The 90 second and 38 call lines do not delay that hypothesis. Do not wait for them once 4 files have been read. If agent_elapsed_seconds is still under 150 and reaches about 90, or counted calls reach about 38, and you have not edited, write the HYPOTHESIS line and make the heredoc on the next call, even with fewer than 4 reads.
 
