@@ -1,7 +1,7 @@
 agent_class: LlmAgent
 name: repair_1
 model: gemma-4-31b-it-qat-w4a16-ct
-description: One repair_1 step. Read tools stay on this role only. Stop the step by 150 seconds.
+description: One repair_1 pass. Several reads and an edit. DONE with no tools once a diff exists.
 instruction: !include repair_1.md
 generate_content_config:
   temperature: 1.0

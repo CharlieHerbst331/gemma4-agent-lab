@@ -19,10 +19,17 @@ from gemma_lab.hygiene import lint_candidate
 V14 = Path("agents/structured-v14").resolve()
 V15 = Path("agents/structured-v15").resolve()
 NOTEBOOK = Path("notebooks/structured-v15-dev13.ipynb").resolve()
-ARCHIVE = "9b9e3bb1f3b500811358d00c608def24573ed12f8090ebb59a0900168636e072"
+ARCHIVE = "194cf0d42e7088d760da3a36d7da27ac82b1e66551843bb1579c108e8c03ce45"
 V14_ARCHIVE = "8eeae0c1859766bc08afafe2b6139e4ea4ebd82ab52b42c04bd01836e4e361bf"
-STEP_SECONDS = 10
-REPAIR_ITERS = {"repair_1_loop": 15, "repair_2_loop": 6, "repair_3_loop": 3}
+REPAIR_ITERS = {"repair_1_loop": 8, "repair_2_loop": 3, "repair_3_loop": 2}
+# v8 smoke5 model-turn gaps: median 3.9 s, mean 6.6 s, p90 13.8 s.
+# Text-only gaps median about 5 s. Idle floor turns before verify_3:
+# triage map+brief (2) + 8 + verify_1 (1) + 3 + verify_2 (1) + 2.
+TURN_MEDIAN_S = 3.9
+TURN_MEAN_S = 6.6
+TURN_P90_S = 13.8
+TEXT_TURN_S = 5.0
+IDLE_TURNS_BEFORE_VERIFY_3 = 2 + 8 + 1 + 3 + 1 + 2
 READ_TOOLS = {"read_file", "search_similar_code", "get_code_neighbors", "get_code_subgraph"}
 LATE_ROLES = ("repair_2", "repair_3", "verify_1", "verify_2", "verify_3")
 DEV13 = (
@@ -119,14 +126,21 @@ def _repo(path):
     return path
 
 
-def test_caps_stay_at_v14_and_loops_target_150_and_240():
+def test_caps_stay_at_v14_and_idle_floor_uses_measured_turns():
     loaded = load_yaml(V15 / "eval_config.yaml", V15)
     assert loaded["evaluation"]["timeout_seconds"] == 300
     assert loaded["evaluation"]["max_tool_calls"] == 220
     assert loaded["evaluation"]["max_time_minutes"] == 5
     assert loaded["evaluation"]["max_turns"] == 320
-    assert sum(REPAIR_ITERS.values()) * STEP_SECONDS == 240
-    assert REPAIR_ITERS["repair_1_loop"] * STEP_SECONDS == 150
+    assert IDLE_TURNS_BEFORE_VERIFY_3 == 17
+    assert sum(REPAIR_ITERS.values()) == 13
+    assert round(IDLE_TURNS_BEFORE_VERIFY_3 * TURN_MEDIAN_S, 1) == 66.3
+    assert round(IDLE_TURNS_BEFORE_VERIFY_3 * TURN_MEAN_S, 1) == 112.2
+    assert IDLE_TURNS_BEFORE_VERIFY_3 * TEXT_TURN_S == 85
+    assert round(IDLE_TURNS_BEFORE_VERIFY_3 * TURN_P90_S, 1) == 234.6
+    # One pass can hold the 21-call median and the 16-call fastapi_11194 edit.
+    assert 21 * TURN_MEAN_S < 300
+    assert 16 * TURN_P90_S < 300
     assert (V15 / "callbacks.py").exists() is False
 
 
@@ -184,11 +198,21 @@ def test_prompts_use_get_status_and_require_the_gate():
         assert "agent_elapsed_seconds" in text
         assert prefix in text
         assert "A write under /tmp is not a source edit." in text
-    assert "15 times" in _prompt("repair_1")
-    assert "150 or more" in _prompt("repair_1")
-    assert "6 times" in _prompt("repair_2")
-    assert "3 times" in _prompt("repair_3")
+    repair_1 = _prompt("repair_1")
+    assert "8 times" in repair_1
+    assert "several tool calls" in repair_1
+    assert "at most one" not in repair_1
+    assert "150 or more" not in repair_1
+    assert "DONE" in repair_1
+    assert "does not count as a tool call" in repair_1
+    assert "3 times" in _prompt("repair_2")
+    assert "2 times" in _prompt("repair_3")
     assert "240 second" in _prompt("repair_3")
+    for name in ("repair_2", "repair_3"):
+        text = _prompt(name)
+        assert "A plus 39" in text
+        assert "40 lines" in text
+        assert "at most one" not in text
     for name in LATE_ROLES:
         text = _prompt(name)
         assert "read_file" in text
@@ -199,6 +223,9 @@ def test_prompts_use_get_status_and_require_the_gate():
     assert "skills/check" not in (V15 / "sub_agents" / "verify_3.yaml").read_text()
     gate = (V15 / "skills/gate/scripts/run.py").read_text()
     assert "git rev-parse" in gate
+    assert "pytest" in gate
+    assert '"-x"' in gate
+    assert '"-q"' in gate
     assert "git show" not in gate
     assert "end_invocation" not in gate
     body = gate.split("def repo_root", 1)[1].split("\ndef ", 1)[0]
@@ -309,13 +336,30 @@ def test_src_layout_import_passes_without_a_wipe(tmp_path, monkeypatch):
     assert text.endswith("PASS")
 
 
+def test_pytest_missing_is_a_labeled_noop(tmp_path, monkeypatch):
+    repo = _repo(tmp_path / "repo")
+    target = repo / "pkg" / "mod.py"
+    target.write_text("VALUE = 5\n")
+    tests = repo / "tests"
+    tests.mkdir()
+    (tests / "test_mod.py").write_text("def test_mod():\n    assert False\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYTHONPATH", str(repo))
+    module = _gate(tmp_path)
+    monkeypatch.setattr(module, "_pytest_available", lambda: False)
+    text = module.handle()
+    assert "test NOOP pytest missing tests/test_mod.py" in text
+    assert target.read_text() == "VALUE = 5\n"
+    assert text.endswith("PASS")
+
+
 def test_touched_module_test_failure_keeps_the_edit(tmp_path, monkeypatch):
     repo = _repo(tmp_path / "repo")
     target = repo / "pkg" / "mod.py"
     target.write_text("VALUE = 4\n")
     tests = repo / "tests"
     tests.mkdir()
-    (tests / "test_mod.py").write_text("raise SystemExit(1)\n")
+    (tests / "test_mod.py").write_text("def test_mod():\n    assert False\n")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("PYTHONPATH", str(repo))
     text = _gate(tmp_path).handle()
@@ -516,9 +560,9 @@ def test_plain_archive_compiles_with_no_registry(tmp_path):
         assert payload["version"] == version
         rows = {row["name"]: row for row in payload["rows"]}
         assert rows["structured_v15"]["kind"] == "SequentialAgent"
-        assert rows["repair_1_loop"]["max_iterations"] == 15
-        assert rows["repair_2_loop"]["max_iterations"] == 6
-        assert rows["repair_3_loop"]["max_iterations"] == 3
+        assert rows["repair_1_loop"]["max_iterations"] == 8
+        assert rows["repair_2_loop"]["max_iterations"] == 3
+        assert rows["repair_3_loop"]["max_iterations"] == 2
         assert rows["triage"]["tools"] == []
         assert rows["triage"]["skills"] == ["map"]
         assert rows["triage"]["max_output_tokens"] == 1024

@@ -231,13 +231,31 @@ def _test_file(root, rel):
     return None
 
 
+def _pytest_available():
+    proc = _run([sys.executable, "-c", "import pytest"], Path("."), 10)
+    return proc.returncode == 0
+
+
 def _run_test(root, test_path):
+    """Run pytest -x -q. None means pytest is missing and the test is a no-op."""
+    if not _pytest_available():
+        return None
     env = os.environ.copy()
     env["PYTHONPATH"] = _pythonpath(root)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    cache = Path(tempfile.gettempdir()) / "v15-pytest-cache"
     try:
         proc = subprocess.run(
-            [sys.executable, str(test_path)],
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-x",
+                "-q",
+                str(test_path),
+                "-o",
+                f"cache_dir={cache}",
+            ],
             cwd=str(root),
             capture_output=True,
             text=True,
@@ -296,7 +314,9 @@ def handle():
         tested = True
         code = _run_test(root, test_path)
         shown = test_path.relative_to(root).as_posix()
-        if code == 0:
+        if code is None:
+            lines.append(f"test NOOP pytest missing {shown}")
+        elif code == 0:
             lines.append(f"test PASS {shown}")
         else:
             failed = True

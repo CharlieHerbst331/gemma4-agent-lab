@@ -1,6 +1,6 @@
 agent_class: SequentialAgent
 name: structured_v15
-description: Triage maps. Repair loops are 15, 6, and 3 steps. Late roles have no read tool. Only the last verify submits, after the gate skill.
+description: Triage maps. Repair loops are 8, 3, and 2 passes. Late roles have no read tool. Only the last verify submits, after the gate skill.
 sub_agents:
 - config_path: sub_agents/triage.yaml
 - config_path: sub_agents/repair_1_loop.yaml

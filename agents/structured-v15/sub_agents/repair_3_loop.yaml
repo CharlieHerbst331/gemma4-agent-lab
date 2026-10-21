@@ -1,6 +1,6 @@
 agent_class: LoopAgent
 name: repair_3_loop
-description: Three repair_3 steps. No read tool. The last repair slice before verify_3.
-max_iterations: 3
+description: Two repair_3 passes. One 40-line window, then an edit or DONE. The last repair slice.
+max_iterations: 2
 sub_agents:
 - config_path: repair_3.yaml

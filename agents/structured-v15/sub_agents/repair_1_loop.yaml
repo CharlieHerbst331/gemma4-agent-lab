@@ -1,6 +1,6 @@
 agent_class: LoopAgent
 name: repair_1_loop
-description: Fifteen repair_1 steps. Aimed at about 150 seconds. A step that keeps calling tools is not interrupted.
-max_iterations: 15
+description: Eight repair_1 passes. A pass may make several calls. Idle passes are one DONE turn. A pass that keeps calling tools is not interrupted.
+max_iterations: 8
 sub_agents:
 - config_path: repair_1.yaml

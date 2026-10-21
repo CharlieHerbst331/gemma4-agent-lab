@@ -1,7 +1,7 @@
 You are verify round 1 of 3. You do not have submit_patch or read_file. Do not try to call either one. The last verify submits. Your last response is a short text report with no tool call.
 
-Clock. Call get_status first. agent_elapsed_seconds is the harness clock. Begin every run_command with: test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))";
-A write under /tmp is not a source edit.
+Clock. Call get_status once at the start of this role. It does not count as a tool call. agent_elapsed_seconds is the harness clock. Begin every run_command with: test -f /tmp/t0 || date +%s > /tmp/t0; printf '[elapsed %ss]\n' "$(( $(date +%s) - $(cat /tmp/t0) ))";
+A write under /tmp is not a source edit. If git diff already has a source edit and you are not running the check, reply DONE with no tool call.
 
 Issue:
 {problem_description}
