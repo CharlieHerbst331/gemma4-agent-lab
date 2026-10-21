@@ -1,17 +1,17 @@
 {
   "bundle": {
-    "archive": "/tmp/tmpbyeb0cnb/submission.zip",
-    "candidate_source_commit": "uncommitted",
+    "archive": "/tmp/tmpk0mfrjqb/submission.zip",
+    "candidate_source_commit": "a722a0f12ec72ade4f4734823c69c37600d56484",
     "candidate_source_dirty": false,
-    "created_at": "2026-10-21T04:11:19.988262+00:00",
+    "created_at": "2026-10-21T04:33:39.549296+00:00",
     "files": {
       "agent.yaml": "edd7e5993116f089007e8486bc3037094cfd3182ee38695b13fe06dba6cfef54",
-      "eval_config.yaml": "58681d9baef6ba63543a6f94f7c4e25e0fd86b91a35f6e3effae998a8e99eb05",
+      "eval_config.yaml": "dbb9bd9b1148b4b55c5a2d4d6ba7b458cfd6e9ab60f51aa81df7963d9cce6cd5",
       "skills/check/SKILL.md": "53be3c89f61d5fb21bb1b6026f62e0e07af9ef41eff7a6ea23a10dc4e036e933",
       "skills/check/scripts/run.py": "d8fcfccdc7b7e3be73f10aeeb2811faef1fc5d7015c1bb4b28223dd16b9eae9c",
       "sub_agents/repair_1.md": "a01c359f527b28be813ace3b8a42215d12a62c186f4e50716bef01ec89ece434",
       "sub_agents/repair_1.yaml": "6b102c4be97168b754a3da3fd2caed004126a63a69ba09caffd17f9bda357b65",
-      "sub_agents/repair_2.md": "18797d7fbca7de01e0c503776c4c5f33da1af586cfa4da3e7b4888e80ae37936",
+      "sub_agents/repair_2.md": "99acd7154d36a0fba457f4f9faf9d252eee75deb69422064284acde231b7462e",
       "sub_agents/repair_2.yaml": "af481480c6e7c660e2f5e3af58e0582b25ee789c5ddc1fc8150c91f385f93dc3",
       "sub_agents/repair_3.md": "0d64c270bcce6ceb73a7aeed143a43ccbd22002188c35f8dd44b2146c481bb0c",
       "sub_agents/repair_3.yaml": "3a0dd19fa4ee9fbc1dcd16ba8de55f0068029e5a83c290f6ed28b1a64136bb96",
@@ -19,21 +19,21 @@
       "sub_agents/thinking.yaml": "a66ae06d8bb4e93673e940a8c404fedaa1e9a282b8349f831df68304e12a08a6",
       "sub_agents/triage.md": "6468d531d87712f8afcb8a9eb20873f39d4874a39393a28ff4e6f2cf30dc2b80",
       "sub_agents/triage.yaml": "ee8657dc2e664d639ecabf35580485ba0a0bb6325f723eb2bec4f2a2bc73ea6e",
-      "sub_agents/verify_1.md": "8baf33346381db2c7325c386ad3b7c3a2b9055f4b16eb7d166774b52bc83fdc0",
+      "sub_agents/verify_1.md": "1c344ecaad3e21cfc12a12849b9b88c527a434bc2cc3c67820bae1ae638ee7ae",
       "sub_agents/verify_1.yaml": "473f80a31d44ae41ce93c70675968778822ca90c8cdeddf94e3fb5ba0db3ed4d",
       "sub_agents/verify_2.md": "eba3b62a821b90be90530fc4081d82947b22c9678927b9d6ea6a934840606020",
       "sub_agents/verify_2.yaml": "af497f5b94edd47e68657395f3650a0b384ede597e5a81043386fd3db0badce7",
       "sub_agents/verify_3.md": "139698e8350e4b0cba9b9d949185553ec948cc1f60ea4baff570ced769a10467",
       "sub_agents/verify_3.yaml": "11de71f05e91c10ea3e0510c7f0dd323cc4dc9e217d6158632a61cf633eb6372"
     },
-    "git_revision": "7d5fd87f7677190b688a84647d097c2f35d3a132-dirty",
-    "packing_commit": "7d5fd87f7677190b688a84647d097c2f35d3a132",
-    "sha256": "dff316a37290895d377574bbedfd43d0b962f9871e700974b2c1b663be7f6c38",
+    "git_revision": "a722a0f12ec72ade4f4734823c69c37600d56484",
+    "packing_commit": "a722a0f12ec72ade4f4734823c69c37600d56484",
+    "sha256": "2bcee926e39c71c7ca4c8b8443195c7a78fc563f3ab3b4fe0b051c61f2ad7159",
     "source": "/workspace/agents/structured-v16-1",
     "validation": "portable checks only; official GPU harness required",
-    "worktree_dirty": true
+    "worktree_dirty": false
   },
-  "generated_at": "2026-10-21T04:11:19.997471+00:00",
-  "git_revision": "7d5fd87f7677190b688a84647d097c2f35d3a132-dirty",
+  "generated_at": "2026-10-21T04:33:39.558296+00:00",
+  "git_revision": "a722a0f12ec72ade4f4734823c69c37600d56484",
   "starter_sha256": "549e7a9a60b3580aca8de94a01d345632954b9e7549b8860e72847ddd1afafab"
 }
