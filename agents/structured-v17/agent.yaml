@@ -1,0 +1,11 @@
+agent_class: SequentialAgent
+name: structured_v17
+description: Triage, then three shrinking repair and verify rounds. Repair round 1 writes a HYPOTHESIS and the next call is the heredoc, then the text report. A diff past about 240 seconds goes to submit. Only the last verify can submit.
+sub_agents:
+- config_path: sub_agents/triage.yaml
+- config_path: sub_agents/repair_1.yaml
+- config_path: sub_agents/verify_1.yaml
+- config_path: sub_agents/repair_2.yaml
+- config_path: sub_agents/verify_2.yaml
+- config_path: sub_agents/repair_3.yaml
+- config_path: sub_agents/verify_3.yaml
