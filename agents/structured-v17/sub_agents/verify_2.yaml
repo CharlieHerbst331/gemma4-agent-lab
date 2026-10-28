@@ -1,0 +1,19 @@
+agent_class: LlmAgent
+name: verify_2
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Run the flat check once more, then hand off. This round cannot submit.
+instruction: !include verify_2.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  max_output_tokens: 2048
+  thinking_config: !include thinking.yaml
+tools:
+- get_status
+- read_file
+- run_command
+include_contents: default
+output_key: verify_2_report
+skills:
+- skills/check

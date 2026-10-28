@@ -1,6 +1,26 @@
 # Project status
 
-Last updated: October 21, 2026.
+Last updated: October 28, 2026.
+
+## Unevaluated structured-v17
+
+`agents/structured-v17` (`structured_v17`) is a copy of
+`agents/structured-v13-1`, not of the v16 line. Existing agent
+directories were not modified. No score is claimed. No GPU run and no
+submission yet. The cap stays 300 seconds, 220 calls, and 320 turns.
+
+Coordinator scores: v15 at 4 minutes 0.06, stock v15 0.08, v13-1 0.12
+and 0.10, v8 0.10 and 0.13. Hard caps scored worse. v16.x was worse on
+dev-13. Clock rules were ignored because `get_status` is rarely called
+after the start. The bet is a count: repro optional, at most 2 calls, a
+passing repro is not the wrong place, at most 4 file reads, then
+`HYPOTHESIS` and the very next call is the guarded heredoc. repair_1 is
+already one `LlmAgent`, so the text report after that edit is the
+hand-off. There is no loop and no new clock. If repair_1 never returns,
+the diff stays empty. That is still possible. The map skill stays out.
+Write-up: `docs/STRUCTURED_V17.md`. Archive SHA256
+`27b47d34554d9b64f3786b430856dd950d678d5ea6dbd4a0ae6fb7dd687e79e6`.
+Pack: `uv run gemma-lab pack agents/structured-v17 --output /tmp/structured-v17.zip`.
 
 ## Unevaluated structured-v16.2
 
@@ -181,8 +201,9 @@ Archive SHA256
 ## Unevaluated structured-v13-1
 
 `agents/structured-v13-1` (`structured_v13_1`) is a copy of
-`agents/structured-v13`. Existing agent directories were not modified. No
-score is claimed. No Kaggle push and no GPU run for this candidate.
+`agents/structured-v13`. Existing agent directories were not modified. The
+coordinator later reported scores of 0.12 and 0.10. No Kaggle push was
+made from this checkout for that report.
 structured-v8 remains the scored best, at 0.10 and, on the same archive,
 0.13. structured-v12 scored 0.06. structured-v13 is submitted and its score
 is pending (Kaggle ref 57412943).
