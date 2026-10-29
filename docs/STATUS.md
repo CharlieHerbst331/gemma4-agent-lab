@@ -1,13 +1,40 @@
 # Project status
 
-Last updated: October 28, 2026.
+Last updated: October 29, 2026.
 
-## Unevaluated structured-v17
+## Unevaluated structured-v18
+
+`agents/structured-v18` (`structured_v18`) is a full localize/patch split.
+The tree started as a copy of `agents/structured-v13-1`. `skills/check` is
+the structured-v17 copy. Existing agent directories, archives, and evidence
+were not modified. No score is claimed. No GPU run and no submission. The
+cap stays 300 seconds, 220 calls, and 320 turns. There is no hard per-task
+cap and no new prompt clock. No Python callbacks.
+
+Hypothesis: v17 (hypothesis-then-edit) scored 0.12 public (Kaggle ref
+57718020), tying v13-1, below v8 at 0.13. The main recoverable loss is
+never-edit (about 50 of 118 tasks with a zero diff), caused by exploration
+tools in repair roles and soft empty-diff escapes. Removing read and graph
+tools from the patch phase and deleting those escapes should raise edit-rate
+and score. That comparison has not been run.
+
+localize_1 has read-only tools and no `run_command`. patch_1 and patch_2
+are `LoopAgent` passes with `max_iterations: 2` and only `get_status` plus
+`run_command`, plus the force-heredoc skill. patch_3 is one pass with the
+same tools. Verify handoffs use `{patch_N_report?}`. Portable validation
+passed. Plain-zip compile with no registry was checked on adk-submission
+0.2.12 and 0.2.13. The minimal A/B fallback was not used. Write-up:
+`docs/STRUCTURED_V18.md`. Archive SHA256
+`b6137580f3870e312491f68f97cfdd36cb88d89387dbd782d8007ba3056b42d5`.
+Pack: `uv run gemma-lab pack agents/structured-v18 --output /tmp/structured-v18.zip`.
+
+## structured-v17 public score 0.12
 
 `agents/structured-v17` (`structured_v17`) is a copy of
 `agents/structured-v13-1`, not of the v16 line. Existing agent
-directories were not modified. No score is claimed. No GPU run and no
-submission yet. The cap stays 300 seconds, 220 calls, and 320 turns.
+directories were not modified. Public score 0.12, Kaggle ref 57718020.
+That ties the reported v13-1 score of 0.12 and is below v8 at 0.13.
+The cap stays 300 seconds, 220 calls, and 320 turns.
 
 Coordinator scores: v15 at 4 minutes 0.06, stock v15 0.08, v13-1 0.12
 and 0.10, v8 0.10 and 0.13. Hard caps scored worse. v16.x was worse on
