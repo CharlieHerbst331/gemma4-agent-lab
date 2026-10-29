@@ -1,0 +1,6 @@
+agent_class: LoopAgent
+name: patch_2_loop
+description: Up to two patch_2 passes. Empty diff gets one retry. No read tools.
+max_iterations: 2
+sub_agents:
+- config_path: patch_2.yaml

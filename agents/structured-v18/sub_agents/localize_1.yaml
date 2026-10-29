@@ -1,0 +1,20 @@
+agent_class: LlmAgent
+name: localize_1
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Open at most four triage files. End with one HYPOTHESIS line. No edits. No run_command.
+instruction: !include localize_1.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  max_output_tokens: 1024
+  thinking_config: !include thinking.yaml
+tools:
+- get_status
+- read_file
+- search_similar_code
+- get_code_neighbors
+- get_code_subgraph
+# intentionally NO run_command — cannot heredoc in this role
+include_contents: default
+output_key: localize_1_report
