@@ -1,0 +1,19 @@
+agent_class: LlmAgent
+name: patch_1
+model: gemma-4-31b-it-qat-w4a16-ct
+description: First productive tool call is the heredoc. No read tools. Empty diff is failure.
+instruction: !include patch_1.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  max_output_tokens: 2048
+  thinking_config: !include repair_thinking.yaml
+tools:
+- get_status
+- run_command
+# no read_file, no graph tools, no submit_patch
+include_contents: default
+output_key: patch_1_report
+skills:
+- skills/force-heredoc

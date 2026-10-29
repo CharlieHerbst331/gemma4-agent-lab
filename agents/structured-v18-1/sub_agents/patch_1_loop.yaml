@@ -1,0 +1,6 @@
+agent_class: LoopAgent
+name: patch_1_loop
+description: Up to two patch_1 passes. An idle DONE with empty diff gets one retry.
+max_iterations: 2
+sub_agents:
+- config_path: patch_1.yaml
