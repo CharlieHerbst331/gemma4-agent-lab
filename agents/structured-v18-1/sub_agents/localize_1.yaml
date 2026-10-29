@@ -1,0 +1,22 @@
+agent_class: LlmAgent
+name: localize_1
+model: gemma-4-31b-it-qat-w4a16-ct
+description: At most 6 tool calls, then one HYPOTHESIS line. No edits. No run_command. No loop.
+instruction: !include localize_1.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  # Hard cap the harness enforces. 512 fits one read_file call or the two-line
+  # report. It cuts a long localize completion. The 6-call budget is prompt-only.
+  max_output_tokens: 512
+  thinking_config: !include thinking.yaml
+  # Hard stop once the model emits the report marker. Does not fire until then.
+  stop_sequences:
+  - END_LOCALIZE
+tools:
+- get_status
+- read_file
+# no graph tools and no run_command — this role cannot search the graph or heredoc
+include_contents: default
+output_key: localize_1_report

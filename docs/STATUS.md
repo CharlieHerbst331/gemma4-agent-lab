@@ -2,6 +2,27 @@
 
 Last updated: October 29, 2026.
 
+## Unevaluated structured-v18-1
+
+`agents/structured-v18-1` (`structured_v18_1`) is a copy of
+`agents/structured-v18`. Existing agent directories, including
+structured-v18, were not modified. No score is claimed. No GPU run and
+no submission. The cap stays 300 seconds, 220 calls, and 320 turns.
+
+v17 scored 0.12 public (Kaggle ref 57718020), v13-1 scored 0.12, and v8
+scored 0.13. Those three are within noise. This copy does not treat
+0.13 as a separate regime from 0.12.
+
+Two changes. localize_1 stays one sequential `LlmAgent`, not a loop.
+Hard levers the harness enforces: `max_output_tokens` 512,
+`stop_sequences` `END_LOCALIZE`, and tools limited to `get_status` and
+`read_file`. The cap of 6 tool calls before the location report is
+prompt-only. The schema has no per-role call cap. patch_1, patch_2, and
+patch_3 prompts include the line_fix heredoc and say not to call
+`load_skill`. The force-heredoc skill stays attached. No Python
+callbacks. Archive SHA256 `0fde003c39592d8c2a3439231e3d333d6f0f31e27761a6210620693fffcde475`.
+Pack: `uv run gemma-lab pack agents/structured-v18-1 --output /tmp/structured-v18-1.zip`.
+
 ## Unevaluated structured-v18
 
 `agents/structured-v18` (`structured_v18`) is a full localize/patch split.
