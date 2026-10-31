@@ -1,0 +1,6 @@
+agent_class: LoopAgent
+name: repair_loop
+description: Exactly one repair pass, then submit. There is no exit tool, so max_iterations stays 1.
+max_iterations: 1
+sub_agents:
+- config_path: repair.yaml
