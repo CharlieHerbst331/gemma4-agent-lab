@@ -1,0 +1,18 @@
+evaluation:
+  # 300 seconds stays. The v8 smoke5 mean was 293.3 s because 4 of 5 tasks
+  # hit this cap (302.5-307.6). The other task finished at 248.3 and pulls
+  # the mean down. The largest integer cap whose 8 s overrun still passes
+  # the internal 120-task block is 252 s:
+  # 120 * ((252 + 8) + 70) = 120 * 330 = 39600, so the block needs mean <= 260.
+  # That block is this lab's margin model, not a hosted limit. The host
+  # enforces 12 hours total only (research/runtime-cap.md). v12 used 250
+  # and scored 0.06. This candidate keeps the 300 s failsafe. A v13 upload
+  # whose mean is above 260 s needs the same uploader override already used
+  # for v8's hosted runs, because check_projected_runtime refuses that mean.
+  # 220 calls and 320 turns match v8. timeout_seconds matches the cap.
+  # structured-v19 does not shorten this cap. Same numbers as structured-v18-1.
+  # A 240 or 250 second cap scored 0.06. This candidate keeps 300.
+  timeout_seconds: 300
+  max_tool_calls: 220
+  max_time_minutes: 5
+  max_turns: 320

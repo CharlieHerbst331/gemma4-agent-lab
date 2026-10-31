@@ -1,13 +1,40 @@
 # Project status
 
-Last updated: October 29, 2026.
+Last updated: October 31, 2026.
 
-## Unevaluated structured-v18-1
+## Unevaluated structured-v19
+
+`agents/structured-v19` (`structured_v19`) is a verify-then-repair copy of
+`agents/structured-v18-1`. Other agent directories were not modified. No
+score is claimed. No submission. The cap stays 300 seconds, 220 calls,
+and 320 turns. A 240 or 250 second cap scored 0.06, so this candidate
+does not shorten the wall clock.
+
+Five sequential roles: triage, localize_1, patch_loop (`max_iterations`
+1), verify, repair_loop (`max_iterations` 1). Repair submits. There is
+no exit tool, so a loop runs every iteration; 1 means one pass, not one
+tool call. The only elapsed gate is `agent_elapsed_seconds` of 200 on
+repair, read from `get_status`, and it is prompt-only. Hard levers are
+tool lists, those loop caps, `max_output_tokens`, and stop sequences.
+Verify greps for one test file and runs `timeout 40 pytest -x -q` on it.
+Repair saves `/tmp/best.diff` and restores it when the rerun is not
+better. Archive SHA256 `4481c2ce3521cbec711978a5c11ebd1fb4b12171034399afae97b376a9e073ad`.
+Pack: `uv run gemma-lab pack agents/structured-v19 --output /tmp/structured-v19.zip`.
+
+## structured-v18-1 public score 0.12
 
 `agents/structured-v18-1` (`structured_v18_1`) is a copy of
 `agents/structured-v18`. Existing agent directories, including
-structured-v18, were not modified. No score is claimed. No GPU run and
-no submission. The cap stays 300 seconds, 220 calls, and 320 turns.
+structured-v18, were not modified. Public score 0.12, Kaggle ref
+57780163. The cap stays 300 seconds, 220 calls, and 320 turns.
+
+A private run on the 6 dev tasks where structured-v13-1 never edited
+produced a non-empty patch on 4 of 6, and resolved 0 of 6. Five of the
+six hit the 300 second cap. Tool calls were 26 to 45. The empty diffs
+were rich_3105 and rich_3938; those two are judged unreachable. The
+first patch phase lasted about 133 to 251 seconds. Verify was reached
+on 2 of 6 tasks. None of the 4 non-empty patches was tested. That run
+is not a leaderboard score.
 
 v17 scored 0.12 public (Kaggle ref 57718020), v13-1 scored 0.12, and v8
 scored 0.13. Those three are within noise. This copy does not treat

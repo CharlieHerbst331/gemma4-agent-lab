@@ -1,0 +1,20 @@
+agent_class: LlmAgent
+name: patch
+model: gemma-4-31b-it-qat-w4a16-ct
+description: One edit pass. get_status and run_command only. The heredoc is in the prompt.
+instruction: !include patch.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  max_output_tokens: 2048
+  thinking_config: !include thinking.yaml
+  stop_sequences:
+  - END_PATCH
+tools:
+- get_status
+- run_command
+include_contents: default
+output_key: patch_report
+skills:
+- skills/force-heredoc
