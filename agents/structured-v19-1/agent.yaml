@@ -1,0 +1,9 @@
+agent_class: SequentialAgent
+name: structured_v19_1
+description: Triage, localize, one patch pass, one verify, one repair that submits. An empty diff still gets one heredoc under 270 seconds.
+sub_agents:
+- config_path: sub_agents/triage.yaml
+- config_path: sub_agents/localize_1.yaml
+- config_path: sub_agents/patch_loop.yaml
+- config_path: sub_agents/verify.yaml
+- config_path: sub_agents/repair_loop.yaml
