@@ -1,0 +1,7 @@
+# Thinking on for the repair role only. 256 is the small budget used by
+# single-v5-think256. The harness default of 4096 is not used. At about 26 ms
+# per completion token, 256 adds at most about 6.7 s per repair call.
+# adk-submission 0.2.13 ignores include_thoughts false when the budget is
+# missing, so both fields are explicit.
+include_thoughts: true
+thinking_budget: 256

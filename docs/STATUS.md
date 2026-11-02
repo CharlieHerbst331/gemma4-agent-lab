@@ -2,6 +2,23 @@
 
 Last updated: November 2, 2026.
 
+## Unevaluated structured-v20-1
+
+`agents/structured-v20-1` (`structured_v20_1`) is a copy of
+`agents/structured-v20`. That directory was not modified. No score is
+claimed. No submission. The cap stays 300 seconds, 220 calls, and 320
+turns.
+
+Three fixes. Repros stay under /tmp, about 15 lines, run with
+`timeout 20`. triage_localize `max_output_tokens` is 1024. Before
+`submit_patch`, verify runs `git status --porcelain` and deletes only
+untracked paths, after `git ls-files` says they are not tracked. It does
+not delete tracked files and it does not run `git clean`. `line_fix`
+rejects `tests/`, `test/`, `testing/`, `test_*.py`, `*_test.py`, and
+`conftest.py`. `pyproject.toml` and `setup.cfg` are allowed.
+`pytest.ini` and `tox.ini` stay rejected. Archive SHA256 `9b34aff376a2d4acc73441ea6beaf73665cd95631c14faa0df221b1a4af70c07`.
+Pack: `uv run gemma-lab pack agents/structured-v20-1 --output /tmp/structured-v20-1.zip`.
+
 ## Unevaluated structured-v20
 
 `agents/structured-v20` (`structured_v20`) is a new three-role candidate.
