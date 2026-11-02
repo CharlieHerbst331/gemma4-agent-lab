@@ -1,0 +1,19 @@
+agent_class: LlmAgent
+name: triage_localize
+model: gemma-4-31b-it-qat-w4a16-ct
+description: Grep existing tests first, then one structured handoff. No source edits.
+instruction: !include triage_localize.md
+generate_content_config:
+  temperature: 1.0
+  top_p: 0.95
+  top_k: 64
+  max_output_tokens: 512
+  thinking_config: !include thinking.yaml
+  stop_sequences:
+  - END_HANDOFF
+tools:
+- get_status
+- read_file
+- run_command
+include_contents: default
+output_key: handoff

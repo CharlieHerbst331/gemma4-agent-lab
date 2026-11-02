@@ -1,6 +1,40 @@
 # Project status
 
-Last updated: October 31, 2026.
+Last updated: November 2, 2026.
+
+## Unevaluated structured-v20
+
+`agents/structured-v20` (`structured_v20`) is a new three-role candidate.
+Evaluated candidate directories were not modified. No score is claimed.
+No submission. The cap stays 300 seconds, 220 calls, and 320 turns.
+A 240 or 250 second cap scored 0.06, so this candidate does not add a
+shorter whole-task cap.
+
+Hypothesis: v13-1 and v18-1 each scored 0.12 public. On the private
+six-task run of v18-1, 4 of 6 patches were non-empty and 0 of 6 resolved.
+A 0 of 6 count has a 95% interval of 0–46%, so it is not a resolve-rate
+claim. Time went into patch reads, and a repro that passed on unfixed
+code was treated as no bug. Searching existing tests first, a structured
+handoff, and a forced edit by about 12 patch calls or 150 seconds should
+leave a source diff and one real test inside the same 300 second cap.
+That effect is not measured.
+
+triage_localize greps tests before source reads. A passing repro is
+rewritten once. The words already fixed are forbidden. patch is one
+`LoopAgent` pass. verify submits. The 12-call and 150-second trigger is
+prompt-only. Hard levers are tool lists, `max_iterations` 1, output
+token caps, and stop sequences.
+
+`line_fix` rejects `tests/`, `test_*.py`, `*_test.py`, `conftest.py`,
+and pytest or setup configs before it reads. The skill text says exactly
+one edit. Unknown tool-argument keys and the reply `already ran, see above`
+are prompt-only. The hosted compiler drops Python callbacks, so this
+submission cannot wrap the official tools. The archive has no field for
+extra grader packages. `dirty_equals` and `inline_snapshot` are not
+installed. A pip command during the agent run would not be present when
+grading reruns the tests in a fresh sandbox. Archive SHA256
+`7d7522e08c149ddd79e4385997fc77f567491082c31b3717d762fa048e523773`.
+Pack: `uv run gemma-lab pack agents/structured-v20 --output /tmp/structured-v20.zip`.
 
 ## Unevaluated structured-v19-1
 
