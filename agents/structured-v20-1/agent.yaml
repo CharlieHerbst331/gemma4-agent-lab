@@ -1,0 +1,7 @@
+agent_class: SequentialAgent
+name: structured_v20_1
+description: Tests-first localize, one patch pass, one verify that submits. Repros stay under /tmp. The 300 second cap stays.
+sub_agents:
+- config_path: sub_agents/triage_localize.yaml
+- config_path: sub_agents/patch_loop.yaml
+- config_path: sub_agents/verify.yaml

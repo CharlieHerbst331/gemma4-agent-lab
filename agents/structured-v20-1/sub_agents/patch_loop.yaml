@@ -1,0 +1,6 @@
+agent_class: LoopAgent
+name: patch_loop
+description: Exactly one patch pass. There is no exit tool, so a higher max_iterations would run again.
+max_iterations: 1
+sub_agents:
+- config_path: patch.yaml
