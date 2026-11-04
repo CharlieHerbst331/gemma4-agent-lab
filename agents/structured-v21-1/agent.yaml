@@ -1,0 +1,14 @@
+# Modified from gemma-4-baseline-lb-0-24 by verracodeguacas.
+# Upstream config: flexonafft/gemma-4-budget-aware-coding-agent-v2.
+# Reported licence: Apache License 2.0. See NOTICE.md and LICENSE.txt.
+# write_file is not registered, so that tool cannot create graded files.
+name: structured_v21_1
+model: gemma-4-31b-it-qat-w4a16-ct
+instruction: !include prompts/system.md
+tools:
+  - run_command
+  - read_file
+  - edit_file
+  - get_status
+  - submit_patch
+generate_content_config: !include configs/sampling.yaml
