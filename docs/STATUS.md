@@ -1,6 +1,37 @@
 # Project status
 
-Last updated: November 2, 2026.
+Last updated: November 4, 2026.
+
+## Unevaluated structured-v21
+
+`agents/structured-v21` (`structured_v21`) is a new single-agent candidate.
+Evaluated candidate directories were not modified. No score is claimed.
+No submission.
+
+Provenance: public notebook `gemma-4-baseline-lb-0-24`, which says its
+config was copied from `flexonafft/gemma-4-budget-aware-coding-agent-v2`.
+The notebook's own zip, rebuilt here, is SHA-256
+`205a677fdcbd122f50ac3138b1cda0403aeb625453c93edf4c53b7b691926186`.
+That is the unmodified bundle. The author states a public score of 0.24.
+This lab has not reproduced that score, and it is not a claim for v21.
+
+Settings kept: one agent, thinking budget 4096, temperature 0.2,
+max output 8192, `edit_file`, 28 tool calls, 8 minutes
+(`max_time_minutes: 8`), 80 turns, and a 240 second per-command timeout.
+No shorter whole-task cap was added.
+
+Hypothesis: unregistering the three graph tools, falling back to the
+heredoc only after `edit_file` fails once or reports a missing parameter,
+forcing an edit if the diff is still empty around call 18, grepping tests
+in the first search, and running `py_compile` plus the target test
+(`timeout 45`) on the final command, should cut empty diffs and untested
+syntax breaks. That effect is not measured.
+
+`line_fix` rejects `tests/`, `test/`, `testing/`, `test_*.py`, `*_test.py`,
+and `conftest.py`. There are no sub-agents, no prompt clocks, and no
+untracked-file deletion. Scratch stays in `/tmp`. Archive SHA256
+`df8cf3319db43c45f208d111731c486ed8b44d7781a160558b87235577609572`.
+Pack: `uv run gemma-lab pack agents/structured-v21 --output /tmp/structured-v21.zip`.
 
 ## Unevaluated structured-v20-1
 
