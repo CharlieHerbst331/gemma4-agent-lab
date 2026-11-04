@@ -2,6 +2,37 @@
 
 Last updated: November 4, 2026.
 
+## Unevaluated structured-v21-1
+
+`agents/structured-v21-1` (`structured_v21_1`) is a copy of
+`agents/structured-v21`. That directory was not modified. No score is
+claimed. No submission.
+
+The 8 minute cap, 28 tool calls, 80 turns, 240 second per-command
+timeout, thinking budget 4096, temperature 0.2, and max output 8192 are
+unchanged. `write_file` is not registered. `line_fix` also rejects
+`pytest.ini` and `tox.ini`. The FastAPI `docs_src` hint is gone. The
+prompt has no braces. Scratch stays in `/tmp`. Untracked files are not
+deleted.
+
+Attribution: notebook `gemma-4-baseline-lb-0-24` by verracodeguacas;
+upstream config `flexonafft/gemma-4-budget-aware-coding-agent-v2`. The
+public-ideas audit reports Apache License 2.0 for that lineage. The
+rebuilt notebook zip had no upstream LICENSE file, so the report is
+unverified here. The candidate archive carries `LICENSE.txt` and
+`NOTICE.md`.
+
+Submission is NOT ready. The 12 hour gate is unresolved. There is no
+thinking-4096 wall-time run of this archive. A submission is not ready
+until a dev wall-time run proves 129 times the mean, plus model load
+(417 to 1170 seconds), is at most 43200 seconds. The 8 minute worst case
+is about 64k to 68k seconds and fails that gate. This candidate does not
+lower `max_time_minutes`. The author-stated 0.24 figure is not a score
+for this archive.
+
+Archive SHA256 `1a49094d9954e029333f76f202261fc8ae7d6951504ae3252f04140ceb6adc5d`.
+Pack: `uv run gemma-lab pack agents/structured-v21-1 --output /tmp/structured-v21-1.zip`.
+
 ## Unevaluated structured-v21
 
 `agents/structured-v21` (`structured_v21`) is a new single-agent candidate.
@@ -32,6 +63,9 @@ and `conftest.py`. There are no sub-agents, no prompt clocks, and no
 untracked-file deletion. Scratch stays in `/tmp`. Archive SHA256
 `df8cf3319db43c45f208d111731c486ed8b44d7781a160558b87235577609572`.
 Pack: `uv run gemma-lab pack agents/structured-v21 --output /tmp/structured-v21.zip`.
+The same 12 hour gate is unproven for this archive. Submission is not
+ready until a wall-time run proves the bound in the structured-v21-1
+section. The cap was not lowered.
 
 ## Unevaluated structured-v20-1
 
