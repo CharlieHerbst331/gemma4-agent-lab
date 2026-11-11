@@ -7,7 +7,7 @@ Last updated: November 11, 2026.
 `agents/structured-v22` (`structured_v22`) is a new single-agent candidate
 built from the LB-0.24 draft. Existing candidate directories were not
 modified. It has been built and packed. It has not been run on GPU. No
-score is claimed. No submission.
+score is claimed. SUBMIT NOT READY.
 
 Settings: one agent, five tools (`run_command`, `read_file`, `edit_file`,
 `get_status`, `submit_patch`), no `write_file`, no graph tools. Temperature
@@ -25,10 +25,13 @@ verracodeguacas; config from
 reports Apache License 2.0. That upstream LICENSE file was not in the
 rebuilt notebook zip, so the report is unverified here.
 
-Submit readiness depends on the dev-13 paired measurement against
-`structured-v21-1` and on the 12 hour fit. Neither has been run for this
-archive. The cap is still 8 minutes, so the worst-case fit is still an
-open question. Do not submit until both are answered.
+SUBMIT NOT READY. The 12 hour fit fails by construction. At the 8-minute
+cap, 129 tasks × 480 s = 61,920 s, which is more than the 43,200 s Kaggle
+limit. `max_time_minutes` stays at 8. A dev-13 paired-seed wall-time run
+of this exact archive
+(`c45c6c4c9cde0638b1bdc39eed9bca9024e52655bde73d06ebcaa0e27129b87d`)
+is queued and approved. It needs a mean of about 300 s or less, with p90
+and max reported. No results are claimed.
 
 Archive SHA256 `c45c6c4c9cde0638b1bdc39eed9bca9024e52655bde73d06ebcaa0e27129b87d`.
 Pack: `uv run gemma-lab pack agents/structured-v22 --output /tmp/structured-v22.zip`.
