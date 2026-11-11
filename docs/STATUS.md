@@ -1,6 +1,37 @@
 # Project status
 
-Last updated: November 4, 2026.
+Last updated: November 11, 2026.
+
+## Unevaluated structured-v22
+
+`agents/structured-v22` (`structured_v22`) is a new single-agent candidate
+built from the LB-0.24 draft. Existing candidate directories were not
+modified. It has been built and packed. It has not been run on GPU. No
+score is claimed. No submission.
+
+Settings: one agent, five tools (`run_command`, `read_file`, `edit_file`,
+`get_status`, `submit_patch`), no `write_file`, no graph tools. Temperature
+0.2, top_p 0.95, max output 6144, thinking budget 4096. 28 calls, 8 minutes,
+240 second per-command timeout, 80 turns. The prompt is 7941 characters,
+has no braces, and has no attribution header.
+
+The candidate adds output discipline and a commit rule. It does not add a
+loop guard. There are no callbacks, so the host cannot detect a loop,
+truncate output, or store state.
+
+Attribution: LB-0.24 notebook author not verified; Budget-Fit core by
+verracodeguacas; config from
+`flexonafft/gemma-4-budget-aware-coding-agent-v2`. The public-ideas audit
+reports Apache License 2.0. That upstream LICENSE file was not in the
+rebuilt notebook zip, so the report is unverified here.
+
+Submit readiness depends on the dev-13 paired measurement against
+`structured-v21-1` and on the 12 hour fit. Neither has been run for this
+archive. The cap is still 8 minutes, so the worst-case fit is still an
+open question. Do not submit until both are answered.
+
+Archive SHA256 `c45c6c4c9cde0638b1bdc39eed9bca9024e52655bde73d06ebcaa0e27129b87d`.
+Pack: `uv run gemma-lab pack agents/structured-v22 --output /tmp/structured-v22.zip`.
 
 ## Unevaluated structured-v21-1
 
