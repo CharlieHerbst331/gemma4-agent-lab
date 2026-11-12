@@ -2,6 +2,19 @@
 
 Last updated: November 11, 2026.
 
+## structured-v22 dev-13 results; handoff to Antigravity
+
+Recorded November 11, 2026. Three dev-13 seeds of archive `c45c6c4c…` resolved 4, 4 and 3 of
+13 (mean 3.67). The unmodified LB-0.24 bundle also averaged 3.67 over 3 seeds, and
+structured-v21-1 averaged 4.5 over 2 seeds (5, 4). v22's mean wall was 329, 326 and 307 s
+(p90 about 480 s), which fails the 300 s gate. Not submitted. Compared with the bundle,
+v22 had fewer compactions (12–18 vs 17–21), outputs over 4k chars (12–29 vs 42–57) and loop
+tasks (2–3 vs 5–8). Failed edit_file calls were 10, 45 and 28; almost all are
+missing-`old_string` parse failures that the model repeats, up to 37 times on one task.
+Next step: structured-v22-1 (handoff/HANDOFF.md §6). Development moves to Google Antigravity
+on Charles's Mac; start at `handoff/HANDOFF.md`. Submit only through
+`scripts/handoff/submit_guarded.py`.
+
 ## Unevaluated structured-v22
 
 `agents/structured-v22` (`structured_v22`) is a new single-agent candidate

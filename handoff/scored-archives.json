@@ -1,0 +1,183 @@
+{
+ "_doc": "Archives that must never be submitted again. sha256 values were re-derived on Nov 11, 2026 by repacking each agents/<name> directory at main 3ff49994 (packing is deterministic; v21-1, v22, v20-1 and v8 match their recorded hashes). Kaggle refs and scores come from `kaggle competitions submissions gemma-4-developer-agent`. Rows with sha256 null have no agent directory in the repo; submit_guarded.py also checks Kaggle descriptions for the sha prefix. Append a row after every upload.",
+ "archives": [
+  {
+   "ref": "58037165",
+   "date_utc": "2026-11-05",
+   "agent": "structured-v21-1",
+   "public_score": 0.17,
+   "sha256": "1a49094d9954e029333f76f202261fc8ae7d6951504ae3252f04140ceb6adc5d",
+   "note": "retry of 57996686"
+  },
+  {
+   "ref": "57996686",
+   "date_utc": "2026-11-04",
+   "agent": "structured-v21-1",
+   "public_score": null,
+   "sha256": "1a49094d9954e029333f76f202261fc8ae7d6951504ae3252f04140ceb6adc5d",
+   "note": "ERROR (unexplained); same archive later scored 0.17"
+  },
+  {
+   "ref": "57927493",
+   "date_utc": "2026-11-03",
+   "agent": "structured-v20-1",
+   "public_score": 0.08,
+   "sha256": "9b34aff376a2d4acc73441ea6beaf73665cd95631c14faa0df221b1a4af70c07",
+   "note": ""
+  },
+  {
+   "ref": "57822100",
+   "date_utc": "2026-10-31",
+   "agent": "structured-v19-1",
+   "public_score": 0.1,
+   "sha256": "2a30282690f80b2888736950400bb0e52ca51cdec540b5143b71c77f4958d4e3",
+   "note": ""
+  },
+  {
+   "ref": "57780163",
+   "date_utc": "2026-10-29",
+   "agent": "structured-v18-1",
+   "public_score": 0.12,
+   "sha256": "0fde003c39592d8c2a3439231e3d333d6f0f31e27761a6210620693fffcde475",
+   "note": ""
+  },
+  {
+   "ref": "57718020",
+   "date_utc": "2026-10-28",
+   "agent": "structured-v17",
+   "public_score": 0.12,
+   "sha256": "27b47d34554d9b64f3786b430856dd950d678d5ea6dbd4a0ae6fb7dd687e79e6",
+   "note": ""
+  },
+  {
+   "ref": "57647354",
+   "date_utc": "2026-10-26",
+   "agent": "structured-v15",
+   "public_score": 0.08,
+   "sha256": "194cf0d42e7088d760da3a36d7da27ac82b1e66551843bb1579c108e8c03ce45",
+   "note": ""
+  },
+  {
+   "ref": "57575301",
+   "date_utc": "2026-10-24",
+   "agent": "structured-v13-1",
+   "public_score": 0.1,
+   "sha256": "74a6e27904e88d4d73d3ca1846f5ad228eb9e27ec431c347517b60f79b1e52fe",
+   "note": "resubmit of 57454574"
+  },
+  {
+   "ref": "57483600",
+   "date_utc": "2026-10-21",
+   "agent": "structured-v14",
+   "public_score": null,
+   "sha256": "8eeae0c1859766bc08afafe2b6139e4ea4ebd82ab52b42c04bd01836e4e361bf",
+   "note": "COMPLETE, no score shown (hosted failures)"
+  },
+  {
+   "ref": "57454574",
+   "date_utc": "2026-10-20",
+   "agent": "structured-v13-1",
+   "public_score": 0.12,
+   "sha256": "74a6e27904e88d4d73d3ca1846f5ad228eb9e27ec431c347517b60f79b1e52fe",
+   "note": ""
+  },
+  {
+   "ref": "57412943",
+   "date_utc": "2026-10-19",
+   "agent": "structured-v13",
+   "public_score": 0.1,
+   "sha256": "5ff4c0b3671cb1ff32cfbcb714b079e7a6f72177959c72d36c578fee1fb30dde",
+   "note": ""
+  },
+  {
+   "ref": "57363951",
+   "date_utc": "2026-10-18",
+   "agent": "structured-v12",
+   "public_score": 0.06,
+   "sha256": "1db40320137309e3a496b1590156ca98579e02ae385cc2cd7d44d43879515f39",
+   "note": ""
+  },
+  {
+   "ref": "57300592",
+   "date_utc": "2026-10-17",
+   "agent": "structured-v11",
+   "public_score": 0.13,
+   "sha256": "9b1b01ca6881268867b06b5610fa03fc5fcb7b9f0ae3f98df5df565fb1ab586e",
+   "note": "byte-identical to structured-v8"
+  },
+  {
+   "ref": "57262340",
+   "date_utc": "2026-10-16",
+   "agent": "structured-v10",
+   "public_score": 0.01,
+   "sha256": "c07fcc5505f509f648a924a09dfa5a0f4c1cfe10d4b0a784f938e69116c66ed0",
+   "note": ""
+  },
+  {
+   "ref": "57224300",
+   "date_utc": "2026-10-15",
+   "agent": "structured-v9",
+   "public_score": 0.08,
+   "sha256": "209bd43ed52731813ecc4fc8d40edea186bd1af2a6f00e18acf5aae7809b18a5",
+   "note": ""
+  },
+  {
+   "ref": "57176412",
+   "date_utc": "2026-10-14",
+   "agent": "structured-v8",
+   "public_score": 0.1,
+   "sha256": "9b1b01ca6881268867b06b5610fa03fc5fcb7b9f0ae3f98df5df565fb1ab586e",
+   "note": ""
+  },
+  {
+   "ref": "57081417",
+   "date_utc": "2026-10-11",
+   "agent": "single-v6",
+   "public_score": 0.08,
+   "sha256": "f90204f21e2bbee4638f8c13a6af14d5dc933d82449bf2f78a2aad3d2879c488",
+   "note": ""
+  },
+  {
+   "ref": "56905832",
+   "date_utc": "2026-10-07",
+   "agent": "simple-v3",
+   "public_score": 0.03,
+   "sha256": "50d7b69dd4d0f6a5b4925bda919f69e57196b72337190bd6073be95591ff2646",
+   "note": "earlier upload history showed ERROR; latest list shows 0.03"
+  },
+  {
+   "ref": null,
+   "date_utc": null,
+   "agent": "public LB-0.24 bundle (unmodified, packed from box v22/bundle)",
+   "public_score": 0.24,
+   "sha256": "e478cdc36eec05bba9358a37186b5ae10b91fc8e1b67a3f31986914444297c80",
+   "note": "not our submission; author-reported score; resubmitting it tests nothing"
+  },
+  {
+   "ref": null,
+   "date_utc": null,
+   "agent": "public LB-0.24 notebook's own submission.zip",
+   "public_score": 0.24,
+   "sha256": "205a677fdcbd122f50ac3138b1cda0403aeb625453c93edf4c53b7b691926186",
+   "note": "not our submission; author-reported score"
+  }
+ ],
+ "unknown_sha": [
+  {
+   "ref": "57614074",
+   "date_utc": "2026-10-25",
+   "agent": "structured-v15-4min",
+   "public_score": 0.06,
+   "sha256": null,
+   "note": "no agent dir in repo; sha unknown"
+  },
+  {
+   "ref": "57512188",
+   "date_utc": "2026-10-22",
+   "agent": "structured-v14-1",
+   "public_score": null,
+   "sha256": null,
+   "note": "COMPLETE, no score shown; no agent dir in repo; sha unknown"
+  }
+ ]
+}
