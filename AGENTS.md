@@ -1,5 +1,14 @@
 # Development contract
 
+**New agent (Antigravity or any other)? Start with `handoff/HANDOFF.md`, then `handoff/SETUP.md`.**
+Antigravity also loads `.agents/rules/*.md` (Charles's principles, Kaggle operations, harness
+design) on every request and offers `.agents/skills/*` as slash commands: `/pack-agent`,
+`/push-dev13`, `/analyze-dev13`, `/submit-candidate`. Those rules win over anything older below.
+
+Current state (Nov 11, 2026): best public score 0.17 (structured-v21-1). structured-v22 is merged
+but not submitted (dev-13 3.67/13, mean wall 321 s). Next step: propose and build v22-1
+(HANDOFF.md §6). Submit only through `scripts/handoff/submit_guarded.py`.
+
 Work toward a competitive Gemma 4 coding agent and a technically credible portfolio.
 Read README.md and docs/RUNBOOK.md before modifying experiments or submission operations.
 

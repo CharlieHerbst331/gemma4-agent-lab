@@ -1,5 +1,8 @@
 # Resume here — handoff to another coding agent
 
+> **Superseded (Nov 11, 2026).** This file describes the October structured-v4 era. The current
+> handoff is [`handoff/HANDOFF.md`](../handoff/HANDOFF.md). Keep this file for history only.
+
 This document is written for a new agent with no chat history. Read AGENTS.md,
 README.md, this file, STATUS.md, and HARNESS_SPEC.md before changing anything.
 
